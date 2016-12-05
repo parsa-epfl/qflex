@@ -12,8 +12,8 @@ permalink:        pretty
 title:            QFlex
 tagline:          'Quick & Flexible Computer Architecture Simulator'
 description:      'Quick & Flexible Computer Architecture Simulator'
-url:              http://127.0.0.1:4000/
-baseurl:          /
+url:              http://parsalab.github.io/qflex
+baseurl:          /qflex/
 
 author:
   name:           'Mark Otto'
