@@ -9,23 +9,26 @@ kramdown:
 permalink:        pretty
 
 # Setup
-title:            Hyde
-tagline:          'A Jekyll theme'
-description:      'A brazen two-column <a href="http://jekyllrb.com" target="_blank">Jekyll</a> theme that pairs a prominent sidebar with uncomplicated content. Made by <a href="https://twitter.com/mdo" target="_blank">@mdo</a>.'
-url:              http://hyde.getpoole.com
+title:            QFlex
+tagline:          'Quick & Flexible Computer Architecture Simulator'
+description:      'Quick & Flexible Computer Architecture Simulator'
+url:              http://127.0.0.1:4000/
 baseurl:          /
 
 author:
   name:           'Mark Otto'
   url:            https://twitter.com/mdo
 
-paginate:         5
+paginate:         3
+paginate_path:    blog/page:num
 
 # Custom vars
-version:          2.1.0
+version:          1.0.0
+blog_path:        blog/
+excerpt_separator: <!--more-->
 
 github:
-  repo:           https://github.com/poole/hyde
+  repo:           https://github.com/parsalab/qflex
 
 # Handling Reading
 exclude: 			 [old]
