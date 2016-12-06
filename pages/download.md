@@ -4,18 +4,16 @@ title: Download
 sidebar: "true"
 ---
 
-QFlex is a project that integrates QEMU and Flexus to perform cycle accurate simulation of multiprocessor systems. QFlex uses QEMU to perform system emulation and feed Flexus timing models.
+QFlex is a full-system cycle-accurate simulator of multi-node computer systems. QFlex is a multi-layer software stack composed of QEMU, Flexus, and NS-3. QEMU is a widely-used machine emulator, which allows to boot any machine and execute unmodified applications and operating systems. Flexus is a cycle-accurate modeling tool of complete servers, which enables modeling modern CPUs, with various core types, network-on-chip topologies, and cache organizations; and various DRAM-based memory systems. NS-3 is a popular network simulator that allows to glue all the simulated server nodes together with different network integration characteristics. 
 
-QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently QFlex is able perform trace based memory system simulation, and no timing models are available.
+QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently, QFlex is able perform full-system trace-based memory system simulation of a single server node. Hence, no timing models are available yet.
 
 QFlex's source code is available on our [GitHub repository](https://github.com/ParsaLab/qflex/tree/arm_trace).
 
 ## How to Build QFlex ##
 -------------------------
 
-Before compiling QFlex, first you need to make sure you have the required
-prerequisites installed.
-If you are using Ubuntu-based Linux the process is described below:
+Before compiling QFlex, make sure you have the required prerequisites installed. The process of installing the prerequisites for an Ubuntu distribution is described below.
 
 - Installing the basic dependencies:
 
@@ -43,8 +41,8 @@ $ sudo apt-get update
 $ sudo apt-get -y install gcc-${GCC_VERSION} g++-${GCC_VERSION}
 ```
 
-- Then you have to set the recently installed version of `gcc` as your system
-default version. One way of doing it is through `update-alternatives`:
+- Setting the recently installed version of `gcc` as your system's
+default version:
 
 ```bash
 $ sudo update-alternatives --remove-all gcc
@@ -57,7 +55,7 @@ $ sudo update-alternatives --config gcc
 $ sudo update-alternatives --config g++
 ```
 
-- Now you have to install a compatible version of the `boost` library,
+- Installing a compatible version of the `boost` library,
 1.59.0 or 1.58.0:
 
 ```bash
@@ -117,10 +115,9 @@ $ sed 's|BOOST_VERSION_NOCHECK=.*|BOOST_VERSION_NOCHECK=true|' \
       && mv makefile.defs.2 makefile.defs
 ```
 
-- Now that we have everything set, we can build QFlex.
-Please note that you have to build each simulator separately:
+- Now that we have everything set, we can build QFlex. 
 
-  **Note:** For now, only the ARM simulator is supported.
+  **Note:** For now, only the 64-bit ARM trace-based simulator is supported. The simulator features a two-level cache hierarchy, with a private per-core first-level and a shared second-level. 
 
 ```bash
 $ make "QEMUCMP.L2Shared.Trace-arm"
@@ -130,9 +127,9 @@ $ make stat-manager
 ## How to Use QFlex ##
 -------------------------
 
-QFlex can be run with the aid of the scripts present in the `scripts` folder. This folder contains scripts to aid both in the deployment of simple single-instance or complex multi-instance QFlex jobs with various network configurations. For complex deployments, please refer to each script usage command, by calling the script with the `-h` flag.
+You can run QFlex with the aid of the scripts present in the `scripts` folder. The scripts to aid both in the deployment of simple single-instance or complex multi-instance QFlex jobs with various network configurations. For complex deployments, please refer to each script usage command, by calling the script with the `-h` flag.
 
-Before running QFlex, you must have:
+Before running QFlex, you must have the following prerequisites:
 
 - A QEMU image with an ARM 64-bit OS installed (we have tested Debian 8 and Ubuntu Server 12.04)
 - Kernel and initrd images, normally extracted from the OS image.
@@ -153,15 +150,15 @@ We also offer the Linux kernel images, extracted from the same Debian 8 builds, 
 
 For simple deployments, `cd` into the `scripts` folder and copy the `user_example.cfg` to a new file named `user.cfg`. In the new file, configure the environment variables `QEMU_PATH`, `KERNEL_PATH`, `KERNEL`, `INITRD`, `FLEXUS_REPO`, `FLEXUS_PATH`, `IMG_0`, `ADD_TO_PATH` and `ADD_TO_LD_LIBRARY_PATH`. Depending on your QFlex instalation, the `ADD_TO_PATH` and `ADD_TO_LD_LIBRARY_PATH` variables may be empty.
 
-Once you have configured the `user.cfg` script, you can run QFlex. We strongly recommend that you boot QEMU without Flexus attached, take a snapshot, and then run from the snapshot with any feature enabled (e.g., with Flexus attached). Booting a machine with Flexus attached is not recommended because Flexus greatly slows down execution.
+Once you have configured the `user.cfg` script, you can run QFlex. We strongly recommend that you boot QEMU without Flexus. Booting a machine with Flexus attached is not recommended as it greatly slows down the execution. Hence, the simulation workflow will be as follows: (1) Boot a machine without Flexus, (2) install and tune your application, (3) take a snapshot when the application reaches the desired point to start simulating, and (4) start QEMU with Flexus from the aforesaid snapshot. 
 
-You can boot QEMU with Flexus support disabled by using the following commands, from the `scripts` folder:
+You can boot QEMU without Flexus by using the following command (from the `scripts` folder):
 
 ```bash
 $ ./run_instance.sh
 ```
 
-This command will start boot your image. You should see the guest boot information on your terminal. Unless you are running an image with network and SSH support, this will be your interface with the guest. With QEMU running, you can take the snapshot with:
+This command will boot your image. You should see the guest boot information on your terminal. Unless you are running an image with network and SSH support, this will be your interface with the guest. With QEMU running, you can take a snapshot with the following commands:
 
 ```
 # On the guest terminal
@@ -170,7 +167,7 @@ Ctrl^a + C # Calls QEMU monitor
 (qemu) $ quit
 ```
 
-After that, you can start QEMU from the snapshot and with Flexus attached using the following command:
+After that, you can start QEMU from the snapshot, with Flexus attached, by using the following command:
 
 ```bash
 $ ./run_instance.sh -tr -lo=snapshot_name
@@ -178,7 +175,7 @@ $ ./run_instance.sh -tr -lo=snapshot_name
 
 ## Example: Running Memcached with QFlex ##
 
-In this section, we are going to run a Memcache server instance with QFlex. We are going to use the provided Memcached image, running the client and the server on the same QEMU instance and using a loopback network to communicate. Configure your `user.cfg` file, pointing it to the memcached image and configuring a boot with at least 2 cores and 4GB of memory.
+In this section, we will simulate a Memcache server with QFlex. We will use the provided Memcached image. The Memcached client and server will run on the same QEMU instance; client and server will communicate through the loopback network interface. Configure your `user.cfg` file, pointing it to the memcached image and configuring a boot with at least 2 cores and 4GB of memory.
 
 The [benchmark](http://cloudsuite.ch/datacaching/) is composed of the following components:
 
@@ -187,9 +184,9 @@ The [benchmark](http://cloudsuite.ch/datacaching/) is composed of the following 
 
 In order to run the Memcached benchmark, it is recommended to use a terminal multiplexer software, such as `screen`. Furthermore, as we are using a single QEMU instance for the client and the server, you should pin the client and server to different groups of cores with `taskset` . You can install `screen` using `apt-get` from the guest OS (Debian 8). `taskset` is already installed.
 
-  **Note:** `screen` control command `Ctrl^a + C` conflicts with QEMU monitor command. To get around this, create `.screenrc` file under your home directory with `escape ^Xx` in it. This allows using screen with `Ctrl^x` instead of `Ctrl^a`
+  **Note:** The `screen` control command `Ctrl^a + C` conflicts with the QEMU monitor's command. To get around this, create a `.screenrc` file under your home directory with `escape ^Xx` in it. This step allows using `screen` with `Ctrl^x` instead of `Ctrl^a`
 
-The following commands assume a QEMU instance with 4GB of memory and and at least 2 cores. We require at least one for the server and one for the client. We will boot a Memcached server instance of 1GB, since we must have at least 4 times the memory of the Memcached server to safelly run the server and the client. We also assume you have two terminals in the guest OS, once for the server and one for the client.
+The following commands assume a QEMU instance with 4GB of memory and and at least 2 cores. We require at least one core for the server and one for the client. We will start a Memcached server of 1GB, since we must have at least 4 times the memory of the Memcached server to safelly run the server and the client in the same machine. We also assume you have two terminals in the guest OS, one for the server and one for the client.
 
 Boot the QEMU instance, without Flexus attached, and start a `screen` terminal. On this first terminal, we are going to start the Memcached server and pin it to core 1, with the following command:
 
@@ -197,7 +194,7 @@ Boot the QEMU instance, without Flexus attached, and start a `screen` terminal. 
 $ taskset 0x2 memcached -t 1 -m 1024 -n 550
 ```
 
-Now you must start the client. Since the client and server have to run concurrently, start another terminal. The Memcached client must perform several tasks: create the expanded dataset, warmup the server, and tune and run the benchmark. The provided unscaled dataset `twitter_data/twitter_dataset_unscaled` is around 300MB. We will scale the dataset by a factor of 3, to generate a dataset of around 1GB, with the following command:
+Now you must start the client. Since the client and server have to run concurrently, start another terminal. The Memcached client must perform several tasks: generate the dataset, warmup the server, and tune and run the benchmark. The provided dataset `twitter_data/twitter_dataset_unscaled` is around 300MB. We will scale the dataset by a factor of 3 to generate a dataset of around 1GB, with the following command:
 
 ```bash
 $ cd /home/cloudsuite/memcached/memcached-client
@@ -225,7 +222,7 @@ $ taskset 0x4 ./loader -a ../twitter_dataset/twitter_dataset_3x \
               -s docker_servers.txt -g 0.8 -T 1 -c 200 -w 1 -e -r rps
 ```
 
-In the command above, `rps` indicates the number of requests per second to be issued by the client. You must vary the value of `rps` until the client reports a QoS that is acceptable for your tests. Once you find the correct value of `rps`, you must run the client with the same command above, wait for the client response latency to stabilize, and take a snapshot of the running benchmark:
+In the command above, `rps` indicates the number of requests per second to be issued by the client. You must vary the value of `rps` until the client reports a QoS that is acceptable for your tests (the magnitude reported for QoS is milliseconds). Once you find the correct value of `rps`, you must run the client with the same command above. Wait for the client response latency to stabilize, and take a snapshot of the running benchmark with the following commands:
 
 ```
 # On the guest terminal
