@@ -23,7 +23,7 @@ paginate:         3
 paginate_path:    blog/page:num
 
 # Custom vars
-version:          1.0.0
+version:          1.0
 blog_path:        blog/
 excerpt_separator: <!--more-->
 
