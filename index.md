@@ -10,10 +10,24 @@ title: Overview
 <ul>
   {% for post in site.posts limit: 3%}
     <li>
-        <span class="recent-news-date">{{ post.date | date_to_string }} »</span>
-        <a href="{{ site.url }}{{ post.url }}" >{{ post.title }}</a>
-        <p>{{ post.excerpt }}</p>
+          <h4 class="post-title">
+            <span class="recent-news-date">{{ post.date | date_to_string }} &raquo;</span>
+            <a href="{{ site.url }}{{ post.url }}">{{ post.title }}</a>
+          </h4>
+          <p>{{ post.excerpt }}
+          
+          {% capture content_words %}
+          {{ post.content | number_of_words }}
+          {% endcapture %}
+          {% capture excerpt_words %}
+          {{ post.excerpt | number_of_words }}
+          {% endcapture %}
+          {% if excerpt_words != content_words %}
+            <a href="{{ site.url }}{{ post.url }}">Read more...</a>
+          {% endif %}
+          </p>
     </li>
+    <hr/>
   {% endfor %}
 </ul>
 
