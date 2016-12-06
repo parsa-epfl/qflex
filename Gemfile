@@ -1,5 +1,5 @@
 # A sample Gemfile
-source "http://rubygems.org"
+source "https://rubygems.org"
 
 # gem "rails"
 gem 'jekyll', '3.0.2'
@@ -24,3 +24,4 @@ gem 'jekyll-seo-tag', '0.1.4'
 gem 'rb-fsevent', '<= 0.9.4'
 gem 'classifier-reborn'
 gem 'rb-gsl'
+gem "html-proofer"
