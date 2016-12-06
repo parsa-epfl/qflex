@@ -6,7 +6,7 @@ sidebar: "true"
 
 QFlex is a full-system cycle-accurate simulator of multi-node computer systems. QFlex is a multi-layer software stack composed of QEMU, Flexus, and NS-3. QEMU is a widely-used machine emulator, which allows to boot any machine and execute unmodified applications and operating systems. Flexus is a cycle-accurate modeling tool of complete servers, which enables modeling modern CPUs, with various core types, network-on-chip topologies, and cache organizations; and various DRAM-based memory systems. NS-3 is a popular network simulator that allows to glue all the simulated server nodes together with different network integration characteristics. 
 
-QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently, QFlex is able perform full-system trace-based memory system simulation of a single server node. Hence, no timing models are available yet.
+QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently, QFlex is able perform full-system trace-based simulation of a single server node (for 64-bit ARM). Hence, no timing models are available yet.
 
 QFlex's source code is available on our [GitHub repository](https://github.com/ParsaLab/qflex/tree/arm_trace).
 
