@@ -17,7 +17,7 @@ title: Overview
   {% endfor %}
 </ul>
 
-For more news refer to our <a href="{{ site.baseurl }}{{ site.blog_path }}" >blog</a>.
+For more news refer to our <a href="{{ site.url }}{{ site.baseurl }}{{ site.blog_path }}" >blog</a>.
 
 </div>
 

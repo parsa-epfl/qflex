@@ -2,10 +2,10 @@
   <div class="container ">
     <div class="sidebar-about">
       <h1>
-        <a href="{{ site.baseurl }}">
+        <a href="{{ site.url }}{{ site.baseurl }}">
           <!--{{ site.title }}-->
           <!--<center>-->
-            <img src="{{ site.baseurl }}public/images/QFlex.png" alt="QFlex Logo" width="60%"> </img>
+            <img src="{{ site.url }}{{ site.baseurl }}public/images/QFlex.png" alt="QFlex Logo" width="60%"> </img>
           <!--</center>-->
         </a>
       </h1>
@@ -13,7 +13,7 @@
     </div>
 
     <nav class="sidebar-nav">
-      <a class="sidebar-nav-item{% if page.url == site.baseurl %} active{% endif %}" href="{{ site.baseurl }}">Home</a>
+      <a class="sidebar-nav-item{% if page.url == site.baseurl %} active{% endif %}" href="{{ site.url }}{{ site.baseurl }}">Home</a>
 
       {% comment %}
         The code below dynamically generates a sidebar nav of pages with
@@ -29,16 +29,16 @@
         {% endif %}
       {% endfor %}
 
-      <a class="sidebar-nav-item{% if page.url contains site.blog_path %} active{% endif %}" href="{{ site.baseurl }}{{ site.blog_path }}">News Blog</a>
+      <a class="sidebar-nav-item{% if page.url contains site.blog_path %} active{% endif %}" href="{{ site.url }}{{ site.baseurl }}{{ site.blog_path }}">News Blog</a>
 
 
     <div class="external-links">
-        <a href="{{ site.baseurl }}atom.xml" rel="alternate" type="application/rss+xml">
-          <img src="{{ site.baseurl }}public/images/rss-icon-20.png" alt="Subscribe via RSS"/>
+        <a href="{{ site.url }}{{ site.baseurl }}atom.xml" rel="alternate" type="application/rss+xml">
+          <img src="{{ site.url }}{{ site.baseurl }}public/images/rss-icon-20.png" alt="Subscribe via RSS"/>
         </a>
 
         <a href="{{ site.github.repo }}">
-          <img src="{{ site.baseurl }}public/images/github-mark-light-20.png" alt="GitHub"/>
+          <img src="{{ site.url }}{{ site.baseurl }}public/images/github-mark-light-20.png" alt="GitHub"/>
         </a>
     </div>
 
