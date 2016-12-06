@@ -11,7 +11,7 @@ title: Overview
   {% for post in site.posts limit: 3%}
     <li>
         <span class="recent-news-date">{{ post.date | date_to_string }} »</span>
-        <a href="{{ post.url }}" >{{ post.title }}</a>
+        <a href="{{ site.url }}{{ post.url }}" >{{ post.title }}</a>
         <p>{{ post.excerpt }}</p>
     </li>
   {% endfor %}
