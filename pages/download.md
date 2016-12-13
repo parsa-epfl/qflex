@@ -8,7 +8,7 @@ QFlex is a full-system cycle-accurate simulator of multi-node computer systems. 
 
 QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently, QFlex is able perform full-system trace-based simulation of a single server node (for 64-bit ARM). Hence, no timing models are available yet.
 
-QFlex's source code is available on our [GitHub repository](https://github.com/ParsaLab/qflex/tree/arm_trace).
+QFlex's source code is available on our [GitHub repository](https://github.com/ParsaLab/qflex/).
 
 ## How to Build QFlex ##
 -------------------------
@@ -75,8 +75,11 @@ $ sudo ./b2 install
 $ cd ..
 $ git clone git@github.com:ParsaLab/qflex.git
 $ cd qflex
-$ git checkout arm_trace
+$ git checkout master
 $ git submodule update --init --recursive
+$ cd images
+$ git lfs fetch
+$ git lfs pull
 ```
    **Note:** Please note that the submodules are defined in SSH format, and GitHub needs your SSH key for authentication.
    You can find more information [here](https://help.github.com/articles/generating-an-ssh-key/).
@@ -87,7 +90,7 @@ and it has already been downloaded as one of the submodules.
 Here is how to build QEMU:
 
 ```bash
-$ cd ./qemu
+$ cd ../qemu
 $ export CFLAGS="-fPIC"
 $ ./configure --target-list=aarch64-softmmu \
               --enable-flexus --disable-werror --disable-tpm
