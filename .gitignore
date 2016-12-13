@@ -1,0 +1,15 @@
+# Compiled sources
+*.a
+*_dep
+*_o
+*Makefile*depend*
+*.so
+*.so.*
+*.fresh
+*.swp
+user.cfg
+stat-collapse
+stat-manager
+stat-sample
+
+.DS_Store

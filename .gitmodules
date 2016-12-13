@@ -1,0 +1,6 @@
+[submodule "qemu"]
+	path = qemu
+	url = git@github.com:ParsaLab/qemu.git
+[submodule "images"]
+	path = images
+	url = git@github.com:ParsaLab/images.git
