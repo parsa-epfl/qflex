@@ -5,7 +5,6 @@ sidebar: "true"
 ---
 
 ## Faculty
-- [Edouard Bugnion](https://people.epfl.ch/edouard.bugnion)
 - [Babak Falsafi](http://parsa.epfl.ch/~falsafi/)
 
 ## Students
@@ -25,7 +24,7 @@ sidebar: "true"
 - Nikhil Gupta
 - Damien Hilloulin
 - Rishabh Iyer
-- [Georgios Psaropoulos](http://parsa.epfl.ch/~psaropou/)
+- Georgios Psaropoulos
 - Nibal Salha
 - Rishabh Sanghi
 - Marina Shimchenko
