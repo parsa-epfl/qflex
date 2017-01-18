@@ -30,7 +30,7 @@ $ sudo apt-get --no-install-recommends -y build-dep qemu
 - We use `git-lfs` to store and share QEMU images.
   Please refer to [this page](https://help.github.com/articles/installing-git-large-file-storage/#platform-linux) to install `git-lfs`.
 
-- Installing a compatible version of `gcc`, _5_ or _4.8_:
+- Installing a compatible version of `gcc`, _4.8_:
 
   **Note:** Following this process will replace your system's `gcc` with `gcc 4.8`.
 
@@ -56,7 +56,7 @@ $ sudo update-alternatives --config g++
 ```
 
 - Installing a compatible version of the `boost` library,
-1.59.0 or 1.58.0:
+_1.59.0_ or _1.58.0_:
 
 ```bash
 $ export BOOST="boost_1_58_0"
