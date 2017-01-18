@@ -10,7 +10,7 @@ QFlex consists of several software components that are governed by various licen
 
   * [NS-3](https://www.gnu.org/copyleft/gpl.html)
   * [QEMU](http://wiki.qemu.org/License)
-  * [SimFlex] (http://parsa.epfl.ch/simflex/)
+  * [SimFlex](http://parsa.epfl.ch/simflex/)
 
 ### Software developed internally (by the QFlex group)
 **QFlex License**
