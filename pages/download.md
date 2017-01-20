@@ -183,7 +183,7 @@ In this section, we will simulate a Memcache server with QFlex. We will use the 
 The [benchmark](http://cloudsuite.ch/datacaching/) is composed of the following components:
 
 - `/usr/local/bin/memcached`: The Memcached server binary.
-- `/home/cloudsuite/memcached-client`: The Memcached client and configuration files.
+- `/home/cloudsuite/memcached/memcached_client`: The Memcached client and configuration files.
 
 In order to run the Memcached benchmark, we recommend using a terminal multiplexer software, such as `screen`. Furthermore, as we are using a single QEMU instance for the client and the server, you should pin the client and server to different groups of cores with `taskset` . You can install `screen` using `apt-get` from the guest OS (Debian 8). `taskset` is already installed.
 
@@ -200,7 +200,7 @@ $ taskset 0x2 memcached -t 1 -m 1024 -n 550
 Now you must start the client. Since the client and server have to run concurrently, start another terminal. The Memcached client must perform several tasks: generate the dataset, warmup the server, and tune and run the benchmark. The provided dataset `twitter_data/twitter_dataset_unscaled` is around 300MB. We will scale the dataset by a factor of 3 to generate a dataset of around 1GB, with the following command:
 
 ```bash
-$ cd /home/cloudsuite/memcached/memcached-client
+$ cd /home/cloudsuite/memcached/memcached_client
 $ taskset 0x4 ./loader -a ../twitter_dataset/twitter_dataset_unscaled \
               -o ../twitter_dataset/twitter_dataset_3x -s docker_servers.txt -w 1 -S 3 -D 1024 -j -T 1
 ```
@@ -212,7 +212,7 @@ After a few minutes, you should see the following message: `You are warmed up, s
 Now, warm up the server with the following command:
 
 ```bash
-$ cd /home/cloudsuite/memcached/memcached-client
+$ cd /home/cloudsuite/memcached/memcached_client
 $ taskset 0x4 ./loader -a ../twitter_dataset/twitter_dataset_3x \
               -s docker_servers.txt -w 1 -S 1 -D 1024 -j -T 1
 ```
@@ -220,7 +220,7 @@ $ taskset 0x4 ./loader -a ../twitter_dataset/twitter_dataset_3x \
 After a few minutes, you should see the following message: `You are warmed up, sir`. This message indicates that the server is warmed up. The next step is to tune the server, which you can do with the following command:
 
 ```bash
-$ cd /home/cloudsuite/memcached/memcached-client
+$ cd /home/cloudsuite/memcached/memcached_client
 $ taskset 0x4 ./loader -a ../twitter_dataset/twitter_dataset_3x \
               -s docker_servers.txt -g 0.8 -T 1 -c 200 -w 1 -e -r rps
 ```
