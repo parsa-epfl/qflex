@@ -4,7 +4,7 @@ title: Download
 sidebar: "true"
 ---
 
-QFlex is a full-system cycle-accurate simulator of multi-node computer systems. QFlex is a multi-layer software stack composed of QEMU, Flexus, and NS-3. QEMU is a widely-used machine emulator, which allows to boot any machine and execute unmodified applications and operating systems. Flexus is a cycle-accurate modeling tool of complete servers, which enables modeling modern CPUs, with various core types, network-on-chip topologies, and cache organizations; and various DRAM-based memory systems. NS-3 is a popular network simulator that allows to glue all the simulated server nodes together with different network integration characteristics. 
+QFlex is a full-system cycle-accurate simulator of multi-node computer systems, which is composed of QEMU, Flexus, and NS-3. QEMU is a widely-used machine emulator, which is able to boot any machine and execute unmodified applications and operating systems. Flexus is a cycle-accurate tool, which simulates modern CPUs with varying core types, network-on-chip topologies, and cache organizations; and various DRAM-based memory systems. NS-3 is a popular network simulator that glues all the simulated server nodes together with different network integration characteristics. 
 
 QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently, QFlex is able perform full-system trace-based simulation of a single server node (for 64-bit ARM). Hence, no timing models are available yet.
 
@@ -151,7 +151,7 @@ We also offer the Linux kernel images, extracted from the same Debian 8 builds, 
 
 ## Deploying a single node QFlex job ##
 
-For simple deployments, `cd` into the `scripts` folder and copy the `user_example.cfg` to a new file named `user.cfg`. In the new file, configure the environment variables `QEMU_PATH`, `KERNEL_PATH`, `KERNEL`, `INITRD`, `FLEXUS_REPO`, `FLEXUS_PATH`, `IMG_0`, `ADD_TO_PATH` and `ADD_TO_LD_LIBRARY_PATH`. Depending on your QFlex instalation, the `ADD_TO_PATH` and `ADD_TO_LD_LIBRARY_PATH` variables may be empty.
+For simple deployments, `cd` into the `scripts` folder and copy the `user_example.cfg` to a new file named `user.cfg`. In the new file, configure the environment variables `QEMU_PATH`, `KERNEL_PATH`, `KERNEL`, `INITRD`, `FLEXUS_REPO`, `FLEXUS_PATH`, `IMG_0`, `ADD_TO_PATH` and `ADD_TO_LD_LIBRARY_PATH`. Depending on your QFlex installation, the `ADD_TO_PATH` and `ADD_TO_LD_LIBRARY_PATH` variables may be empty.
 
 Once you have configured the `user.cfg` script, you can run QFlex. We strongly recommend that you boot QEMU without Flexus. Booting a machine with Flexus attached is not recommended as it greatly slows down the execution. Hence, the simulation workflow will be as follows: (1) Boot a machine without Flexus, (2) install and tune your application, (3) take a snapshot when the application reaches the desired point to start simulating, and (4) start QEMU with Flexus from the aforesaid snapshot. 
 
@@ -185,11 +185,11 @@ The [benchmark](http://cloudsuite.ch/datacaching/) is composed of the following 
 - `/usr/local/bin/memcached`: The Memcached server binary.
 - `/home/cloudsuite/memcached-client`: The Memcached client and configuration files.
 
-In order to run the Memcached benchmark, it is recommended to use a terminal multiplexer software, such as `screen`. Furthermore, as we are using a single QEMU instance for the client and the server, you should pin the client and server to different groups of cores with `taskset` . You can install `screen` using `apt-get` from the guest OS (Debian 8). `taskset` is already installed.
+In order to run the Memcached benchmark, we recommend using a terminal multiplexer software, such as `screen`. Furthermore, as we are using a single QEMU instance for the client and the server, you should pin the client and server to different groups of cores with `taskset` . You can install `screen` using `apt-get` from the guest OS (Debian 8). `taskset` is already installed.
 
   **Note:** The `screen` control command `Ctrl^a + C` conflicts with the QEMU monitor's command. To get around this, create a `.screenrc` file under your home directory with `escape ^Xx` in it. This step allows using `screen` with `Ctrl^x` instead of `Ctrl^a`
 
-The following commands assume a QEMU instance with 4GB of memory and and at least 2 cores. We require at least one core for the server and one for the client. We will start a Memcached server of 1GB, since we must have at least 4 times the memory of the Memcached server to safelly run the server and the client in the same machine. We also assume you have two terminals in the guest OS, one for the server and one for the client.
+The following commands assume a QEMU instance with 4GB of memory and and at least 2 cores. We require at least one core for the server and one for the client. We will start a Memcached server of 1GB, since we must have at least 4 times the memory of the Memcached server to safely run the server and the client in the same machine. We also assume you have two terminals in the guest OS, one for the server and one for the client.
 
 Boot the QEMU instance, without Flexus attached, and start a `screen` terminal. On this first terminal, we are going to start the Memcached server and pin it to core 1, with the following command:
 
