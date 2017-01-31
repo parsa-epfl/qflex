@@ -2,7 +2,7 @@ language: ruby
 rvm:
 - 2.2.5
 
-sudo: false # route your build to the container-based infrastructure for a faster build
+sudo: false
 
 addons:
   apt:
@@ -20,7 +20,7 @@ script: ./script/cibuild
 branches:
   only:
   - gh-pages     # test the gh-pages branch
-  # - /pages-(.*)/ # test every branch which starts with "pages-"
+  - master
 
 env:
   global:
