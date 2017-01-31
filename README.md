@@ -4,6 +4,8 @@ QFlex is a full-system cycle-accurate computer architecture simulator of multi-n
 
 More information is available in the QFlex [website][qfw].
 
+[![QFlex](https://parsalab.github.io/qflex/public/images/QFlex.png)](http://parsalab.github.io/qflex/)
+
 # Licensing #
 
 QFlex's software components are all available as open-source software. All of the software components are governed by 
