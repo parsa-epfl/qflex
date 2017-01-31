@@ -8,7 +8,7 @@ QFlex is a full-system cycle-accurate simulator of multi-node computer systems, 
 
 QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently, QFlex is able perform full-system trace-based simulation of a single server node (for 64-bit ARM). Hence, no timing models are available yet.
 
-QFlex's source code is available on our [GitHub repository](https://github.com/ParsaLab/qflex/).
+QFlex's source code is available on our [GitHub repository]({{ site.github.repo }}).
 
 ## How to Build QFlex ##
 -------------------------
@@ -30,12 +30,12 @@ $ sudo apt-get --no-install-recommends -y build-dep qemu
 - We use `git-lfs` to store and share QEMU images.
   Please refer to [this page](https://help.github.com/articles/installing-git-large-file-storage/#platform-linux) to install `git-lfs`.
 
-- Installing a compatible version of `gcc`, _4.8_:
+- Installing a compatible version of `gcc`, _5_:
 
-  **Note:** Following this process will replace your system's `gcc` with `gcc 4.8`.
+  **Note:** Following this process will replace your system's `gcc` with `gcc 5`.
 
 ```bash
-$ export GCC_VERSION="4.8"
+$ export GCC_VERSION="5"
 $ sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
 $ sudo apt-get update
 $ sudo apt-get -y install gcc-${GCC_VERSION} g++-${GCC_VERSION}
@@ -45,8 +45,6 @@ $ sudo apt-get -y install gcc-${GCC_VERSION} g++-${GCC_VERSION}
 default version:
 
 ```bash
-$ sudo update-alternatives --remove-all gcc
-$ sudo update-alternatives --remove-all g++
 $ sudo update-alternatives --install /usr/bin/gcc gcc \
                                      /usr/bin/gcc-${GCC_VERSION} 20
 $ sudo update-alternatives --install /usr/bin/g++ g++ \
@@ -55,17 +53,16 @@ $ sudo update-alternatives --config gcc
 $ sudo update-alternatives --config g++
 ```
 
-- Installing a compatible version of the `boost` library,
-_1.59.0_ or _1.58.0_:
+- Installing a compatible version of the `boost` library, _1.59.0_ :
 
 ```bash
-$ export BOOST="boost_1_58_0"
-$ export BOOST_VERSION="1.58.0"
+$ export BOOST="boost_1_59_0"
+$ export BOOST_VERSION="1.59.0"
 $ wget http://sourceforge.net/projects/boost/files/boost/${BOOST_VERSION}/${BOOST}.tar.bz2 -O /tmp/${BOOST}.tar.gz
 $ tar -xf /tmp/${BOOST}.tar.gz
 $ cd ./${BOOST}/
-$ sudo ./bootstrap.sh --prefix=/usr/local
-$ sudo ./b2 -j4
+$ ./bootstrap.sh --prefix=/usr/local
+$ ./b2 -j8
 $ sudo ./b2 install
 ```
 - Now use `git` to clone the QFlex repository, and update all its submodules
@@ -94,29 +91,12 @@ $ cd ../qemu
 $ export CFLAGS="-fPIC"
 $ ./configure --target-list=aarch64-softmmu \
               --enable-flexus --disable-werror --disable-tpm
-$ make -j4
+$ make -j
 ```
 
 - As the final step before compiling QFlex, we need to set the paths
-to the installed dependencies:
-
-```bash
-$ cd ../flexus
-$ sed 's|GCC_BINARY=.*|GCC_BINARY=g++ --std=c++11|' \
-      makefile.defs > makefile.defs.2 \
-      && mv makefile.defs.2 makefile.defs
-$ sed 's|GCC_PATH=.*|GCC_PATH=|' makefile.defs > makefile.defs.2 \
-      && mv makefile.defs.2 makefile.defs
-$ sed 's|BOOST_PATH=.*|BOOST_PATH=/usr/local/include|' \
-      makefile.defs > makefile.defs.2 \
-      && mv makefile.defs.2 makefile.defs
-$ sed 's|BOOST_BINARIES=.*|BOOST_BINARIES=/usr/local/lib|' \
-      makefile.defs > makefile.defs.2 \
-      && mv makefile.defs.2 makefile.defs
-$ sed 's|BOOST_VERSION_NOCHECK=.*|BOOST_VERSION_NOCHECK=true|' \
-      makefile.defs > makefile.defs.2 \
-      && mv makefile.defs.2 makefile.defs
-```
+for `GCC_BINARY`, `GCC_PATH`, `BOOST_PATH`, and `BOOST_BINARIES` in
+`makefile.defs` to the installed dependencies.
 
 - Now that we have everything set, we can build QFlex. 
 
