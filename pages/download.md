@@ -70,9 +70,8 @@ $ sudo ./b2 install
 
 ```bash
 $ cd ..
-$ git clone git@github.com:ParsaLab/qflex.git
+$ git clone --branch v1.0 git@github.com:ParsaLab/qflex.git
 $ cd qflex
-$ git checkout master
 $ git submodule update --init --recursive
 $ cd images
 $ git lfs fetch
