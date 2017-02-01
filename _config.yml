@@ -28,7 +28,7 @@ blog_path:        blog/
 excerpt_separator: <!--more-->
 
 github:
-  repo:           https://github.com/parsalab/qflex
+  repo:           https://github.com/ParsaLab/qflex
 
 # Handling Reading
 exclude: 			 [old]
