@@ -7,9 +7,11 @@ sidebar: "true"
 ## Faculty
 - [Babak Falsafi](http://parsa.epfl.ch/~falsafi/)
 
-## Students
+## Current Contributors
+- [Hossein Ajallooiean](https://people.epfl.ch/hossein.ajallooiean)
 - [Alexandros Daglis](http://parsa.epfl.ch/~daglis/)
 - [Mario Drumond](http://parsa.epfl.ch/~drumond/)
+- [Hussein Kassir](https://people.epfl.ch/hussein.kassir)
 - [Nooshin Mirzadeh](http://parsa.epfl.ch/~mirzadeh/)
 - [Stanko Novakovic](http://parsa.epfl.ch/~snovakov/)
 - [Javier Picorel](http://parsa.epfl.ch/~picorel/)
