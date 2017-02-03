@@ -44,6 +44,6 @@ Computer architects have traditionally relied on software simulation to measure 
 The QFlex project targets quick, accurate, and flexible simulation of multi-node computer systems proceeding along four fronts:
 
 * QEMU is a popular open-source full-system machine emulator that allows functional emulation of unmodified operating systems and applications.
-* Flexus is a powerful and flexible simulator framework that allows detailed cycle-accurate simulation.
+* Flexus is a powerful and flexible simulation framework that allows detailed cycle-accurate simulation.
 * NS-3 is a popular, detailed, and flexible network simulation stack.
 * SMARTS applies rigorous statistical sampling theory to reduce the simulation turnaround time by several orders of magnitude, while achieving high accuracy and confidence estimates. 
