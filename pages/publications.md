@@ -4,7 +4,7 @@ title: Publications
 sidebar: "true"
 ---
 
-The QFlex simulator is the most recent incarnation of [SimFlex](http://parsa.epfl.ch/simflex/). Please cite the following two references if you need citations for QFlex:
+The QFlex project is the most recent incarnation of [SimFlex](http://parsa.epfl.ch/simflex/). Please cite the following two references if you need citations for QFlex:
 
 **QFlex v1.0.**
 Babak Falsafi, Hossein Ajallooiean, Alexandros Daglis, Mario Drumond, Hussein Kassir, Nooshin Mirzadeh, Stanko Novakovic, Javier Picorel, Arash Pourhabibi, and Dmitrii Ustiugov.
