@@ -4,7 +4,7 @@ title: Download
 sidebar: "true"
 ---
 
-QFlex is a full-system cycle-accurate simulator of multi-node computer systems, which is composed of QEMU, Flexus, and NS-3. QEMU is a widely-used machine emulator, which is able to boot any machine and execute unmodified applications and operating systems. Flexus is a cycle-accurate tool, which simulates modern CPUs with varying core types, network-on-chip topologies, and cache organizations; and various DRAM-based memory systems. NS-3 is a popular network simulator that glues all the simulated server nodes together with different network integration characteristics. 
+QFlex is a full-system cycle-accurate simulation framework of multi-node computer systems, which is composed of QEMU, Flexus, and NS-3. QEMU is a widely-used machine emulator, which is able to boot any machine and execute unmodified applications and operating systems. Flexus is a cycle-accurate tool, which simulates modern CPUs with varying core types, network-on-chip topologies, and cache organizations; and various DRAM-based memory systems. NS-3 is a popular network simulator that glues all the simulated server nodes together with different network integration characteristics. 
 
 QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently, QFlex is able perform full-system trace-based simulation of a single server node (for 64-bit ARM). Hence, no timing models are available yet.
 
@@ -128,7 +128,7 @@ Both images user name and password are:
 
 We also offer the Linux kernel images, extracted from the same Debian 8 builds, located in the `images/kernel` folder of this repository.
 
-## Deploying a single node QFlex job ##
+### Deploying a single node QFlex job ###
 
 For simple deployments, `cd` into the `scripts` folder and copy the `user_example.cfg` to a new file named `user.cfg`. In the new file, configure the environment variables `QEMU_PATH`, `KERNEL_PATH`, `KERNEL`, `INITRD`, `FLEXUS_REPO`, `FLEXUS_PATH`, `IMG_0`, `ADD_TO_PATH` and `ADD_TO_LD_LIBRARY_PATH`. Depending on your QFlex installation, the `ADD_TO_PATH` and `ADD_TO_LD_LIBRARY_PATH` variables may be empty.
 
@@ -155,7 +155,7 @@ After that, you can start QEMU from the snapshot, with Flexus attached, by using
 $ ./run_instance.sh -tr -lo=snapshot_name
 ```
 
-## Example: Running Memcached with QFlex ##
+### Example: Running Memcached with QFlex ###
 
 In this section, we will simulate a Memcache server with QFlex. We will use the provided Memcached image. The Memcached client and server will run on the same QEMU instance; client and server will communicate through the loopback network interface. Configure your `user.cfg` file, pointing it to the memcached image and configuring a boot with at least 2 cores and 4GB of memory.
 
@@ -227,6 +227,6 @@ After the simulation, a `stats_db.out.gz` file is created with all the statistic
 $ stat-manager print all
 ```
 
-## Automation of QFlex ##
+### Automation of QFlex ###
 
 The process of booting a single- or multi-instance QEMU configuration, installing software, taking snapshots, and running QFlex, can be automated by the `run_system.sh` script in the `scripts` folder. You should understand the entire process before using that script, since some debugging might be required. Please refer to the documentation in the `scripts` folder for information on how to use the scripts.
