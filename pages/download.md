@@ -229,4 +229,4 @@ $ stat-manager print all
 
 ### Automation of QFlex ###
 
-The process of booting a single- or multi-instance QEMU configuration, installing software, taking snapshots, and running QFlex, can be automated by the `run_system.sh` script in the `scripts` folder. You should understand the entire process before using that script, since some debugging might be required. Please refer to the documentation in the `scripts` folder for information on how to use the scripts.
+The process of booting a single- or multi-instance QEMU configuration, installing software, taking snapshots, and running QFlex can be automated. This automation is done by the `run_system.sh` script in the `scripts` folder. You should understand the entire process before using that script, since some debugging might be required. Please refer to the documentation in the scripts folder for information on how to use the scripts.
