@@ -159,7 +159,7 @@ $ ./run_instance.sh -tr -lo=snapshot_name
 
 In this section, we will simulate a Memcache server with QFlex. We will use the provided Memcached image. The Memcached client and server will run on the same QEMU instance; client and server will communicate through the loopback network interface. Configure your `user.cfg` file, pointing it to the memcached image and configuring a boot with at least 2 cores and 4GB of memory.
 
-The [benchmark](http://cloudsuite.ch/datacaching/) is composed of the following components:
+The [benchmark](http://cloudsuite.ch/pages/benchmarks/datacaching/) is composed of the following components:
 
 - `/usr/local/bin/memcached`: The Memcached server binary.
 - `/home/cloudsuite/memcached/memcached_client`: The Memcached client and configuration files.
