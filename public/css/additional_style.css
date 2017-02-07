@@ -23,6 +23,11 @@
     border-top: 1px solid #EEE;
 }
 
+#footer-container {
+    padding-bottom: 0rem;
+    padding-top: 0rem;
+}
+
 .footer-logo{
     vertical-align: middle;
     display:inline-block;
