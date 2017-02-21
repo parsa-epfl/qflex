@@ -147,7 +147,7 @@ void print_copyright() {
   cerr << "//           ****    ****   ***     ***            ***      ********   ***      ***                   //" << endl;
   cerr << "//                                                                                                    //" << endl; 
   cerr << "//   QFlex (C) 2016-2017                                                                              //" << endl;
-  cerr << "//   Website: https://parsalab.github.io/qflex/                                                       //" << endl;
+  cerr << "//   Website: https://parsa-epfl.github.io/qflex/                                                     //" << endl;
   cerr << "//   QFlex uses software developed externally:                                                        //" << endl;
   cerr << "//   [NS-3](https://www.gnu.org/copyleft/gpl.html)                                                    //" << endl;
   cerr << "//   [QEMU](http://wiki.qemu.org/License)                                                             //" << endl;

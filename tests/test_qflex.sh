@@ -49,23 +49,23 @@ if [ "$TARGET" != "QEMUCMP.L2Shared.Trace-arm" ]; then
     exit 0
 fi
 
-cd $HOME/build/ParsaLab/qflex/tests/
+cd $HOME/build/parsa-epfl/qflex/tests/
 cp ../scripts/user_example.cfg ../scripts/user.cfg
 
 sed -i "s/USER_NAME username/USER_NAME $USER/" ../scripts/user.cfg
 sed -i "s/QEMU_CORE_NUM 4/QEMU_CORE_NUM 1/" ../scripts/user.cfg
 sed -i "s/FLEXUS_CORE_NUM 4/FLEXUS_CORE_NUM 1/" ../scripts/user.cfg
 sed -i "s/MEM 4096/MEM 512/" ../scripts/user.cfg
-path_to_kernel=$(printf '%s\n' "$HOME/build/ParsaLab/qflex/images/kernel" | sed 's/[[\.*^$/]/\\&/g')
+path_to_kernel=$(printf '%s\n' "$HOME/build/parsa-epfl/qflex/images/kernel" | sed 's/[[\.*^$/]/\\&/g')
 sed -i "s/\/path\/to\/qemu\/image\/kernel/$path_to_kernel/g" ../scripts/user.cfg
-path_to_qemu=$(printf '%s\n' "$HOME/build/ParsaLab/qflex/qemu" | sed 's/[[\.*^$/]/\\&/g')
+path_to_qemu=$(printf '%s\n' "$HOME/build/parsa-epfl/qflex/qemu" | sed 's/[[\.*^$/]/\\&/g')
 sed -i "s/\/path\/to\/qemu/$path_to_qemu/g" ../scripts/user.cfg
-path_to_qflex=$(printf '%s\n' "$HOME/build/ParsaLab/qflex" | sed 's/[[\.*^$/]/\\&/g')
+path_to_qflex=$(printf '%s\n' "$HOME/build/parsa-epfl/qflex" | sed 's/[[\.*^$/]/\\&/g')
 sed -i "s/\/path\/to\/qflex/$path_to_qflex/g" ../scripts/user.cfg
-path_to_image=$(printf '%s\n' "$HOME/build/ParsaLab/qflex/images/debian-blank/debian.qcow2" | sed 's/[[\.*^$/]/\\&/g')
+path_to_image=$(printf '%s\n' "$HOME/build/parsa-epfl/qflex/images/debian-blank/debian.qcow2" | sed 's/[[\.*^$/]/\\&/g')
 sed -i "s/\/path\/to\/server\/image\/.qcow2\/or\/.img/$path_to_image/g" ../scripts/user.cfg
 sed -i "s/\/path\/to\/client\/image\/.qcow2\/or\/.img/$path_to_image/g" ../scripts/user.cfg
-path_to_sim=$(printf '%s\n' "$HOME/build/ParsaLab/qflex/flexus/simulators/QEMUCMP.L2Shared.Trace/libflexus_QEMUCMP.L2Shared.Trace_arm_iface_gcc.so" | sed 's/[[\.*^$/]/\\&/g')
+path_to_sim=$(printf '%s\n' "$HOME/build/parsa-epfl/qflex/flexus/simulators/QEMUCMP.L2Shared.Trace/libflexus_QEMUCMP.L2Shared.Trace_arm_iface_gcc.so" | sed 's/[[\.*^$/]/\\&/g')
 sed -i "s/\/path\/to\/simulator\/.so/$path_to_sim/g" ../scripts/user.cfg
 
 sudo ./test_travis.sh
