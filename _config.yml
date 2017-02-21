@@ -12,7 +12,7 @@ permalink:        pretty
 title:            QFlex
 tagline:          'Quick & Flexible Computer Architecture Simulation'
 description:      'Quick & Flexible Computer Architecture Simulation'
-url:              https://parsalab.github.io/qflex/
+url:              https://parsa-epfl.github.io/qflex/
 baseurl:          /qflex/
 
 author:
@@ -28,7 +28,7 @@ blog_path:        blog/
 excerpt_separator: <!--more-->
 
 github:
-  repo:           https://github.com/ParsaLab/qflex
+  repo:           https://github.com/parsa-epfl/qflex
 
 # Handling Reading
 exclude: 			 [old]
