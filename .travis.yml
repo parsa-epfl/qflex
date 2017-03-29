@@ -58,12 +58,12 @@ git:
 matrix:
   include:
     - env:
-      - TARGET="QEMUCMP.L2Shared.Trace-arm"
+      - TARGET="KeenKraken-arm"
       - BOOST="boost_1_59_0"
       - BOOST_VERSION="1.59.0"
       - GCC_VERSION="5"
     - env:
-      - TARGET="QEMUCMP.L2Shared.Trace-v9"
+      - TARGET="KeenKraken-v9"
       - BOOST="boost_1_59_0"
       - BOOST_VERSION="1.59.0"
       - GCC_VERSION="5"

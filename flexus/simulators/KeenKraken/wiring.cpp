@@ -52,7 +52,7 @@
 #include <core/simulator_name.hpp>
 namespace Flexus {
 //Simulator Name
-std::string theSimulatorName = "QEMUCMP.L2Shared.Trace v1.0";
+std::string theSimulatorName = "Keen Kraken v1.0";
 }
 
 

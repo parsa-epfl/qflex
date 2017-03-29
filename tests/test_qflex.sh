@@ -45,7 +45,7 @@ set -x
 set -e
 
 # Test qFlex
-if [ "$TARGET" != "QEMUCMP.L2Shared.Trace-arm" ]; then
+if [ "$TARGET" != "KeenKraken-arm" ]; then
     exit 0
 fi
 
@@ -65,7 +65,7 @@ sed -i "s/\/path\/to\/qflex/$path_to_qflex/g" ../scripts/user.cfg
 path_to_image=$(printf '%s\n' "$HOME/build/parsa-epfl/qflex/images/debian-blank/debian.qcow2" | sed 's/[[\.*^$/]/\\&/g')
 sed -i "s/\/path\/to\/server\/image\/.qcow2\/or\/.img/$path_to_image/g" ../scripts/user.cfg
 sed -i "s/\/path\/to\/client\/image\/.qcow2\/or\/.img/$path_to_image/g" ../scripts/user.cfg
-path_to_sim=$(printf '%s\n' "$HOME/build/parsa-epfl/qflex/flexus/simulators/QEMUCMP.L2Shared.Trace/libflexus_QEMUCMP.L2Shared.Trace_arm_iface_gcc.so" | sed 's/[[\.*^$/]/\\&/g')
+path_to_sim=$(printf '%s\n' "$HOME/build/parsa-epfl/qflex/flexus/simulators/KeenKraken/libflexus_KeenKraken_arm_iface_gcc.so" | sed 's/[[\.*^$/]/\\&/g')
 sed -i "s/\/path\/to\/simulator\/.so/$path_to_sim/g" ../scripts/user.cfg
 
 sudo ./test_travis.sh

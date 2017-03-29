@@ -82,7 +82,7 @@ cd ..
 # Build Qemu
 cd ./qemu
 export CFLAGS="-fPIC"
-if [ "$TARGET" = "QEMUCMP.L2Shared.Trace-arm" ]; then
+if [ "$TARGET" = "KeenKraken-arm" ]; then
     ./configure --target-list=aarch64-softmmu --enable-flexus --disable-werror --disable-tpm
 else
     ./configure --target-list=sparc64-softmmu --enable-flexus --disable-werror --disable-tpm
