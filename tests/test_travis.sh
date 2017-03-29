@@ -89,6 +89,20 @@ popd >> /dev/null
 
 ################################################################################
 
+# Test run_system.sh running Flexus trace
+bash $DIR/../scripts/run_system.sh -exp=../tests/results/trace_run -ow -lo=test_snap -df=$DIR/results/single_save/Qemu_0/default_depend_list.txt -tr -sf=10000000
+sleep 30
+pushd $DIR/results/trace_run/Qemu_0 >> /dev/null
+export LD_LIBRARY_PATH=/usr/local/lib/
+$DIR/../flexus/stat-manager/stat-manager print all > $DIR/results/trace_run/Qemu_0/stats.raw
+
+# check to see if flexus ran for 10000000 instructions
+TEST_TRACE=`grep feeder-ICount.*10000000 $DIR/results/trace_run/Qemu_0/stats.raw`
+check_status "$TEST_TRACE" "Running Flexus trace" "$dir/results/trace_run/qemu_0/logs"
+popd >> /dev/null
+
+################################################################################
+
 # Test run_system.sh in load mode
 bash $DIR/../scripts/run_system.sh --kill -exp=../tests/results/single_load -ow -lo=test_snap -rs -sn=test_snap -df=$DIR/results/single_save/Qemu_0/default_depend_list.txt
 pushd $DIR/results/single_load >> /dev/null

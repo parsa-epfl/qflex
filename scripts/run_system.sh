@@ -243,29 +243,31 @@ if [ "$TYPE" = "single" ]; then
     echo -e "\nRunning Single Instance Mode : Port 2220\n$RUN\nBooting... Please wait\n"
     echo -e "\n *** Running Single Instance Mode : Port 2220 ***\n" >> $LOG
     check_run_instance 0
-    check_ssh 0
-    echo -e "\n\n *** SSH to remote server success ***\n" >> $LOG
+    if [ "$TRACE" != "TRUE" ]; then
+        check_ssh 0
+        echo -e "\n\n *** SSH to remote server success ***\n" >> $LOG
 
-    # After successful SSH, execute all the commands specified for "single" instance on remote host
-    echo -e " *** Running Commands on remote host ***\n" >> $LOG
-    echo -e "Running Commands"
-    check_invoke_script $DIR/helpers/ssh_commands.sh 0 >> $LOG
-    echo Finished Commands
+        # After successful SSH, execute all the commands specified for "single" instance on remote host
+        echo -e " *** Running Commands on remote host ***\n" >> $LOG
+        echo -e "Running Commands"
+        check_invoke_script $DIR/helpers/ssh_commands.sh 0 >> $LOG
+        echo Finished Commands
 
-    # Take snapshot of current state 
-    if [ ! -z "$SNAPSHOT_NAME" ]; then
-        if [ ! -z "$REMOVE_SNAPSHOT" ]; then
-            echo -e " *** Removing Snapshot ***\n" >> $LOG
-            echo -e "\nRemoving Snapshot $SNAPSHOT_NAME"
-            # FIXME: to be updated when the new snapshot mechanism is ready (delvm testing)
-            cp $DEP_FILE $DIR/$LOG_NAME/Qemu_0/
-            check_invoke_script $DIR/helpers/remove_snapshot.sh $SNAPSHOT_NAME >> $LOG
-            check_error $? "Snapshot Removed" "Error Removing Snapshot"
-        else
-            echo -e " *** Taking Snapshot ***\n" >> $LOG
-            echo -e "\nTaking Snapshot $SNAPSHOT_NAME"
-            check_invoke_script $DIR/helpers/save_snapshot.sh $SNAPSHOT_NAME >> $LOG
-            check_error $? "Snapshot Saved" "Error Saving Snapshot"
+        # Take snapshot of current state 
+        if [ ! -z "$SNAPSHOT_NAME" ]; then
+            if [ ! -z "$REMOVE_SNAPSHOT" ]; then
+                echo -e " *** Removing Snapshot ***\n" >> $LOG
+                echo -e "\nRemoving Snapshot $SNAPSHOT_NAME"
+                # FIXME: to be updated when the new snapshot mechanism is ready (delvm testing)
+                cp $DEP_FILE $DIR/$LOG_NAME/Qemu_0/
+                check_invoke_script $DIR/helpers/remove_snapshot.sh $SNAPSHOT_NAME >> $LOG
+                check_error $? "Snapshot Removed" "Error Removing Snapshot"
+            else
+                echo -e " *** Taking Snapshot ***\n" >> $LOG
+                echo -e "\nTaking Snapshot $SNAPSHOT_NAME"
+                check_invoke_script $DIR/helpers/save_snapshot.sh $SNAPSHOT_NAME >> $LOG
+                check_error $? "Snapshot Saved" "Error Saving Snapshot"
+            fi
         fi
     fi
 
