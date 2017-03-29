@@ -102,7 +102,7 @@ for `GCC_BINARY`, `GCC_PATH`, `BOOST_PATH`, and `BOOST_BINARIES` in
   **Note:** For now, only the 64-bit ARM trace-based simulator is supported. The simulator features a two-level cache hierarchy, with a private per-core first-level and a shared second-level. 
 
 ```bash
-$ make "QEMUCMP.L2Shared.Trace-arm"
+$ make "KeenKraken-arm"
 $ make stat-manager
 ```
 
