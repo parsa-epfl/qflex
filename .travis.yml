@@ -44,9 +44,12 @@ language: cpp
 sudo: required
 branches:
   only:
-    - arm_trace
+    - master
     - gh-pages
-    - release-candidate
+notifications:
+  email: false
+  slack: 
+    parsa-epfl:jY28s7BKfln7gmNdbtxoQWx7
 # To build on Ubuntu 14.04
 dist: trusty
 # We will get submodules ourselves
