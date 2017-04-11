@@ -8,8 +8,8 @@ The QFlex project is the most recent incarnation of [SimFlex](http://parsa.epfl.
 
 **QFlex v1.0.**
 Babak Falsafi, Hossein Ajallooiean, Alexandros Daglis, Mario Drumond, Hussein Kassir, Nooshin Mirzadeh, Stanko Novakovic, Javier Picorel, Arash Pourhabibi, and Dmitrii Ustiugov.
-*Zenodo, February 2017.*
-[[Detailed record]](https://doi.org/10.5281/zenodo.266990) - [[Bibtex]]({{ site.url }}public/qflex.bib) - [[repo]]({{ site.github.repo }})
+*Zenodo, April 2017.*
+[[Detailed record]](http://doi.org/10.5281/zenodo.504368) - [[Bibtex]]({{ site.url }}public/qflex.bib) - [[repo]]({{ site.github.repo }})
 
 **SimFlex: Statistical Sampling of Computer Architecture Simulation.**
 Thomas F. Wenisch, Roland E. Wunderlich, Mike Ferdman, Anastassia Ailamaki, Babak Falsafi and James C. Hoe.
