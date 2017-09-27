@@ -62,3 +62,9 @@
 .external-links img {
     display: inline;
 }
+
+.no-margin-here,
+.no-margin-here p,
+ #no-margin-here{
+    margin: 0;
+}
