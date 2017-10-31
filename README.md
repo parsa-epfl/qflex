@@ -21,7 +21,7 @@ QFlex is still a work in progress, and at this stage, we provide limited functio
 
 # Support #
 
-We encourage QFlex users to use GitHub issues for requests for enhacements or bug fixes.
+We encourage QFlex users to use GitHub issues for requests for enhacements, questions or bug fixes.
 
 [qfw]: http://parsa-epfl.github.io/qflex/
 [qfl]: http://parsa-epfl.github.io/qflex//pages/license/
