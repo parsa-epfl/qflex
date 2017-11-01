@@ -11,11 +11,11 @@ sidebar: "true"
 - [Hossein Ajallooiean](https://people.epfl.ch/hossein.ajallooiean)
 - [Alexandros Daglis](http://parsa.epfl.ch/~daglis/)
 - [Mario Drumond](http://parsa.epfl.ch/~drumond/)
+- [Siddharth Gupta](https://people.epfl.ch/siddharth.gupta)
 - [Hussein Kassir](https://people.epfl.ch/hussein.kassir)
-- [Nooshin Mirzadeh](http://parsa.epfl.ch/~mirzadeh/)
-- [Stanko Novakovic](http://parsa.epfl.ch/~snovakov/)
-- [Javier Picorel](http://parsa.epfl.ch/~picorel/)
 - [Arash Pourhabibi](http://parsa.epfl.ch/~pourhabi/)
+- [Mark Sutherland](https://sites.google.com/site/markjohnsutherland/)
+- [Zilu Tian](https://parsa.epfl.ch/~ztian/)
 - [Dmitrii Ustiugov](http://parsa.epfl.ch/~ustiugov/)
 
 ## Past Contributors
@@ -26,6 +26,9 @@ sidebar: "true"
 - Nikhil Gupta
 - Damien Hilloulin
 - Rishabh Iyer
+- Nooshin Mirzadeh
+- Stanko Novakovic
+- Javier Picorel
 - Georgios Psaropoulos
 - Nibal Salha
 - Rishabh Sanghi
