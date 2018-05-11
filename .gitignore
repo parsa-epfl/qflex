@@ -13,3 +13,4 @@ stat-manager
 stat-sample
 
 .DS_Store
+dockerize/.Dockerfile_DeployKey
