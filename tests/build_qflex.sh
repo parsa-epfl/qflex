@@ -69,15 +69,9 @@ cd ..
 rm -rf ./${BOOST}/
 # Fetch all the submodules (QEMU, images and etc.)
 git submodule update --init --recursive
-# Install Git-LFS
-sudo add-apt-repository -y ppa:git-core/ppa
-curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-sudo apt-get install git-lfs
-git lfs install
 # Get images
 cd images
-git lfs fetch
-git lfs pull
+git lfs pull --exclude "debian-memcached/*"
 cd ..
 # Build Qemu
 cd ./qemu

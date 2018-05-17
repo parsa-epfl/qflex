@@ -1,25 +1,25 @@
-#!/bin/bash -xv
+#!/bin/bash
 # QFlex consists of several software components that are governed by various
 # licensing terms, in addition to software that was developed internally.
 # Anyone interested in using QFlex needs to fully understand and abide by the
 # licenses governing all the software components.
-# 
+#
 ##### Software developed externally (not by the QFlex group)
-# 
+#
 #     * [NS-3](https://www.gnu.org/copyleft/gpl.html)
 #     * [QEMU](http://wiki.qemu.org/License)
 #     * [SimFlex] (http://parsa.epfl.ch/simflex/)
-# 
+#
 ##### Software developed internally (by the QFlex group)
 # **QFlex License**
-# 
+#
 # QFlex
 # Copyright &copy; 2016, Parallel Systems Architecture Lab, EPFL
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without modification,
 # are permitted provided that the following conditions are met:
-# 
+#
 #     * Redistributions of source code must retain the above copyright notice,
 #       this list of conditions and the following disclaimer.
 #     * Redistributions in binary form must reproduce the above copyright notice,
@@ -29,7 +29,7 @@
 #       nor the names of its contributors may be used to endorse or promote
 #       products derived from this software without specific prior written
 #       permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 # ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 # WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -177,17 +177,11 @@ else
     exit 1
 fi
 
-# Evaluates Load Option
-# FIXME: to be updated when the new snapshot mechanism is ready
-if [ -z "${LOAD_OPTION}" ]; then
-    LOAD_OPTS=""
-else
-    LOAD_OPTS="${LOAD_OPTION} ${DEP_FILE}"
-fi
+LOAD_OPTS=$LOAD_OPTION
 
 # Evaluates set quantum Option
 if [ "${QUANTUM}" = "0" ]; then
-    QUANTUM_OPT="-set_quantum 1024"
+    QUANTUM_OPT=""
 else
     QUANTUM_OPT="-set_quantum ${QUANTUM}"
 fi
@@ -232,7 +226,7 @@ else
     QMP=""
 fi
 
-echo -e "\n---Starting QEMU---\n" 
+echo -e "\n---Starting QEMU---\n"
 
 set -x
 
@@ -250,12 +244,12 @@ if [ ! -z "${LOAD_OPTION}" ]; then
         -rtc driftfix=slew \
         $NETWORK_CONFIG \
         $DISK_CONFIG \
-        -loadvm "$LOAD_OPTS" \
+        -loadvm $LOAD_OPTS \
         $ICOUNT_CONFIG \
         $FLEXUS \
         $QUANTUM_OPT \
         $QMP
-else # FIXME: code replication to be removed when the new snapshot mechanism is ready 
+else # FIXME: code replication to be removed when the new snapshot mechanism is ready
      # (testing: loadvm and " marks interpretation)
     $RUN_CFG $QEMU_PATH/qemu-system-aarch64 \
         -machine virt \
@@ -272,7 +266,8 @@ else # FIXME: code replication to be removed when the new snapshot mechanism is 
         $ICOUNT_CONFIG \
         $FLEXUS \
         $QUANTUM_OPT \
-        $QMP
+        $QMP \
+        -accel tcg,thread=single
 fi
 
 if [ "${TRACE}" = "TRUE" ]; then

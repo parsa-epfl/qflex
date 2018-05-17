@@ -44,12 +44,10 @@ language: cpp
 sudo: required
 branches:
   only:
-    - master
+    - dev
     - gh-pages
-notifications:
-  email: false
-  slack: 
-    parsa-epfl:jY28s7BKfln7gmNdbtxoQWx7
+    - merge_test
+    - master
 # To build on Ubuntu 14.04
 dist: trusty
 # We will get submodules ourselves
@@ -57,16 +55,11 @@ git:
   submodules: false
 # Builds GCC version: 5
 # Builds BOOST version: 1.59.0
-# Builds targets 'arm' and 'v9'  
+# Builds targets 'arm' and 'v9'
 matrix:
   include:
     - env:
       - TARGET="KeenKraken-arm"
-      - BOOST="boost_1_59_0"
-      - BOOST_VERSION="1.59.0"
-      - GCC_VERSION="5"
-    - env:
-      - TARGET="KeenKraken-v9"
       - BOOST="boost_1_59_0"
       - BOOST_VERSION="1.59.0"
       - GCC_VERSION="5"
