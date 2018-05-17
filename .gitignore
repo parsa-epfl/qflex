@@ -1,6 +1,7 @@
 # Compiled sources
 *.a
 *_dep
+*.pyc
 *_o
 *Makefile*depend*
 *.so
@@ -11,5 +12,5 @@ user.cfg
 stat-collapse
 stat-manager
 stat-sample
-
+*.gz
 .DS_Store

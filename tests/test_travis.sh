@@ -96,9 +96,27 @@ pushd $DIR/results/trace_run/Qemu_0 >> /dev/null
 export LD_LIBRARY_PATH=/usr/local/lib/
 $DIR/../flexus/stat-manager/stat-manager print all > $DIR/results/trace_run/Qemu_0/stats.raw
 
+cat $DIR/results/trace_run/Qemu_0/stats.raw
+
 # check to see if flexus ran for 10000000 instructions
 TEST_TRACE=`grep feeder-ICount.*10000000 $DIR/results/trace_run/Qemu_0/stats.raw`
 check_status "$TEST_TRACE" "Running Flexus trace" "$dir/results/trace_run/qemu_0/logs"
+
+r=1
+for stat in Fetches IOOps LoadExOps StoreExOps LoadOps StoreOps; do
+  t="$(grep feeder-${stat} $DIR/results/trace_run/Qemu_0/stats.raw | tr -s ' ' | cut -d ' ' -f3)"
+  r=$((r*t))
+done
+if [ $r -eq 0 ]; then
+  exit 1
+fi
+
+# load-ex and store-ex instructions go in pairs
+lx="$(grep feeder-LoadExOps $DIR/results/trace_run/Qemu_0/stats.raw | tr -s ' ' | cut -d ' ' -f3)"
+sx="$(grep feeder-StoreExOps $DIR/results/trace_run/Qemu_0/stats.raw | tr -s ' ' | cut -d ' ' -f3)"
+if [ "$lx" -ne "$sx" ]; then
+  exit 1
+fi
 popd >> /dev/null
 
 ################################################################################
@@ -117,6 +135,7 @@ check_status "$TEST_REMOVE" "Deleting Snapshot" "$DIR/results/single_load/Qemu_0
 popd >> /dev/null
 
 # ustiugov FIXME: enable multiple nodes testing in travis (soft-lockup bug)
+cat $DIR/results/summary
 exit 0
 #################################################################################
 
