@@ -59,9 +59,9 @@ RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.d
 ENV CFLAGS "-fPIC"
 RUN cd qflex/qemu && \
     ./configure --target-list=aarch64-softmmu --enable-flexus --disable-werror --disable-tpm && \
-    make -j && \
+    make && \
     cd ../flexus && \
-    make -j "KnottyKraken" && \
+    make "KnottyKraken" && \
     make stat-manager
 
 ENTRYPOINT /bin/bash
