@@ -5,13 +5,14 @@
 IMAGE_PATH=$1
 IMAGE_DIR=$2
 FLEXUS_PATH=$3
+DOCKER_IMAGE=$4
 UNAME=`whoami`
 UID=`id -u`
 GID=`id -g`
 JID=`echo $(($(date +%s%N)/1000000))`
 
 
-# Iterate over all checkpoints, create .yaml file and simulate
+# Iterate over all QEMU checkpoint images, create .yaml file and run trace mode simulation
 for chkpt in $IMAGE_PATH/$IMAGE_DIR/*/; do
         Chkpt=`basename "$chkpt"`
         echo "Launching job for checkpoint: " $Chkpt
@@ -33,7 +34,7 @@ spec:
     spec:                                                              
       containers:                                                      
       - name: $UNAME-$Chkpt-$CID                                   
-        image: qflex_dev:v6                                            
+        image: $DOCKER_IMAGE                                            
         volumeMounts:                                                  
         - mountPath: /home/usr/qflex/images                            
           name: volume-images                                          

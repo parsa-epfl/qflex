@@ -1,5 +1,5 @@
 run_job.sh usage:
-./run_job.sh <path_to_images_root_dir> <specific_image_dir> <path_to_flexus_binary>
+./run_job.sh <path_to_images_root_dir> <specific_image_dir> <path_to_flexus_binary> <docker_image_name>
 Ensure the deployment image is already present on all nodes in the kubernetes cluster and make sure you are running this script on a kubernetes cluster node.
 The script creates a job id for you. You can query the status of your jobs using kubectl get jobs -l jid=<job_id>
 
