@@ -27,9 +27,9 @@ i.e. qemu_instance_sample_file and qemu_setup_sample_file
 """
 CONHLP = \
     """
-Convert the text provided into a XML instance file. this options takes two arguments. 
-the first is the text you wish to use - please use quotes for defining your command as spaces are 
-prne to causing misunderstandings. the second is your output file.
+Convert the text provided into a XML instance file. this options takes two arguments.
+the first is the text you wish to use - please use quotes for defining your command as spaces are
+prone to causing misunderstandings. the second is your output file.
 """
 RUNHLP = \
     """
@@ -41,7 +41,7 @@ Output the commands used by this script for running the instances. useful for de
 """
 LDHLP = \
     """
-Loads the snapshot provided. it will automatically append the instance name for instance specific load. 
+Loads the snapshot provided. it will automatically append the instance name for instance specific load.
 NOTE: this uses loadext only
 """
 QHLP = \
@@ -79,7 +79,7 @@ This option can be used for updating your instance file. as this scripts can add
 see what the script has done to your file. useful for debugging"""
 
 
-def setupParseArg():
+def setupParseArg(argv):
     parser = argparse.ArgumentParser(
         description=HELP_TEXT, formatter_class=RawTextHelpFormatter)
 
@@ -122,13 +122,13 @@ def setupParseArg():
     parser.add_argument('-l','--log', dest='log', action='store',
                         choices=['NOTSET','DEBUG','INFO', 'WARNING', 'ERROR','CRITICAL'],
                         help='Logging events')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return args
 
 
-def main():
+def main(argv):
 
-    args = setupParseArg()
+    args = setupParseArg(argv)
     if len(sys.argv) <= 1:
         log.critical("more than one argument is needed")
         exit(1)
@@ -142,4 +142,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

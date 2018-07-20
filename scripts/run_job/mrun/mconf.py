@@ -15,16 +15,15 @@ import socket
 
 import mexec # for host address / port
 
-STOPPED = "stopped"
 DIR = os.path.dirname(os.path.realpath(__file__))
 QFLEX_DIR = DIR.rsplit('/', 2)[0]
 
-SAMPLE_TEXT = """{0}/qemu/aarch64-softmmu/qemu-system-aarch64 -machine virt -cpu cortex-a57 -smp 4 
--m 2000 -kernel {0}/images/ubuntu-16.04-blank/vmlinuz-4.4.0-83-generic 
--initrd {0}/images/ubuntu-16.04-blank/initrd.img-4.4.0-83-generic -append 'root=/dev/sda2' 
--global virtio-blk-device.scsi=off -device virtio-scsi-device,id=scsi 
--drive file={0}/images/ubuntu-16.04-blank/ubuntu-16.04-lts-blank.qcow2,id=rootimg,cache=unsafe,if=none 
--device scsi-hd,drive=rootimg -rtc driftfix=slew -serial telnet:localhost:5555,server,nowait -name q1 -accel tcg,thread=single -nographic 
+SAMPLE_TEXT = """{0}/qemu/aarch64-softmmu/qemu-system-aarch64 -machine virt -cpu cortex-a57 -smp 4
+-m 2000 -kernel {0}/images/ubuntu-16.04-blank/vmlinuz-4.4.0-83-generic
+-initrd {0}/images/ubuntu-16.04-blank/initrd.img-4.4.0-83-generic -append 'root=/dev/sda2'
+-global virtio-blk-device.scsi=off -device virtio-scsi-device,id=scsi
+-drive file={0}/images/ubuntu-16.04-blank/ubuntu-16.04-lts-blank.qcow2,id=rootimg,cache=unsafe,if=none
+-device scsi-hd,drive=rootimg -rtc driftfix=slew -serial telnet:localhost:5555,server,nowait -name q1 -accel tcg,thread=single -nographic
 -netdev user,id=net1,hostfwd=tcp::2220-:22 -device virtio-net-device,mac=52:54:00:00:02:12,netdev=net1""".format(QFLEX_DIR)
 
 
@@ -173,10 +172,16 @@ class instance:
             # thread.start()
 
     def isStopped(self):
-        return self.__psutil.status() == STOPPED
+        return self.__psutil.status() == psutil.STATUS_STOPPED
 
     def isStarted(self):
         return self.__started
+
+    def process_status(self):
+        return self.__psutil.status()
+
+    def isTerminated(self):
+        return self.__psutil.status() == psutil.STATUS_ZOMBIE
 
     def getPid(self):
         return self.__pid
@@ -370,8 +375,6 @@ class instance:
         else:
             self.__load = "{0}-{1}".format(val, self.__name)
             self.__log.warning("overwriting existing load option for instance {0}".format(self.__name))
-
-
 
     def setQuantum(self, val):
         self.__log.debug("Setting quantum value {0} name for instance {1}".format(val, self.__name))
