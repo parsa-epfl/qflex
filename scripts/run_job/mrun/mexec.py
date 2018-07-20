@@ -64,7 +64,7 @@ class executor:
         self.__setLogger()
 
         self.__exitstatus = exithandler(
-            ['None', 'GENDONE', 'CONVERTDONE', 'UPATE/OUTPUT DONE', 'GENERR', 'RUNERR', 'NETERR', 'KILL'])
+            ['None', 'GENDONE', 'CONVERTDONE', 'UPATE/OUTPUT DONE', 'GENERR', 'RUNERR', 'NETERR', 'KILL', 'DONE'])
         self.__instances = []
         self.__pids = []
         self.__updateFile = self.__cleanRequested = False
@@ -76,7 +76,6 @@ class executor:
         self.__ns = mnet.net()
         atexit.register(self.__cleanup)
         self.__configSetup()
-
 
     def __setLogger(self):
         if self.__args.log:
@@ -108,7 +107,6 @@ class executor:
 
         time.sleep(2)
         self.__cleanRequested = True
-
 
     def __configSetup(self):
         if self.__args.gen:
@@ -152,7 +150,6 @@ class executor:
             # if i.getUserNetwork() in user_nets:
             #     raise Exception, "found duplicate user networks in instance files and thats not allowed"
             #     user_nets[i.getUserNetwork()] = 1
-
 
     def __setupInstances(self):
         self.__instances = self.__cfg.parse(self.__args.run)
@@ -241,7 +238,6 @@ class executor:
             else:
                 self.__log.critical("no communication protocol defined")
 
-
             self.__getPids()
             self.__log.debug("All subprocesses have been started! {0}".format(self.__pids))
 
@@ -254,7 +250,6 @@ class executor:
         for i in self.__instances:
             i.start()
 
-
     def __startExecution(self):
         self.__log.debug("Execution: Starting Instances ...")
         self.__startInstances()
@@ -264,6 +259,10 @@ class executor:
             if self.__cleanRequested:
                 self.__log.debug("Execution: clean-up requested")
                 break
+            if self.__allTerminated():
+                self.__log.debug("Execution: all instances terminated, requesting clean-up")
+                self.__cleanup()
+                self.__exitstatus.setStatus('DONE')
             if self.__allStopped():
                 num = num +1
                 self.__log.debug("Execution: Iterating {0}".format(num))
@@ -370,18 +369,27 @@ class executor:
             if i is not None:
                 if not i.isStopped():
                     return False
-                return True
             else:
                 self.__log.critical('instance {0} is None'.format(i.getName()))
+        return True
 
     def __allStarted(self):
         for i in self.__instances:
             if i is not None:
                 if not i.isStarted():
                     return False
-                return True
+            else:
+                self.__log.critical('instance {0} is Noen'.format(i.getName()))
+        return True
+
+    def __allTerminated(self):
+        for i in self.__instances:
+            if i is not None:
+                if not i.isTerminated():
+                    return False
             else:
                 self.__log.critical('instance {0} is None'.format(i.getName()))
+        return True
 
 
     def __iterate(self):
