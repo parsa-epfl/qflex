@@ -436,7 +436,8 @@ class qmp_shell():
         #self.__startProcess()
 
     def executecmd(self, cmd):
-        self.__qemu.read_exec_command(cmd)
+        if self.__qemu:
+            self.__qemu.read_exec_command(cmd)
 
     def __startProcess(self):
         while True:

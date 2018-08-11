@@ -12,10 +12,13 @@ import Queue
 import logging as log
 import time
 import socket
+import signal
 
 import mexec # for host address / port
 
 STOPPED = "stopped"
+ZOMBIE = "zombie"
+
 DIR = os.path.dirname(os.path.realpath(__file__))
 QFLEX_DIR = DIR.rsplit('/', 2)[0]
 
@@ -67,7 +70,10 @@ class instance:
 
     def executeQMPInner(self,cmd):
         #self.__qmpshell.queueCommand(cmd)
-        self.__qmpshell.executecmd(cmd)
+        try:
+            self.__qmpshell.executecmd(cmd)
+        except Exception as e:
+            self.__log.critical("couldnt execute qmp command {0} for instance: {1} Terminating".format(cmd, self.__name))
 
     def cleanup(self):
         if self.__qmpshell is not None:
@@ -76,6 +82,11 @@ class instance:
 
         self.__log.debug("instance: {0} Terminating" .format(self.__name))
         self.__psutil.terminate()
+
+        time.sleep(1)
+        # if self.__psutil.is_running():
+        #     self.__log.debug("Killing instance: {0} with SIGKILL".format(self.__name))
+        #     os.kill(self.__pid, signal.SIGKILL)
 
     def outputCMD(self):
         output = ""
@@ -107,6 +118,25 @@ class instance:
 
     def nodeSpecificRequest(self, cmd):
         self.executeQMP(str(cmd.strip() + "_" + self.__name))
+
+
+    def exists(self):
+        var = psutil.pid_exists(self.__pid)
+        return var
+
+    def __isZombie(self):
+        return self.__psutil.status() == ZOMBIE
+
+
+
+    def checkHealth(self):
+        if self.__isZombie():
+            f = self.__psutil.terminate()
+            self.__log.critical("Execution: terminating instance {0}".format(self.__name))
+            return False
+
+
+
 
     def performPendingCmd(self):
         while self.__pendingCmdQueue.not_empty:
@@ -171,6 +201,9 @@ class instance:
             #     target=self.__startQMPshellInner, args=(s,), name="qmp-{0}".format(self.__name))
             # thread.daemon = True  # Daemonize thread
             # thread.start()
+
+
+
 
     def isStopped(self):
         return self.__psutil.status() == STOPPED
@@ -296,7 +329,7 @@ class instance:
         self.__setOptionalName(sname)
 
         if (self.__name is None):
-            self.setName(self.__optionalName)
+            self.setNameOpt(self.__optionalName)
 
     def hasQMPopts(self):
         return self.__usingqmp
@@ -320,7 +353,7 @@ class instance:
 
         return self.__qmpip, self.__qmpport
 
-    def setName(self, name):
+    def setNameOpt(self, name):
         print "no name given! adding name to your command for instance {0}".format(self.__id)
         self.__name = name  # extracted from filename
         self.__cmd.extend(["-name", self.__name])
@@ -411,6 +444,14 @@ class instance:
 
     def getName(self):
         return self.__name
+
+    def setName(self, str):
+        for index, item in enumerate(self.__cmd):
+            if item is None:
+                continue
+
+            if (item == "-name"):
+                self.__cmd[index+1] = self.__optionalName
 
     def __setOptionalName(self, opt):
         self.__optionalName = opt

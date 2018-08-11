@@ -12,6 +12,7 @@ import atexit
 import mqmp
 import logging as log
 import sys
+import subprocess
 
 TIMEOUT = time.time() + 15  # 15 seconds
 
@@ -97,14 +98,25 @@ class executor:
                 self.__log.debug("updating instance file {0}".format(i.getName()))
 
     def __cleanup(self):
-        if self.__args.ns is not None:
-            self.__log.debug("NS3 clean-up requested")
-            self.__ns.cleanup()
+        for i in self.__instances:
+            if i is not None:
+                i.cleanup()
+        time.sleep(1)
+
+        try:
+            if self.__args.ns is not None:
+                self.__log.debug("NS3 clean-up requested")
+                self.__ns.cleanup()
+        except subprocess.CalledProcessError as e:
+            self.__log.critical("bringing down tap/bridge network failed "
+                                "\n CMD = {0}"
+                                "\n return code = {1}"
+                                .format(e.cmd, e.returncode))
+
         if self.__server is not None:
             self.__log.debug("server clean-up requested")
             self.__server.cleanup()
-        for i in self.__instances:
-            i.cleanup()
+
 
         time.sleep(2)
         self.__cleanRequested = True
@@ -147,7 +159,9 @@ class executor:
         user_nets = {}
         for i in self.__instances:
             if i.getName() in names:
-                self.__log.critical("found duplicate names in instance files and that's not allowed. - each instance has to have a unique name")
+                self.__log.critical("found duplicate names in instance file {0} and that's not allowed. - each instance has to have a unique name".format(i.getFilename()))
+                i.setName(i.getFilename())
+                self.__log.critical("changing name to filename {0}".format(i.getName()))
             names[i.getName()] = 1
             # if i.getUserNetwork() in user_nets:
             #     raise Exception, "found duplicate user networks in instance files and thats not allowed"
@@ -180,23 +194,32 @@ class executor:
                 else:
                     self.__log.debug("using user-provided qmp options for {0}".format(i.getName()))
 
-    def __setupNS3(self):
-        # setup NS3 network for instances
-        if self.__args.ns is not None:
-            self.__log.debug("NS3 option enabled")
-            # if not os.path.isfile(self.__args.ns):
-            #     self.__log.critical("ns-3 script not found")
-            #     self.__exitstatus.setStatus('NETERR')
 
-            [i.setNetdev() for i in self.__instances]
-            self.__log.debug("creating NS3 config for instance {0}".format(i.getName()))
+    def __run_ns(self):
+        if self.__args.ns is not None:
             # create NS3 network for instances
             names = [i.getNetName() for i in self.__instances]
             self.__ns.setScriptPath(self.__args.ns)
 
-            self.__ns.configureNetwork(names)
+            try:
+                self.__ns.configureNetwork(names)
+            except Exception as e:
+                raise e
             # for i in self.__instances:
             #     i.activateSudo()
+
+    def __setupNS3(self):
+        # setup NS3 network for instances
+        if self.__args.ns is not None:
+            self.__log.debug("NS3 option enabled")
+            if not os.path.isdir(self.__args.ns):
+                self.__log.critical("ns-3 dir not found")
+                self.__exitstatus.setStatus('NETERR')
+                raise Exception, "{0} is not a valid directory".format(self.__args.ns)
+
+            [i.setNetdev() for i in self.__instances]
+            self.__log.debug("creating NS3 config for instance {0}".format(i.getName()))
+
 
     def __setOutput(self):
         if self.__args.output:
@@ -226,11 +249,24 @@ class executor:
 
         self.__setUpdateFiles()
         self.__setupNS3()
+
         self.__setOutput()
 
         if self.__args.output or self.__args.update:
             self.__exitstatus.setStatus('UPATE/OUTPUT DONE')
         else:
+            try:
+                self.__run_ns()
+            except subprocess.CalledProcessError as e:
+                self.__exitstatus.setStatus('NETERR')
+                self.__log.critical("creating tap/bridge network failed "
+                                    "\n CMD = {0}"
+                                    "\n return code = {1}"
+                                    .format(e.cmd, e.returncode))
+                self.__cleanup()
+                time.sleep(2)
+                return
+
             self.__setupExecution()
             time.sleep(1)
 
@@ -238,6 +274,7 @@ class executor:
                 for i in self.__instances:
                     i.startQMPshell()
                     time.sleep(1)
+                    self.__setupInputProcessing()
             else:
                 self.__log.critical("no communication protocol defined")
 
@@ -248,11 +285,16 @@ class executor:
             if self.__args.mprotocol:
                 self.__log.critical("multinode Protocol is not supported at the moment")
 
-            self.__setupInputProcessing()
+
 
     def __startInstances(self):
         for i in self.__instances:
             i.start()
+
+    def checkInstancesHealth(self):
+        for i in self.__instances:
+            if not i.checkHealth():
+                return False
 
 
     def __startExecution(self):
@@ -268,6 +310,11 @@ class executor:
                 num = num +1
                 self.__log.debug("Execution: Iterating {0}".format(num))
                 self.__iterate()
+            if not self.checkInstancesHealth():
+                break
+            if self.NoneExist():
+                self.__cleanup()
+                break
 
     def __getPids(self):
         for i in self.__instances:
@@ -319,7 +366,7 @@ class executor:
                 if x == "kill":
                     self.__cleanup()
                     self.__exitstatus.setStatus('KILL')
-                    break
+                    # break
                 elif x.startswith('savevm') or x.startswith('savevm-ext'):
                     for i in self.__instances:
                         i.nodeSpecificRequest(x)
@@ -370,28 +417,35 @@ class executor:
             if i is not None:
                 if not i.isStopped():
                     return False
-                return True
             else:
                 self.__log.critical('instance {0} is None'.format(i.getName()))
+        return True
+
+    def NoneExist(self):
+        for i in self.__instances:
+            if i is not None:
+                if i.exists():
+                    return False
+        return True
+
+
 
     def __allStarted(self):
         for i in self.__instances:
             if i is not None:
                 if not i.isStarted():
                     return False
-                return True
             else:
                 self.__log.critical('instance {0} is None'.format(i.getName()))
-
+        return True
 
     def __iterate(self):
         for i in self.__instances:
             if i is not None:
                 i.performPendingCmd()
-                time.sleep(2)
-                for i in self.__instances:
-                    self.__log.critical('instance {0} is taking its turn'.format(i.getName()))
-                    i.takeTurn()
+                i.checkZombieness()
+                self.__log.critical('instance {0} is taking its turn'.format(i.getName()))
+                i.takeTurn()
             else:
                 self.__log.critical('instance {0} is None'.format(i))
 

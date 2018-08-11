@@ -1,47 +1,45 @@
 #!/usr/bin/python
 
-from subprocess import Popen, PIPE, call
+from subprocess import Popen, PIPE, call, check_call
 import threading
 import logging as log
 import psutil
 import time
 import os
+import netifaces
 
-usingSudo = False
+# usingSudo = False
 
-def POPEN(*args):
-    returncode = POPEN_INNER(*args)
-    log.debug("returncode: {0}".format(returncode))
-
-
-def POPEN_INNER(*args):
+def CALL(*args):
     param = ""
     for i in args:
         param+=i+" "
-    if usingSudo:
-        param = "sudo " + param
-        log.debug("executing: {0}".format(param))
+    # if usingSudo:
+    #     param = "sudo " + param
 
-        return call(param,
-                    shell=True,
-                    stdin=PIPE,
-                    stdout=PIPE,
-                    stderr=PIPE)
-    else:
-        return call(param,
-                    shell=True,
-                    stdin=PIPE,
-                    stdout=PIPE,
-                    stderr=PIPE)
+    ret=check_call(param,
+                shell=True,
+                stdin=PIPE,
+                stdout=PIPE,
+                stderr=PIPE)
+
+    log.debug("performing: {0} with return code= {1}".format(param,ret))
+    return ret
+
 class tap:
     def cleanup(self):
-        # Bring down the taps
-        POPEN('ifconfig',self.__name,'down')
-        self.__log.debug("bringing down tap network: {0}".format(self.__name))
+        addr = netifaces.interfaces()
+        self.__log.debug("current interfaces = {0}".format(addr))
 
-        #sudo tunctl -d tap-lef
-        POPEN('tunctl', '-d', self.__name)
-        self.__log.debug("deleting tap network: {0}".format(self.__name))
+        for i in addr:
+            if i == self.__name:
+                # Bring down the taps
+                CALL('ifconfig',self.__name,'down')
+                self.__log.debug("bringing down tap interface: {0}".format(self.__name))
+
+                #sudo tunctl -d tap-lef
+                CALL('tunctl', '-d', self.__name)
+                self.__log.debug("deleting tap network: {0}".format(self.__name))
 
 
     def __init__(self, name):
@@ -50,10 +48,18 @@ class tap:
         self.__log = log.getLogger('mrun.logger')
 
         #  sudo tunctl -t tap-left
-        POPEN('tunctl','-t', self.__name)
+        addr = netifaces.interfaces()
+        self.__log.debug("current interfaces = {0}".format(addr))
+        for i in addr:
+            if i == self.__name:
+                self.cleanup()
+
+        CALL('tunctl','-t', self.__name)
         self.__log.debug("creating tap network: {0}".format(self.__name))
+
+
         #sudo ifconfig tap-left 0.0.0.0 promisc up
-        POPEN('ifconfig',self.__name,self.__addr,'promisc','up')
+        CALL('ifconfig',self.__name,self.__addr,'promisc','up')
         self.__log.debug("setting up tap network: {0} with address {1}".format(self.__name, self.__addr))
 
     def getName(self):
@@ -63,26 +69,40 @@ class bridge:
 
     def cleanup(self):
         # bring the bridge down
-        POPEN('ifconfig',self.__name,'down')
-        self.__log.debug("bringing down bridge network: {0}".format(self.__name))
+        addr = netifaces.interfaces()
+        self.__log.debug("current interfaces = {0}".format(addr))
+        self.__log.debug("cleaning interface = {0}".format(self.__name))
 
-        #Remove the taps from the bridge 
-        for t in self.__taps:
-            POPEN('brctl','delif',self.__name, t.getName())
-            self.__log.debug("removing tap {0} associated with bridge {1}".format(t.getName(), self.__name))
+        for i in addr:
+            if i == self.__name:
 
-        #Destroy the bridges
-        POPEN('brctl','delbr',self.__name)
-        self.__log.debug("deleting bridge network: {0}".format(self.__name))
+                CALL('ifconfig',self.__name,'down')
+                self.__log.debug("bringing down bridge network: {0}".format(self.__name))
+
+                #Remove the taps from the bridge
+                for t in self.__taps:
+                    CALL('brctl','delif',self.__name, t.getName())
+                    self.__log.debug("removing tap {0} associated with bridge {1}".format(t.getName(), self.__name))
+
+                #Destroy the bridges
+                CALL('brctl','delbr',self.__name)
+                self.__log.debug("deleting bridge network: {0}".format(self.__name))
 
     def __init__(self, name):
         self.__name = name
         self.__taps = []
         self.__log = log.getLogger('mrun.logger')
 
+        addr = netifaces.interfaces()
+        self.__log.debug("current interfaces = {0}".format(addr))
+
+        for i in addr:
+            if i == self.__name:
+                self.cleanup()
+
         #create the bridge
         # sudo brctl addbr br-left
-        POPEN('brctl','addbr',self.__name)
+        CALL('brctl','addbr',self.__name)
         self.__log.debug("creating bridge network: {0}".format(self.__name))
 
 
@@ -90,13 +110,13 @@ class bridge:
         self.__taps.append(t)
         #add tap interface to the bridge
         # sudo brctl addif br-left tap-left
-        POPEN('brctl','addif',self.__name, t.getName())
+        CALL('brctl','addif',self.__name, t.getName())
         self.__log.debug("adding tap {0} to bridge network: {1}".format(t.getName(), self.__name))
 
 
     def bridgeUp(self):
         #bring the bridge up
-        POPEN('ifconfig',self.__name,'up')
+        CALL('ifconfig',self.__name,'up')
         self.__log.debug("bringing up bridge network: {0}".format(self.__name))
 
 
@@ -105,7 +125,7 @@ class net:
         self.__taps = []
         self.__bridges = []
         self.__netnames = None
-        self.__nsScriptFile = None
+        self.__nsScriptDir = ""
         self.__ns_taps = []
         self.__log = log.getLogger('mrun.logger')
         self.__psutil = psutil.Process()
@@ -118,15 +138,20 @@ class net:
             b.cleanup()
         for t in self.__taps:
             t.cleanup()
+        addr = netifaces.interfaces()
+        self.__log.debug("Final interfaces after cleanup = {0}".format(addr))
 
 
 
     def setScriptPath(self, script):
-        self.__nsScriptFile = script
+        self.__nsScriptDir = script
 
     def configureNetwork(self, names):
         self.__log.debug("creating NS3 network")
-        self.__configureNetworkInner(names)
+        try:
+            self.__configureNetworkInner(names)
+        except Exception as e:
+            raise e
         # thread = threading.Thread(
         #     target=self.configureNetworkInner, args=(names,), name="ns3")
         # thread.daemon = True                            # Daemonize thread
@@ -135,32 +160,30 @@ class net:
     def __configureNetworkInner(self, names):
 
         self.__netNames = names
+        try:
+            for index, item in enumerate(names):
+                ns_name = item + "-ns"
 
-        for index, item in enumerate(names):
-            ns_name = item + "-ns"
+                t1 = tap(item)
+                self.__taps.append(t1)
+                t2 = tap(ns_name)
+                self.__taps.append(t2) # create tap for qemu and ns3
+                self.__ns_taps.append(ns_name)
+                # create bridge for the above
+                b = bridge("br-"+str(index))
+                self.__bridges.append(b)
 
-            t1 = tap(item)
-            t2 = tap(ns_name)
-            self.__taps.extend([t1, t2]) # create tap for qemu and ns3
-            self.__ns_taps.append(ns_name)
-            # create bridge for the above
-            b = bridge("br-"+str(index))
-            # add taps to the bridge
-            b.addTap(t1)
-            b.addTap(t2)
+                # add taps to the bridge
+                b.addTap(t1)
+                b.addTap(t2)
 
-            #bring the bridge up
-            b.bridgeUp()
+                #bring the bridge up
+                b.bridgeUp()
+        except Exception as e:
+            raise e
 
-            self.__bridges.append(b)
-
-        for n in self.__ns_taps:
-            self.__nsScriptFile += " {0}".format(n)
 
         os.environ["PATH"] += os.pathsep + "/usr/local/bin"
-
-        self.__log.debug("running ns3 script...")
-        self.__log.debug("performing... {0}".format(self.__nsScriptFile))
 
         try:
             os.environ["PATH"] = "/usr/local/bin" + os.pathsep + os.environ["PATH"]
@@ -175,15 +198,33 @@ class net:
             os.environ["LD_LIBRARY_PATH"] = "/usr/local/lib64" + os.pathsep + \
                                             "/usr/local/lib" + os.pathsep
 
-        cmd = []
-        cmd = self.__nsScriptFile.split()
+
+
+        self.__nsScriptDir = self.__nsScriptDir.strip()
+
+        temp_taps = ""
+        for n in self.__ns_taps:
+            temp_taps += " {0}".format(n)
+
+        command = "{0}{1}".format("tap-csma-virtual-machine-parsa", temp_taps)
+
+        cmd = ['./waf', '--run', command]
+        self.__log.debug("running ns3 script..")
+        self.__log.debug("performing.. {0} . cwd={1}".format(' '.join(cmd), self.__nsScriptDir))
+        
         #cmd.insert(0, 'sudo')
         #start the CSMA network
 
         self.__proc = Popen(cmd,
                         shell=False,
-                        stdin=PIPE, stdout=PIPE, stderr=PIPE)
+                        stdin=PIPE, stdout=PIPE, stderr=PIPE, cwd=self.__nsScriptDir)
+
+
+        log.debug("returncode: {0}".format(self.__proc.returncode))
 
         self.__pid = self.__proc.pid
         self.__log.info("starting instance: with pid: {0}".format(self.__pid))
+
+
+
         self.__psutil = psutil.Process(self.__pid)

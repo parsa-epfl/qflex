@@ -9,79 +9,102 @@ import logging as log
 import threading
 import os
 
+
+VERSION="1.0 (ALPHA)"
+
 HELP_TEXT = \
-    """
-Multinode Qemu Script Version ALPHA
+"""Multinode Qemu Script Version {}
 
 you can use this script for running multi-node setup and
 for that you need to pass a setup file (XML) that would provide the script
 with the location of your QEMU instance configurations. if you don't have the
 XML files ready, you can use the generate command as explained below to generate
 sample files that would make your life easier.
-"""
+
+""".format(VERSION)
+
+VERACT=\
+"""Multinode Qemu Script Version {}
+
+""".format(VERSION)
+
+VERHLP=\
+"""Show program version
+
+""".format(VERSION)
 
 GENHLP = \
-    """
-generate sample files for use with this script.
+"""generate sample files for use with this script.
 i.e. qemu_instance_sample_file and qemu_setup_sample_file
+
 """
 CONHLP = \
-    """
-Convert the text provided into a XML instance file. this options takes two arguments. 
+"""Convert the text provided into a XML instance file. this options takes two arguments. 
 the first is the text you wish to use - please use quotes for defining your command as spaces are 
-prne to causing misunderstandings. the second is your output file.
+prone to causing misunderstandings. the second is your output file.
+
 """
 RUNHLP = \
-    """
-run multinode emulation using the setup file provided
+""" Run multinode emulation using the setup file provided
+
 """
 OUTHLP = \
-    """
-Output the commands used by this script for running the instances. useful for debugging purposes
+"""Output the commands used by this script for running the instances. useful for debugging purposes
+
 """
 LDHLP = \
-    """
-Loads the snapshot provided. it will automatically append the instance name for instance specific load. 
+"""Loads the snapshot provided. it will automatically append the instance name for instance specific load. 
 NOTE: this uses loadext only
+
 """
 QHLP = \
-    """
-used in conjucnction wih the -r command for setting a quantum
+"""Used in conjucnction wih the -r command for setting a quantum
 which will be used to determine the desired quantum lock-step execution
 - this value represents the number of instruction that each qemu executes
 before switching to the next instance.
+
 """
 QMPHLP = \
-    """
-used in conjucnction wih the -r command for enabling qmp.
+"""Used in conjucnction wih the -r command for enabling qmp.
 i will use the qmp option provided in instance files if any available.
 if no qmp option provided, this script will generate one for each instance.
+
 """
 NSHLP = \
-    """
-Setup NS3 network by passing in the location of your ns3 source file- e.g. tap-csma-virtual-machine-parsa.cc.
+"""Setup NS3 network by passing in the location of your ns3 source file- e.g. tap-csma-virtual-machine-parsa.cc.
 NOTE: NS3 shold be compiled with our PARSA script beforehand.
 mrun will take care of setting up all the options for instances - so no need for providing them.
 also, mrun will setup all the networks required. so no need to do that as well. setting up networks yourself
 might cause conflict with using this option.
+
 """
 NETHLP = \
-    """
-used in conduction with multi-node network. sets up host"""
+"""Used in conduction with multi-node network. sets up host
+
+"""
 
 MNHLP = \
-    """
-enable multinode protocol - currently in development."""
+   """enable multinode protocol - currently in development.
+   
+"""
 
 UPHLP = \
-    """
-This option can be used for updating your instance file. as this scripts can add to it and you might want to
-see what the script has done to your file. useful for debugging"""
+"""This option can be used for updating your instance file. as this scripts can add to it and you might want to
+see what the script has done to your file. useful for debugging
 
+"""
+
+LOGHLP=\
+"""Pass one of the following options. 
+['NOTSET','DEBUG','INFO', 'WARNING', 'ERROR','CRITICAL']
+
+"""
 
 def setupParseArg():
     parser = argparse.ArgumentParser(
         description=HELP_TEXT, formatter_class=RawTextHelpFormatter)
+
+    parser.add_argument("-v", "--version", help=VERHLP, action='version',version=VERACT)
 
     parser.add_argument("-g", "--generate", help=GENHLP,
                         action='store_true', dest="gen")
@@ -110,18 +133,19 @@ def setupParseArg():
     parser.add_argument("-qmp", help=QMPHLP,
                         action='store_true', dest="qmp")
 
-    parser.add_argument("-q","--quantum", help=QHLP,
+    parser.add_argument("-q","--quantum", help=QHLP,metavar='',
                         dest="quantum")
 
-    parser.add_argument("-lo", "--load", help=LDHLP,
+    parser.add_argument("-lo", "--load", help=LDHLP,metavar='',
                         dest="load")
 
     parser.add_argument("-u","--update-file", help=UPHLP,
                         action='store_true', dest="update")
 
-    parser.add_argument('-l','--log', dest='log', action='store',
+    parser.add_argument('-l','--log', dest='log', action='store', metavar='',
                         choices=['NOTSET','DEBUG','INFO', 'WARNING', 'ERROR','CRITICAL'],
-                        help='Logging events')
+                        help=LOGHLP)
+
     args = parser.parse_args()
     return args
 
