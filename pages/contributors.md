@@ -20,6 +20,7 @@ sidebar: "true"
 
 ## Past Contributors
 - Nora Abi Akar
+- Abhinav Aggarwal
 - Somya Arora
 - John Biggs
 - Nikhil Chaturvedi
