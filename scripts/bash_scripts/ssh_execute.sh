@@ -3,23 +3,23 @@
 # licensing terms, in addition to software that was developed internally.
 # Anyone interested in using QFlex needs to fully understand and abide by the
 # licenses governing all the software components.
-# 
+#
 ##### Software developed externally (not by the QFlex group)
-# 
+#
 #     * [NS-3](https://www.gnu.org/copyleft/gpl.html)
 #     * [QEMU](http://wiki.qemu.org/License)
 #     * [SimFlex] (http://parsa.epfl.ch/simflex/)
-# 
+#
 ##### Software developed internally (by the QFlex group)
 # **QFlex License**
-# 
+#
 # QFlex
 # Copyright &copy; 2016, Parallel Systems Architecture Lab, EPFL
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without modification,
 # are permitted provided that the following conditions are met:
-# 
+#
 #     * Redistributions of source code must retain the above copyright notice,
 #       this list of conditions and the following disclaimer.
 #     * Redistributions in binary form must reproduce the above copyright notice,
@@ -29,7 +29,7 @@
 #       nor the names of its contributors may be used to endorse or promote
 #       products derived from this software without specific prior written
 #       permission.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 # ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 # WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -49,21 +49,16 @@
 #################################################################################
 
 HOST="localhost"
-PASSWORD="cloudsuite"
-PORT=222$1
 USER="cloudsuite"
-TIMEOUT="20"
-
-if [ -e "$DIR/commands/cmd_$1.sh" ]; then
-    COMMAND_SCRIPT=cmd_$1
-else
-    COMMAND_SCRIPT=cmd_default
-fi
+PASSWORD="cloudsuite"
+PORT=$1
+TIMEOUT="60"
+COMMAND_SCRIPT=$2
 
 /usr/bin/expect <<EOD
 set timeout $TIMEOUT
 
-spawn sh -c "ssh $USER@$HOST -p$PORT -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no 'bash -s' < $DIR/commands/$COMMAND_SCRIPT.sh" 
+spawn sh -c "ssh $USER@$HOST -p$PORT -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no 'bash -s' < $COMMAND_SCRIPT"
 expect {
   timeout { send_user "\nFailed to get password prompt\n"; exit 1 }
   eof { send_user "\nSSH failure for $HOST\n"; exit 1 }
