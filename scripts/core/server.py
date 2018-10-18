@@ -1,9 +1,7 @@
-#!/usr/bin/python
-
+import time
+import Queue
 import socket
 import threading
-import Queue
-import time
 
 class server:
     def __init__(self, hostaddress, hostport):
@@ -73,8 +71,7 @@ class server:
 
     def setupServer(self):
         # create a socket object
-        self.__serversocket = socket.socket(
-            socket.AF_INET, socket.SOCK_STREAM)
+        self.__serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         self.__serversocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         print "Setting up Server with IP: %s - port number: %i " % (self.__hostaddress, self.__hostport)
@@ -91,8 +88,6 @@ class server:
             # establish a connection
             clientsocket, addr = self.__serversocket.accept()
 
-
-
             if clientsocket != None:
                 self.__initialized = True
                 self.__numclients += 1
@@ -103,9 +98,8 @@ class server:
 
                 self._sPairs.append([clientsocket, name])
 
-
             print("Got a connection from %s" % str(addr))
 
             thread = threading.Thread(target=self.__clientProcess, args=(clientsocket,), name=str("client_process" + str(self.__numclients)))
-            thread.daemon = True                            # Daemonize thread
+            thread.daemon = True # Daemonize thread
             thread.start()

@@ -52,7 +52,7 @@ class QEMUMonitorProtocol(object):
         @note No connection is established, this is done by the connect() or
               accept() methods
         """
-        self.__log = log.getLogger('mrun.logger')
+        self.__log = log.getLogger(__name__)
         self.__events = []
         self.__address = address
         self._debug = debug

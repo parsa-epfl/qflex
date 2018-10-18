@@ -1,3 +1,5 @@
+THIS README IS OUTDATED
+
 To run an instance of QEMU using predefined scripts you need to create **user.cfg** file in `scripts/` folder.
 *This file acts as a user-specific configuration file which will be sourced to the script `run_instance.sh`.*
 
