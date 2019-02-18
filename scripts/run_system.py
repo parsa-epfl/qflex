@@ -2,7 +2,7 @@ import sys
 import logging
 import argparse
 
-import core.system as system
+import system.system as system
 
 def run_system(argv):
     # Parse arguments

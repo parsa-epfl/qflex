@@ -52,7 +52,7 @@ def validate_instance(config_path):
     try:
         image_repo_path = config.get("Environment", "image_repo_path")
         if not os.path.isdir(image_repo_path):
-            logging.error("Disk images repository is not found at '{0}'".fromat(image_repo_path))
+            logging.error("Disk images repository is not found at '{0}'".format(image_repo_path))
             valid = False
     except ConfigParser.NoOptionError:
         logging.error("Disk images repository path is not set in config file")
@@ -60,29 +60,15 @@ def validate_instance(config_path):
     # Disk image path
     try:
         disk_image_path = config.get("Environment", "disk_image_path")
-        if not os.path.isfile(os.path.join(image_repo_path, disk_image_path)):
-            logging.error("Disk image is not found at '{0}'".format(os.path.join(image_repo_path, disk_image_path)))
+        disk_image_path = os.path.join(image_repo_path, disk_image_path)
+        if not os.path.isfile(disk_image_path):
+            logging.error("Disk image is not found at '{0}'".format(disk_image_path))
             valid = False
+        flash_path = os.path.join(os.path.dirname(disk_image_path),"flash")
+        if not os.path.isfile(flash_path+"0.img") or not os.path.isfile(flash_path+"1.img"):
+            logging.error("Flash image is not found at '{0}'".format(flash_path))
     except ConfigParser.NoOptionError:
         logging.error("Disk image path is not set in config file")
-        valid = False
-    # Kernel path
-    try:
-        kernel_path = config.get("Environment","kernel_path")
-        if not os.path.isfile(os.path.join(image_repo_path, kernel_path)):
-            logging.error("Kernel is not found at '{0}'".format(os.path.join(image_repo_path, kernel_path)))
-            valid = False
-    except ConfigParser.NoOptionError:
-        logging.error("Kernel path is not set in config file")
-        valid = False
-    # Initial RAM disk path
-    try:
-        initrd_path = config.get("Environment", "initrd_path")
-        if not os.path.isfile(os.path.join(image_repo_path, initrd_path)):
-            logging.error("Initial RAM disk is not found at '{0}'".format(os.path.join(image_repo_path, initrd_path)))
-            valid = False
-    except ConfigParser.NoOptionError:
-        logging.error("Initial RAM disk path is not set in config file")
         valid = False
     # External snapshot path
     if config.has_option("Environment", "starting_snapshot"):
