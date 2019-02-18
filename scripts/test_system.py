@@ -7,7 +7,7 @@ import threading
 import subprocess
 import ConfigParser
 
-from core.validation import validate_system
+from system.validation import validate_system
 from run_system import run_system
 
 FNULL = open(os.devnull, 'w')

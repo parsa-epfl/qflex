@@ -55,18 +55,13 @@ class instance:
         image_repo_path = config.get("Environment", "image_repo_path")
         disk_image_path = config.get("Environment", "disk_image_path")
         disk_image_path = os.path.join(image_repo_path, disk_image_path)
+        flash_path = os.path.join(os.path.dirname(disk_image_path),"flash")
         qflex_command.extend(["-global", "virtio-blk-device.scsi=off"])
         qflex_command.extend(["-device", "virtio-scsi-device,id=scsi"])
-        qflex_command.extend(["-drive", "file=" + disk_image_path + ",id=rootimg,cache=unsafe,if=none"])
-        qflex_command.extend(["-device", "scsi-hd,drive=rootimg"])
-        # Kernel
-        kernel_path = config.get("Environment","kernel_path")
-        kernel_path = os.path.join(image_repo_path, kernel_path)
-        qflex_command.extend(["-kernel", kernel_path])
-        # Initial RAM disk
-        initrd_path = config.get("Environment", "initrd_path")
-        initrd_path = os.path.join(image_repo_path, initrd_path)
-        qflex_command.extend(["-initrd", initrd_path])
+        qflex_command.extend(["-drive", "file=" + disk_image_path + ",id=hd0,if=none"])
+        qflex_command.extend(["-device", "scsi-hd,drive=hd0"])
+        qflex_command.extend(["-pflash", flash_path + "0.img"])
+        qflex_command.extend(["-pflash", flash_path + "1.img"])
         # Number of cores
         smp = config.getint("Machine", "qemu_core_count")
         qflex_command.extend(["-smp", str(smp)])
@@ -104,7 +99,6 @@ class instance:
             starting_snapshot = config.get("Environment", "starting_snapshot")
             if starting_snapshot:
                 qflex_command.extend(["-loadext", starting_snapshot])
-
         # Simulation
         if config.has_section("Simulation"):
             # Simulation type
@@ -142,20 +136,17 @@ class instance:
                         qflex_command.extend(["-flexus", "mode=timing,length=" + simulation_length + ",simulator=" + flexus_timing_path + ",config=" + user_postload_path])
                         # Hardwired features
                         qflex_command.extend(["-singlestep"])
-                        qflex_command.extend(["-tb-size", "1"])
                         qflex_command.extend(["-d", "nochain"])
                         qflex_command.extend(["-d", "in_asm"])
-
         # Name
         qflex_command.extend(["-name", self.__name])
-
         # Hardwired features
         qflex_command.append("-nographic")
         qflex_command.append("-exton")
         qflex_command.extend(["-accel", "tcg,thread=single"])
         qflex_command.extend(["-rtc", "driftfix=slew"])
-        qflex_command.extend(["-append", "'root=/dev/sda2'"])
-        qflex_command.extend(["-append", "'console=ttyAMA0'"])
+        # qflex_command.extend(["-append", "'root=/dev/sda2'"])
+        # qflex_command.extend(["-append", "'console=ttyAMA0'"])
         self.__cmd = qflex_command
         # Full command appears later before executing an instance
         # self.__log.debug("Command '{0}' set for instance '{1}'".format(' '.join(self.__cmd), self.__name))

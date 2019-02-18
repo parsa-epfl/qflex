@@ -11,11 +11,11 @@ def input_to_number(input_number):
     base = parsed_input.groups()[0]
     power = parsed_input.groups()[1]
     if power == 'k'or power == 'K':
-        return int(base) * 1000;
+        return int(base) * 1000
     elif power == 'm'or power == 'M':
-        return int(base) * 1000000;
+        return int(base) * 1000000
     elif power == 'k'or power == 'K':
-        return int(base) * 1000000000;
+        return int(base) * 1000000000
     else:
         return int(base)
 

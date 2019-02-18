@@ -6,8 +6,8 @@ import logging
 import argparse
 import ConfigParser
 
-import core.helpers as helpers
-import core.validation as validation
+import system.helpers as helpers
+import system.validation as validation
 from deploy import deploy_system
 from run_system import run_system
 
@@ -69,8 +69,8 @@ def run_job(arguments):
         logging.error("Parsing errors in config file '{0}'".format(args.config_path))
         return False
     # Prepare config files
-    # Write instance config files in the workspace: Remove simulation section from each file, if available
-    # Write job config file in the workspace: Replace instances with their new path in the job config file
+    # 1- Write instance config files in the workspace: Remove simulation section from each file, if available
+    # 2- Write job config file in the workspace: Replace instances with their new path in the job config file
     try:
         # Save instances
         instances = job_config.items("Instances")
@@ -80,7 +80,7 @@ def run_job(arguments):
         # Keep track of all instances names and config paths
         instances_names = []
         instances_configs = []
-        # Empty instances section
+        # Clear instances section, to be populated later
         job_config.remove_section("Instances")
         job_config.add_section("Instances")
     except ConfigParser.NoSectionError:
@@ -121,7 +121,7 @@ def run_job(arguments):
                         instances_names.append(instance_name)
                         instances_configs.append(instance_config)
             else:
-                logging.error("Config file for instance '{0}' is not found at '{0}'".format(instance_name, instance_path))
+                logging.error("Config file for instance '{0}' is not found at '{1}'".format(instance_name, instance_path))
                 return False
     # Write new job config file in the workspace
     job_config_path = os.path.join(host_workspace, os.path.basename(args.config_path))
@@ -176,7 +176,6 @@ def run_job(arguments):
 
     # Collect job parameters
     master_instance    = job_config.get("Job", "master_instance")
-    image_repo_path    = job_config.get("Job", "image_repo_path")
     flexus_path        = job_config.get("Job", "flexus_path")
     flexus_trace_path  = job_config.get("Job", "flexus_trace_path")
     flexus_timing_path = job_config.get("Job", "flexus_timing_path")
@@ -288,7 +287,7 @@ def run_job(arguments):
         # Deploy phases
         if args.deploy:
             deploy_arg_list.extend(["--step_name", "checkpoint-gen-{:03d}".format(i), "--host_workspace", checkpoints_path, "--config_name", "checkpoint_system.ini"])
-            deploy.deploy(deploy_arg_list)
+            deploy_system(deploy_arg_list)
             del deploy_arg_list[-6:]
         else:
             run_system([job_config_path, "-o", checkpoints_path])
@@ -349,12 +348,12 @@ def run_job(arguments):
             job_config.write(job_file)
             job_file.close()
             # Deploy phases
-            # if args.deploy:
-            #     deploy_arg_list.extend(["--step_name", "simulation-{:03d}-{:03d}".format(i, j), "--host_workspace", simulation_path, "--config_name", "simulation_system.ini"])
-            #     deploy.deploy(deploy_arg_list)
-            #     del deploy_arg_list[-6:]
-            # else:
-            #     run_system([job_config_path, "-o", simulation_path])
+            if args.deploy:
+                deploy_arg_list.extend(["--step_name", "simulation-{:03d}-{:03d}".format(i, j), "--host_workspace", simulation_path, "--config_name", "simulation_system.ini"])
+                deploy_system(deploy_arg_list)
+                del deploy_arg_list[-6:]
+            else:
+                run_system([job_config_path, "-o", simulation_path])
 
 ## Execute script
 if __name__ == '__main__':
