@@ -5,7 +5,7 @@ QFlex is a full-system cycle-accurate computer architecture simulator of multi-n
 
 More information is available in the QFlex [website][qfw].
 
-[![QFlex](https://parsa-epfl.github.io/qflex/public/images/QFlex.png)](http://parsa-epfl.github.io/qflex/)
+[![QFlex](http://qflex.epfl.ch/wp-content/uploads/2018/09/QFlex.png)](http://qflex.epfl.ch/)
 
 # Licensing #
 
@@ -23,9 +23,9 @@ QFlex is still a work in progress, and at this stage, we provide limited functio
 
 We encourage QFlex users to use GitHub issues for requests for enhacements, questions or bug fixes.
 
-[qfw]: http://parsa-epfl.github.io/qflex/
-[qfl]: http://parsa-epfl.github.io/qflex//pages/license/
-[qfd]: http://parsa-epfl.github.io/qflex/pages/download/
+[qfw]: http://qflex.epfl.ch/
+[qfl]: http://qflex.epfl.ch/license/
+[qfd]: http://qflex.epfl.ch/#download
 [csdc]: http://cloudsuite.ch/datacaching/
 
 
