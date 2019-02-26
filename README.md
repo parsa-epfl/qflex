@@ -26,6 +26,6 @@ We encourage QFlex users to use GitHub issues for requests for enhacements, ques
 [qfw]: http://qflex.epfl.ch/
 [qfl]: http://qflex.epfl.ch/license/
 [qfd]: http://qflex.epfl.ch/#download
-[csdc]: http://cloudsuite.ch/datacaching/
+[csdc]: https://github.com/parsa-epfl/cloudsuite/blob/master/docs/benchmarks/data-caching.md
 
 
