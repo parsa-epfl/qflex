@@ -12,7 +12,7 @@ import instance
 import validation
 import ns3network
 
-class system:
+class QFSystem(object):
     def __init__(self, config_path):
         # Setup
         self.__config_path = config_path
@@ -29,8 +29,11 @@ class system:
         atexit.register(self.exit)
 
     ## Configuration
-    # Validate and parse system config file and associated instance config files
     def parse_system(self):
+        """
+        Validate and parse system config file and associated instance config files
+        """
+        
         # Validate system config files
         # System validation includes per-instance validation
         if validation.validate_system(self.__config_path):

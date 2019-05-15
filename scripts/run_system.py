@@ -2,7 +2,7 @@ import sys
 import logging
 import argparse
 
-import system.system as system
+from runjob.system import QFSystem
 
 def run_system(argv):
     # Parse arguments
@@ -32,7 +32,7 @@ def run_system(argv):
             logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
 
     # Parse system
-    qflex_system = system.system(args.file)
+    qflex_system = QFSystem(args.file)
     if not qflex_system.parse_system():
         return False
 

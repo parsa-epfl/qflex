@@ -12,7 +12,7 @@ import helpers
 
 qemu_path = "qemu/aarch64-softmmu/qemu-system-aarch64"
 
-class instance:
+class QFInstance:
     ## Constructor: create a new instance with an id, a name, and a config file
     def __init__(self, id, name, file):
         # Instance
