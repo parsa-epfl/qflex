@@ -8,7 +8,7 @@ import threading
 import subprocess
 import ConfigParser
 
-import instance
+from instance import QFInstance
 import validation
 import ns3network
 
@@ -37,13 +37,14 @@ class QFSystem(object):
         # Validate system config files
         # System validation includes per-instance validation
         if validation.validate_system(self.__config_path):
+            logging.info("System configuration validated successfully.")
             # Set up config parser
             config = ConfigParser.ConfigParser()
             config.read(self.__config_path)
             # Parse Instances
             instances_list = config.items("Instances")
             for i, (instance_name, instance_path) in enumerate(instances_list):
-                self.__instances.append(instance.instance(i, instance_name, instance_path))
+                self.__instances.append(QFInstance(i, instance_name, instance_path))
                 self.__instances[i].parse_instance()
 
             # Parse system parameters
@@ -73,6 +74,7 @@ class QFSystem(object):
                             i.set_quantum(quantum)
 
             # Config files are valid
+            logging.info("System configuration parsed successfully.")
             return True
         else:
             self.__log.error("Config files are not valid")

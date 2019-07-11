@@ -74,10 +74,16 @@ def validate_instance(config_path):
     if config.has_option("Environment", "starting_snapshot"):
         starting_snapshot = config.get("Environment", "starting_snapshot")
         if starting_snapshot:
-            snapshot_path = os.path.join(os.path.dirname(os.path.join(image_repo_path, disk_image_path)), starting_snapshot)
+            snapshot_path = os.path.join(
+                os.path.dirname(os.path.join(image_repo_path, disk_image_path)),
+                starting_snapshot)
             if not os.path.isdir(snapshot_path):
-                logging.error("Disk image starting snapshot is not found at '{0}'".format(os.path.join(os.path.dirname(os.path.join(image_repo_path, disk_image_path)), starting_snapshot)))
+                logging.error("Disk image starting snapshot is not found at '{0}'".format(
+                    os.path.join(os.path.dirname(os.path.join(image_repo_path, disk_image_path)), starting_snapshot)))
                 valid = False
+
+    else: # No starting snapshot!
+        logging.info("No starting snapshot is set for this instance.")
 
     ## Machine
     # Number of cores
