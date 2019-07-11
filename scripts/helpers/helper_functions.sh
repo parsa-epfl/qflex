@@ -63,7 +63,7 @@ set_variable(){
     if [ ! -z $PARA_VALUE ]; then
         printf "[  ${PURPLE}VARIABLE  ${NC}] $PARA = ${PARA_VALUE}\n"
     else
-        if [ ! -z $PASSED_VALUE ]; then
+        if [ ! -z "$PASSED_VALUE" ]; then
             eval $PARA=$PASSED_VALUE
             printf "[  ${PURPLE}VARIABLE  ${NC}] $PARA = ${PASSED_VALUE}\n"
         else
@@ -82,6 +82,19 @@ Disk_Config() {
     -device scsi-hd,drive=rootimg"
 }
 
+# Functions for Pflash parameters
+PFlash_Config() {
+    PF0_VAL_FROM_CFG="${PF0}"
+    PF1_VAL_FROM_CFG="${PF1}"
+    #echo "PFlash device 0: $PF0_VAL_FROM_CFG"
+    #echo "PFlash device 1: $PF1_VAL_FROM_CFG"
+    #PFLASH_CONFIG="-drive if=pflash,file=${PF0_VAL_FROM_CFG},readonly=on \
+        #-drive if=pflash,file=${PF1_VAL_FROM_CFG},readonly=on"
+    PFLASH_CONFIG="-drive if=pflash,file=${PF0_VAL_FROM_CFG} \
+        -drive if=pflash,file=${PF1_VAL_FROM_CFG}"
+    #echo "PFLASH_CONFIG string: $PFLASH_CONFIG"
+}
+
 # Functions for Network Configuration
 Network_User() {
     NETWORK="$1"
@@ -89,10 +102,10 @@ Network_User() {
         NETWORK_CONFIG=""
         return 0
     fi
-
+    SSH_PORT="$2"
     MAC="52:54:00:00:00:00"
     echo Network Configured for NETWORK_USER
-    NETWORK_CONFIG="-netdev user,id=net1,hostfwd=tcp::2220-:22 \
+    NETWORK_CONFIG="-netdev user,id=net1,hostfwd=tcp::${SSH_PORT}-:22 \
     -device virtio-net-device,mac=${MAC},netdev=net1"
 }
 
