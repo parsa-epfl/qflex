@@ -70,6 +70,8 @@ UNET_PORT="2222" # default val, can override from cmd
 usage() {
     echo -e "\nUsage: $0 "
     echo -e "use -gdb to run the exact same command with debugging."
+    echo -e "use -valgrind to run the exact same command with memcheck enabled."
+    echo -e "use -ldow to run the exact same command, overwriting LD_LIBRARY_PATH for debugging purposes."
     echo -e "use -mult (--multiple) option to set up multiple instances (default: single instance)"
     echo -e "use -lo=snapshot, where snapshot is name of snapshot (default: boot)"
     echo -e "To use with Flexus trace add the -tr option"
@@ -99,6 +101,14 @@ do
     case $i in
         -gdb)
         GDB_ENABLE="TRUE"
+        shift
+        ;;
+        -valgrind)
+        VALGRIND_ENABLE="TRUE"
+        shift
+        ;;
+        -ldow)
+        LDPATH_OVERWRITE="TRUE"
         shift
         ;;
         -mult|--multiple)
@@ -276,7 +286,7 @@ if [ "${TRACE}" = "TRUE" ]; then
         exit 1
     fi
     echo Creating a configuration file for Flexus.
-    echo $FLEXUS_CORE_NUM >> $RUN_FOLDER/preload_system_width
+    echo $FLEXUS_CORE_NUM > $RUN_FOLDER/preload_system_width
 
     #if [ ! -f $RUN_FOLDER/user_postload ]; then
         #echo -e "\n$0:$LINENO: WARNING: No user_postload file found in the run folder: $RUN_FOLDER"
@@ -305,7 +315,7 @@ if [ "${TIMING}" = "TRUE" ]; then
         exit 1
     fi
     echo Creating a configuration file for Flexus.
-    echo $FLEXUS_CORE_NUM >> $RUN_FOLDER/preload_system_width
+    echo $FLEXUS_CORE_NUM > $RUN_FOLDER/preload_system_width
     #if [ ! -f $RUN_FOLDER/user_postload_rmc_timing ]; then
         #echo -e "\n$0:$LINENO: ERROR: No user_postload file found in the run folder: $RUN_FOLDER"
         #exit 1
@@ -335,13 +345,61 @@ set -x
 
 if [ ! -z "${GDB_ENABLE}" ]; then
     RUN_CFG="gdb --args ${RUN_CFG}"
+elif [ ! -z "${VALGRIND_ENABLE}" ]; then
+    RUN_CFG="valgrind --leak-check=full --track-origins=yes --read-var-info=yes --expensive-definedness-checks=yes --log-file=valgrind.log ${RUN_CFG}"
+fi
+if [ ! -z "${LDPATH_OVERWRITE}" ]; then
+    RUN_CFG="env LD_LIBRARY_PATH=$ADD_TO_LD_LIBRARY_PATH:$LD_LIBRARY_PATH ${RUN_CFG}"
 fi
 
 # Commands to start QEMU instance
 if [ ! -z "${LOAD_OPTION}" ]; then
-   $RUN_CFG $QEMU_PATH/qemu-system-aarch64 \
-        -machine virt \
-        -accel tcg,thread=single \
+    if [ ! -z "${DRY}" ]; then
+        echo "$RUN_CFG $QEMU_PATH/qemu-system-aarch64 \
+            -machine virt,gic-version=3 \
+            -accel tcg,thread=single \
+            -cpu cortex-a57 \
+            -smp $QEMU_CORE_NUM \
+            -m $MEM \
+            -nographic \
+            -rtc clock=vm \
+            $KERNEL_CFG \
+            $NETWORK_CONFIG \
+            $RMC_CFG \
+            $DISK_CONFIG \
+            $PFLASH_CONFIG \
+            -exton -loadext $LOAD_OPTS \
+            $ICOUNT_CONFIG \
+            $FLEXUS \
+            $QUANTUM_OPT \
+            $EXTRA_CMD \
+            $QMP"
+    else
+       $RUN_CFG $QEMU_PATH/qemu-system-aarch64 \
+            -machine virt,gic-version=3 \
+            -accel tcg,thread=single \
+            -cpu cortex-a57 \
+            -smp $QEMU_CORE_NUM \
+            -m $MEM \
+            -nographic \
+            -rtc clock=vm \
+            $KERNEL_CFG \
+            $NETWORK_CONFIG \
+            $RMC_CFG \
+            $DISK_CONFIG \
+            $PFLASH_CONFIG \
+            -exton -loadext $LOAD_OPTS \
+            $ICOUNT_CONFIG \
+            $FLEXUS \
+            $QUANTUM_OPT \
+            $EXTRA_CMD \
+            $QMP
+    fi
+else # FIXME: code replication to be removed when the new snapshot mechanism is ready
+     # (testing: loadvm and " marks interpretation)
+    if [ ! -z "${DRY}" ]; then
+        echo "$RUN_CFG $QEMU_PATH/qemu-system-aarch64 \
+        -machine virt,gic-version=3 \
         -cpu cortex-a57 \
         -smp $QEMU_CORE_NUM \
         -m $MEM \
@@ -352,16 +410,15 @@ if [ ! -z "${LOAD_OPTION}" ]; then
         $RMC_CFG \
         $DISK_CONFIG \
         $PFLASH_CONFIG \
-        -exton -loadext $LOAD_OPTS \
+        -exton \
         $ICOUNT_CONFIG \
         $FLEXUS \
         $QUANTUM_OPT \
         $EXTRA_CMD \
-        $QMP
-else # FIXME: code replication to be removed when the new snapshot mechanism is ready
-     # (testing: loadvm and " marks interpretation)
-    $RUN_CFG $QEMU_PATH/qemu-system-aarch64 \
-        -machine virt \
+        $QMP"
+    else
+        $RUN_CFG $QEMU_PATH/qemu-system-aarch64 \
+        -machine virt,gic-version=3 \
         -cpu cortex-a57 \
         -smp $QEMU_CORE_NUM \
         -m $MEM \
@@ -378,6 +435,7 @@ else # FIXME: code replication to be removed when the new snapshot mechanism is 
         $QUANTUM_OPT \
         $EXTRA_CMD \
         $QMP
+    fi
 fi
 
 if [ "${TRACE}" = "TRUE" ]; then
