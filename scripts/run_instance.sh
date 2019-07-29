@@ -190,7 +190,7 @@ do
         ENABLE_KERNEL="TRUE"
         shift
         ;;
-        --dry-run)
+        -dry-run)
         DRY="TRUE"
         shift
         ;;
