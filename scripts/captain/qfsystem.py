@@ -6,11 +6,21 @@ import logging
 import inspect
 import threading
 import subprocess
-import ConfigParser
+try:
+    import configparser
+except ImportError:
+    # Python 2 fallback
+    import ConfigParser as configparser
 
 from qfinstance import QFInstance
 import validator
 import ns3network
+
+try:
+    # Python 2 fallback
+    input = raw_input
+except NameError:
+    pass
 
 class QFSystem(object):
     def __init__(self, config_path):
@@ -33,13 +43,13 @@ class QFSystem(object):
         """
         Validate and parse system config file and associated instance config files
         """
-        
+
         # Validate system config files
         # System validation includes per-instance validation
         if validator.validate_system(self.__config_path):
             logging.info("System configuration validated successfully.")
             # Set up config parser
-            config = ConfigParser.ConfigParser()
+            config = configparser.ConfigParser()
             config.read(self.__config_path)
             # Parse Instances
             instances_list = config.items("Instances")
@@ -175,7 +185,7 @@ class QFSystem(object):
         while True:
             if self.check_exit():
                 break
-            x = raw_input("qmp >>")
+            x = input("qmp >>")
             if x == "kill":
                 self.exit()
                 break

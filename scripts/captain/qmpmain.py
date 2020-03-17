@@ -65,6 +65,8 @@
 # which will echo back the properly formatted JSON-compliant QMP that is being
 # sent to QEMU, which is useful for debugging and documentation generation.
 
+from __future__ import print_function
+
 import sys
 import os
 
@@ -72,7 +74,11 @@ from qmp import qmp
 import json
 import ast
 import readline
-import Queue
+try:
+    import queue
+except ImportError:
+    # Python 2 fallback
+    import Queue as queue
 import threading
 
 
@@ -239,15 +245,15 @@ class QMPShell(qmp.QEMUMonitorProtocol):
         if self._pretty:
             indent = 4
         jsobj = json.dumps(qmp, indent=indent)
-        print str(jsobj)
+        print(str(jsobj))
 
     def _execute_cmd(self, cmdline):
         try:
             qmpcmd = self.__build_cmd(cmdline)
         except Exception as e:
-            print 'Error while parsing command line: %s' % e
-            print 'command format: <command-name> ',
-            print '[arg-name1=arg1] ... [arg-nameN=argN]'
+            print('Error while parsing command line: %s' % e)
+            print('command format: <command-name> ', end=' ')
+            print('[arg-name1=arg1] ... [arg-nameN=argN]')
             return True
         # For transaction mode, we may have just cached the action:
         if qmpcmd is None:
@@ -256,7 +262,7 @@ class QMPShell(qmp.QEMUMonitorProtocol):
             self._print(qmpcmd)
         resp = self.cmd_obj(qmpcmd)
         if resp is None:
-            print 'Disconnected'
+            print('Disconnected')
             return False
         self._print(resp)
         return True
@@ -270,7 +276,7 @@ class QMPShell(qmp.QEMUMonitorProtocol):
     def show_banner(self, name, msg='Welcome to the QMP low-level shell!'):
         #print str(name + ": " + msg)
         version = self._greeting['QMP']['version']['qemu']
-        print 'Instance %s: Connected to QEMU %d.%d.%d\n' % (name, version['major'],version['minor'],version['micro'])
+        print('Instance %s: Connected to QEMU %d.%d.%d\n' % (name, version['major'],version['minor'],version['micro']))
 
     def get_prompt(self):
         if self._transmode:
@@ -290,7 +296,7 @@ class QMPShell(qmp.QEMUMonitorProtocol):
         #     return False
         if cmdline == '':
             for ev in self.get_events():
-                print ev
+                print(ev)
             self.clear_events()
             return True
         else:
@@ -348,24 +354,24 @@ class HMPShell(QMPShell):
             try:
                 idx = int(cmdline.split()[1])
                 if not 'return' in self.__cmd_passthrough('info version', idx):
-                    print 'bad CPU index'
+                    print('bad CPU index')
                     return True
                 self.__cpu_index = idx
             except ValueError:
-                print 'cpu command takes an integer argument'
+                print('cpu command takes an integer argument')
                 return True
         resp = self.__cmd_passthrough(cmdline, self.__cpu_index)
         if resp is None:
-            print 'Disconnected'
+            print('Disconnected')
             return False
         assert 'return' in resp or 'error' in resp
         if 'return' in resp:
             # Success
             if len(resp['return']) > 0:
-                print self.__name + ": " + resp['return'],
+                print(self.__name + ": " + resp['return'], end=' ')
         else:
             # Error
-            print '%s: %s' % (resp['error']['class'], resp['error']['desc'])
+            print('%s: %s' % (resp['error']['class'], resp['error']['desc']))
         return True
 
     def show_banner(self, msg='Welcome to the HMP shell!'):
@@ -390,7 +396,7 @@ class qmp_shell():
         self.__pretty = False
         self.__verbose = False
         self.__activateCompleter = False
-        self.__queue = Queue.Queue()
+        self.__queue = queue.Queue()
         self.__name = name
         self.__args = args
 

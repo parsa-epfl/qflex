@@ -8,6 +8,8 @@
 # This work is licensed under the terms of the GNU GPL, version 2.  See
 # the COPYING file in the top-level directory.
 
+from __future__ import print_function
+
 import json
 import errno
 import socket
@@ -16,6 +18,15 @@ import logging as log
 import os
 import errno
 
+def compat_input():
+    return raw_input().decode(sys.stdin.encoding or
+                              locale.getpreferredencoding(True)).encode('utf-8')
+
+try:
+    raw_input
+    input = compat_input
+except NameError:
+    pass
 
 class QMPError(Exception):
     pass
@@ -90,7 +101,7 @@ class QEMUMonitorProtocol(object):
             resp = json.loads(data)
             if 'event' in resp:
                 if self._debug:
-                    print >>sys.stderr, "QMP:<<< %s" % resp
+                    print("QMP:<<< %s" % resp, file=sys.stderr)
                 self.__events.append(resp)
                 if not only_event:
                     continue
@@ -150,7 +161,7 @@ class QEMUMonitorProtocol(object):
             try:
                 self.__sock.connect(self.__address)
                 self.__log.debug("connected to socket {0} ".format(self.__address))
-            except socket.error, exc:
+            except socket.error as exc:
                 self.__log.debug("connecting to socket {0} and getting result: {1}".format(self.__address, exc))
         else:
             self.__sock.connect(self.__address)
@@ -182,16 +193,16 @@ class QEMUMonitorProtocol(object):
                 been closed
         """
         if self._debug:
-            print >>sys.stderr, "QMP:>>> %s" % qmp_cmd
+            print("QMP:>>> %s" % qmp_cmd, file=sys.stderr)
         try:
-            self.__sock.sendall(json.dumps(qmp_cmd))
+            self.__sock.sendall(json.dumps(qmp_cmd).encode('utf-8'))
         except socket.error as err:
             if err[0] == errno.EPIPE:
                 return
             raise socket.error(err)
         resp = self.__json_read()
         if self._debug:
-            print >>sys.stderr, "QMP:<<< %s" % resp
+            print("QMP:<<< %s" % resp, file=sys.stderr)
         return resp
 
     def cmd(self, name, args=None, cmd_id=None):

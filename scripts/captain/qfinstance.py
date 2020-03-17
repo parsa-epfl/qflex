@@ -1,10 +1,18 @@
 import os
-import Queue
+try:
+    import queue
+except ImportError:
+    # Python 2 fallback
+    import Queue as queue
 import socket
 import psutil
 import logging
 import threading
-import ConfigParser
+try:
+    import configparser
+except ImportError:
+    # Python 2 fallback
+    import ConfigParser as configparser
 from subprocess import Popen, PIPE
 
 import qmpmain
@@ -35,7 +43,7 @@ class QFInstance:
         self.__qmpshell = None
         self.__qmpip = None
         self.__qmpport = None
-        self.__pendingCmdQueue = Queue.Queue()
+        self.__pendingCmdQueue = queue.Queue()
         # NS3 Network
         self.__netname = None
         self.__netdev_tap = None
@@ -44,16 +52,16 @@ class QFInstance:
     # Set qflex command by parsing the config file
     def parse_instance(self):
         # Set up config parser
-        config = ConfigParser.ConfigParser()
+        config = configparser.ConfigParser()
         config.read(self.__file)
-        
+
         # qflex command
         qflex_command = []
-        
+
         # qemu Executable
         qflex_path = config.get("Environment", "qflex_path")
         qflex_command.append(os.path.join(qflex_path, qemu_path))
-        
+
         # Disk image
         image_repo_path = config.get("Environment", "image_repo_path")
         disk_image_path = config.get("Environment", "disk_image_path")
@@ -65,19 +73,19 @@ class QFInstance:
         qflex_command.extend(["-device", "scsi-hd,drive=hd0"])
         qflex_command.extend(["-pflash", flash_path + "0.img"])
         qflex_command.extend(["-pflash", flash_path + "1.img"])
-        
+
         # Number of cores
         smp = config.getint("Machine", "qemu_core_count")
         qflex_command.extend(["-smp", str(smp)])
-        
+
         # Memory size
         mem = config.getint("Machine", "memory_size")
         qflex_command.extend(["-m", str(mem)])
-        
+
         # Machine type
         machine = config.get("Machine", "machine")
         qflex_command.extend(["-machine", machine])
-        
+
         # CPU type
         cpu = config.get("Machine", "cpu")
         qflex_command.extend(["-cpu", cpu])
@@ -95,7 +103,7 @@ class QFInstance:
                 net_hostfwd_guestport = config.get("Machine", "user_network_hostfwd_guestport")
                 qflex_command.extend(["-netdev", "user,id=" + net_id + ",hostfwd=" + net_hostfwd_protocol + "::" + net_hostfwd_hostport + "-:" + net_hostfwd_guestport])
                 qflex_command.extend(["-device", "virtio-net-device,mac=" + net_mac + ",netdev=" + net_id])
-        
+
         # External Port Forwarding
         for port_option in ["serial", "parallel", "monitor", "qmp"]:
             if config.has_option("Machine", port_option):
@@ -103,24 +111,24 @@ class QFInstance:
                 if port_option_setting == "on":
                     port_option_dev = config.get("Machine", port_option + "_DEV")
                     qflex_command.extend(["-" + port_option, port_option_dev])
-        
+
         # External snapshot
         if config.has_option("Environment", "starting_snapshot"):
             starting_snapshot = config.get("Environment", "starting_snapshot")
             if starting_snapshot:
                 qflex_command.extend(["-loadext", starting_snapshot])
-        
+
         # Simulation
         if config.has_section("Simulation"):
             # Simulation type
             simulation_type = config.get("Simulation", "simulation_type")
-            
+
             # Phases
             if simulation_type == "phases":
                 phases_name = config.get("Simulation", "phases_name")
                 phases_length = config.get("Simulation", "phases_length")
                 qflex_command.extend(["-phases", "steps=" + phases_length + ",name=" + phases_name])
-            
+
             if simulation_type in {"checkpoints", "trace", "timing"}:
                 # Flexus
                 flexus_path = config.get("Simulation", "flexus_path")
@@ -208,7 +216,7 @@ class QFInstance:
 
     # Print the qflex command
     def print_cmd(self):
-        print ("Instance '{0}': \n{1}".format(self.__name, ' '.join(self.__cmd)))
+        print(("Instance '{0}': \n{1}".format(self.__name, ' '.join(self.__cmd))))
 
     # Get Net Name
     def get_netname(self):

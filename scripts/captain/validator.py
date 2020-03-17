@@ -2,7 +2,11 @@ import os
 import re
 import logging
 import argparse
-import ConfigParser
+try:
+    import configparser
+except ImportError:
+    # Python 2 fallback
+    import ConfigParser as configparser
 
 import helpers
 
@@ -16,10 +20,10 @@ def validate_instance(config_path):
         return False
 
     ## Set up config parser
-    config = ConfigParser.ConfigParser()
+    config = configparser.ConfigParser()
     try:
         config.read(config_path)
-    except ConfigParser.ParsingError:
+    except configparser.ParsingError:
         logging.error("Parsing errors in config file '{0}'".format(config_path))
         return False
 
@@ -45,7 +49,7 @@ def validate_instance(config_path):
             if not os.path.isfile(os.path.join(qflex_path, qemu_path)):
                 logging.error("qemu is not found at '{0}'".format(os.path.join(qflex_path, qemu_path)))
                 valid = False
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         logging.error("qflex repository path is not set in config file")
         valid = False
     # Image repository path
@@ -54,7 +58,7 @@ def validate_instance(config_path):
         if not os.path.isdir(image_repo_path):
             logging.error("Disk images repository is not found at '{0}'".format(image_repo_path))
             valid = False
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         logging.error("Disk images repository path is not set in config file")
         valid = False
     # Disk image path
@@ -67,7 +71,7 @@ def validate_instance(config_path):
         flash_path = os.path.join(os.path.dirname(disk_image_path),"flash")
         if not os.path.isfile(flash_path+"0.img") or not os.path.isfile(flash_path+"1.img"):
             logging.error("Flash image is not found at '{0}'".format(flash_path))
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         logging.error("Disk image path is not set in config file")
         valid = False
     # External snapshot path
@@ -92,7 +96,7 @@ def validate_instance(config_path):
     except ValueError:
         logging.error("qemu core count value '{0}' is not valid".format(smp))
         valid = False
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         logging.error("Number of qemu cores is not set in config file")
         valid = False
     # Memory size
@@ -101,19 +105,19 @@ def validate_instance(config_path):
     except ValueError:
         logging.error("Memory size value '{0}' is not valid".format(mem))
         valid = False
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         logging.error("Memory size is not set in config file")
         valid = False
     # Machine type
     try:
         machine = config.get("Machine", "machine")
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         logging.error("Machine type is not set in config file")
         valid = False
     # CPU type
     try:
         cpu = config.get("Machine", "cpu")
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         logging.error("CPU is not set in config file")
         valid = False
     # Network
@@ -144,7 +148,7 @@ def validate_instance(config_path):
                 except ValueError:
                     logging.error("User network port values are not valid")
                     valid = False
-            except ConfigParser.NoOptionError:
+            except configparser.NoOptionError:
                 logging.error("User network parameters are not completely set in config file")
                 valid = False
     # External Port Forwarding
@@ -158,7 +162,7 @@ def validate_instance(config_path):
                     if not port_option_dev:
                         logging.error("'{0}' parameter is not set in config file".format(port_option))
                         valid = False
-                except ConfigParser.NoOptionError:
+                except configparser.NoOptionError:
                     logging.error("'{0}' parameter is not set in config file".format(port_option))
                     valid = False
 
@@ -167,7 +171,7 @@ def validate_instance(config_path):
         # Simulation type
         try:
             simulation_type = config.get("Simulation", "simulation_type")
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Simulation type is not set in config file")
             valid = False
         else:
@@ -182,13 +186,13 @@ def validate_instance(config_path):
                         phases_name = config.get("Simulation", "phases_name")
                         if not phases_name:
                             logging.error("Phases name is not set in config file")
-                    except ConfigParser.NoOptionError:
+                    except configparser.NoOptionError:
                         logging.error("Phases name is not set config file")
                         valid = False
                     # Phases length
                     try:
                         phases_length = config.get("Simulation", "phases_length")
-                    except ConfigParser.NoOptionError:
+                    except configparser.NoOptionError:
                         logging.error("Phases length is not set in config file")
                         valid = False
                     try:
@@ -204,7 +208,7 @@ def validate_instance(config_path):
                         if not os.path.isdir(flexus_path):
                             logging.error("Flexus repository is not found at '{0}'".format(flexus_path))
                             valid = False
-                    except ConfigParser.NoOptionError:
+                    except configparser.NoOptionError:
                         logging.error("Flexus repository path is not set in config file")
                         valid = False
                     # User postload path
@@ -213,7 +217,7 @@ def validate_instance(config_path):
                         if not os.path.isfile(user_postload_path):
                             logging.error("User postload is not found at '{0}'".format(user_postload_path))
                             valid = False
-                    except ConfigParser.NoOptionError:
+                    except configparser.NoOptionError:
                         logging.error("User postload path is not set in config file")
                         valid = False
                     # Flexus trace simulator path
@@ -223,7 +227,7 @@ def validate_instance(config_path):
                             if not os.path.isfile(os.path.join(flexus_path, flexus_trace_path)):
                                 logging.error("Flexus trace simulator is not found at '{0}'".format(os.path.join(flexus_path, flexus_trace_path)))
                                 valid = False
-                        except ConfigParser.NoOptionError:
+                        except configparser.NoOptionError:
                             logging.error("Flexus trace simulator path is not set in config file")
                             valid = False
                     # Flexus timing simulator path
@@ -233,7 +237,7 @@ def validate_instance(config_path):
                             if not os.path.isfile(os.path.join(flexus_path, flexus_timing_path)):
                                 logging.error("Flexus timing simulator is not found at '{0}'".format(os.path.join(flexus_path, flexus_timing_path)))
                                 valid = False
-                        except ConfigParser.NoOptionError:
+                        except configparser.NoOptionError:
                             logging.error("Flexus timing simulator path is not set in config file")
                             valid = False
                     # Simulation length
@@ -241,7 +245,7 @@ def validate_instance(config_path):
                         try:
                             simulation_length = config.get("Simulation", "simulation_length")
                             helpers.input_to_number(simulation_length)
-                        except ConfigParser.NoOptionError:
+                        except configparser.NoOptionError:
                             logging.error("Simulation length is not set in config file")
                             valid = False
                         except ValueError:
@@ -253,7 +257,7 @@ def validate_instance(config_path):
                         try:
                             checkpoints_number = config.get("Simulation", "checkpoints_number")
                             helpers.input_to_number(checkpoints_number)
-                        except ConfigParser.NoOptionError:
+                        except configparser.NoOptionError:
                             logging.error("Checkpoints number is not set in config file")
                             valid = False
                         except ValueError:
@@ -263,7 +267,7 @@ def validate_instance(config_path):
                         try:
                             checkpoints_length = config.get("Simulation", "checkpoints_length")
                             helpers.input_to_number(checkpoints_length)
-                        except ConfigParser.NoOptionError:
+                        except configparser.NoOptionError:
                             logging.error("Checkpoints length is not set in config file")
                             valid = False
                         except ValueError:
@@ -281,10 +285,10 @@ def validate_system(config_path):
         return False
 
     ## Set up config parser
-    config = ConfigParser.ConfigParser()
+    config = configparser.ConfigParser()
     try:
         config.read(config_path)
-    except ConfigParser.ParsingError:
+    except configparser.ParsingError:
         logging.error("Parsing errors in config file '{0}'".format(config_path))
         return False
 
@@ -306,10 +310,10 @@ def validate_system(config_path):
                     if not validate_instance(instance_path):
                         logging.error("Config file '{0}' is not valid".format(instance_path))
                         valid = False
-    except ConfigParser.NoSectionError:
+    except configparser.NoSectionError:
         logging.error("No instances found in config file '{0}'".format(config_path))
         valid = False
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         logging.error("No instances found in config file '{0}'".format(config_path))
         valid = False
 
@@ -334,7 +338,7 @@ def validate_system(config_path):
                     if icount_sleep not in {"on", "off"}:
                         logging.error("ICount sleep value '{0}' is not valid".format(icount_sleep))
                         valid = False
-                except ConfigParser.NoOptionError:
+                except configparser.NoOptionError:
                     logging.error("ICount parameters are not completely set in config file")
                     valid = False
 
@@ -349,7 +353,7 @@ def validate_system(config_path):
                 if not os.path.isdir(ns3_path):
                     logging.error("NS3 repository is not found at '{0}'".format(ns3_path))
                     valid = False
-            except ConfigParser.NoOptionError:
+            except configparser.NoOptionError:
                 logging.error("NS3 repository path is not set in config file")
                 valid = False
 
@@ -374,10 +378,10 @@ def validate_job(config_path):
         return False
 
     ## Set up config parser
-    config = ConfigParser.ConfigParser()
+    config = configparser.ConfigParser()
     try:
         config.read(config_path)
-    except ConfigParser.ParsingError:
+    except configparser.ParsingError:
         logging.error("Parsing errors in config file '{0}'".format(config_path))
         return False
 
@@ -407,7 +411,7 @@ def validate_job(config_path):
                 if master_instance not in instances_names:
                     logging.error("Master instance '{0}' does not correspond to any of the available instances".format(master_instance))
                     valid = False
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Master instance is not set in config file")
             valid = False
 
@@ -417,7 +421,7 @@ def validate_job(config_path):
             if not os.path.isdir(image_repo_path):
                 logging.error("Disk images repository is not found at '{0}'".fromat(image_repo_path))
                 valid = False
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Disk images repository path is not set in config file")
             valid = False
 
@@ -427,7 +431,7 @@ def validate_job(config_path):
             if not os.path.isdir(flexus_path):
                 logging.error("Flexus repository is not found at '{0}'".format(flexus_path))
                 valid = False
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Flexus repository path is not set in config file")
             valid = False
 
@@ -437,7 +441,7 @@ def validate_job(config_path):
             if not os.path.isfile(os.path.join(flexus_path, flexus_trace_path)):
                 logging.error("Flexus trace simulator is not found at '{0}'".format(os.path.join(flexus_path, flexus_trace_path)))
                 valid = False
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Flexus trace simulator path is not set in config file")
             valid = False
 
@@ -447,7 +451,7 @@ def validate_job(config_path):
             if not os.path.isfile(os.path.join(flexus_path, flexus_timing_path)):
                 logging.error("Flexus timing simulator is not found at '{0}'".format(os.path.join(flexus_path, flexus_timing_path)))
                 valid = False
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Flexus timing simulator path is not set in config file")
             valid = False
 
@@ -457,7 +461,7 @@ def validate_job(config_path):
             if not os.path.isfile(user_postload_path):
                 logging.error("User postload is not found at '{0}'".format(user_postload_path))
                 valid = False
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("User postload path is not set in config file")
             valid = False
 
@@ -466,14 +470,14 @@ def validate_job(config_path):
             phases_name = config.get("Job", "phases_name")
             if not phases_name:
                 logging.error("Phases name is not set in config file")
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Phases name is not set config file")
             valid = False
 
         # Phases length
         try:
             phases_length = config.get("Job", "phases_length")
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Phases length is not set in config file")
             valid = False
         try:
@@ -486,7 +490,7 @@ def validate_job(config_path):
         try:
             checkpoints_number = config.get("Job", "checkpoints_number")
             helpers.input_to_number(checkpoints_number)
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Checkpoints number is not set in config file")
             valid = False
         except ValueError:
@@ -497,7 +501,7 @@ def validate_job(config_path):
         try:
             checkpoints_length = config.get("Job", "checkpoints_length")
             helpers.input_to_number(checkpoints_length)
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Checkpoints length is not set in config file")
             valid = False
         except ValueError:
@@ -508,7 +512,7 @@ def validate_job(config_path):
         try:
             simulation_length = config.get("Job", "simulation_length")
             helpers.input_to_number(simulation_length)
-        except ConfigParser.NoOptionError:
+        except configparser.NoOptionError:
             logging.error("Simulation length is not set in config file")
             valid = False
         except ValueError:

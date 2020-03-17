@@ -65,6 +65,8 @@
 # which will echo back the properly formatted JSON-compliant QMP that is being
 # sent to QEMU, which is useful for debugging and documentation generation.
 
+from __future__ import print_function
+
 import qmp
 import json
 import ast
@@ -73,6 +75,12 @@ import sys
 import os
 import errno
 import atexit
+
+try:
+    # Python 2 fallback
+    input = raw_input
+except NameError:
+    pass
 
 class QMPCompleter(list):
     def complete(self, text, state):
@@ -132,7 +140,7 @@ class QMPShell(qmp.QEMUMonitorProtocol):
 
     def _fill_completion(self):
         cmds = self.cmd('query-commands')
-        if cmds.has_key('error'):
+        if 'error' in cmds:
             return
         for cmd in cmds['return']:
             self._completer.append(cmd['name'])
@@ -153,14 +161,14 @@ class QMPShell(qmp.QEMUMonitorProtocol):
                 # File not found. No problem.
                 pass
             else:
-                print "Failed to read history '%s'; %s" % (self._histfile, e)
+                print("Failed to read history '%s'; %s" % (self._histfile, e))
         atexit.register(self.__save_history)
 
     def __save_history(self):
         try:
             readline.write_history_file(self._histfile)
         except Exception as e:
-            print "Failed to save history file '%s'; %s" % (self._histfile, e)
+            print("Failed to save history file '%s'; %s" % (self._histfile, e))
 
     def __parse_value(self, val):
         try:
@@ -221,15 +229,15 @@ class QMPShell(qmp.QEMUMonitorProtocol):
         cmdargs = cmdline.split()
 
         # Transactional CLI entry/exit:
-        if cmdargs[0] == 'transaction(':
+        if cmdargs[0] == u'transaction(':
             self._transmode = True
             cmdargs.pop(0)
-        elif cmdargs[0] == ')' and self._transmode:
+        elif cmdargs[0] == u')' and self._transmode:
             self._transmode = False
             if len(cmdargs) > 1:
                 raise QMPShellError("Unexpected input after close of Transaction sub-shell")
-            qmpcmd = { 'execute': 'transaction',
-                       'arguments': { 'actions': self._actions } }
+            qmpcmd = { u'execute': u'transaction',
+                       u'arguments': { u'actions': self._actions } }
             self._actions = list()
             return qmpcmd
 
@@ -240,17 +248,17 @@ class QMPShell(qmp.QEMUMonitorProtocol):
         # Parse and then cache this Transactional Action
         if self._transmode:
             finalize = False
-            action = { 'type': cmdargs[0], 'data': {} }
-            if cmdargs[-1] == ')':
+            action = { u'type': cmdargs[0], u'data': {} }
+            if cmdargs[-1] == u')':
                 cmdargs.pop(-1)
                 finalize = True
-            self.__cli_expr(cmdargs[1:], action['data'])
+            self.__cli_expr(cmdargs[1:], action[u'data'])
             self._actions.append(action)
-            return self.__build_cmd(')') if finalize else None
+            return self.__build_cmd(u')') if finalize else None
 
         # Standard command: parse and return it to be executed.
-        qmpcmd = { 'execute': cmdargs[0], 'arguments': {} }
-        self.__cli_expr(cmdargs[1:], qmpcmd['arguments'])
+        qmpcmd = { u'execute': cmdargs[0], u'arguments': {} }
+        self.__cli_expr(cmdargs[1:], qmpcmd[u'arguments'])
         return qmpcmd
 
     def _print(self, qmp):
@@ -258,15 +266,15 @@ class QMPShell(qmp.QEMUMonitorProtocol):
         if self._pretty:
             indent = 4
         jsobj = json.dumps(qmp, indent=indent)
-        print str(jsobj)
+        print(str(jsobj))
 
     def _execute_cmd(self, cmdline):
         try:
             qmpcmd = self.__build_cmd(cmdline)
         except Exception as e:
-            print 'Error while parsing command line: %s' % e
-            print 'command format: <command-name> ',
-            print '[arg-name1=arg1] ... [arg-nameN=argN]'
+            print('Error while parsing command line: %s' % e)
+            print('command format: <command-name> ', end=' ')
+            print('[arg-name1=arg1] ... [arg-nameN=argN]')
             return True
         # For transaction mode, we may have just cached the action:
         if qmpcmd is None:
@@ -275,7 +283,7 @@ class QMPShell(qmp.QEMUMonitorProtocol):
             self._print(qmpcmd)
         resp = self.cmd_obj(qmpcmd)
         if resp is None:
-            print 'Disconnected'
+            print('Disconnected')
             return False
         self._print(resp)
         return True
@@ -285,12 +293,12 @@ class QMPShell(qmp.QEMUMonitorProtocol):
         self.__completer_setup()
 
     def show_banner(self, msg='Welcome to the QMP low-level shell!'):
-        print msg
+        print(msg)
         if not self._greeting:
-            print 'Connected'
+            print('Connected')
             return
         version = self._greeting['QMP']['version']['qemu']
-        print 'Connected to QEMU %d.%d.%d\n' % (version['major'],version['minor'],version['micro'])
+        print('Connected to QEMU %d.%d.%d\n' % (version['major'],version['minor'],version['micro']))
 
     def get_prompt(self):
         if self._transmode:
@@ -304,13 +312,13 @@ class QMPShell(qmp.QEMUMonitorProtocol):
         @return True if execution was ok, return False if disconnected.
         """
         try:
-            cmdline = raw_input(prompt)
+            cmdline = input(prompt)
         except EOFError:
-            print
+            print()
             return False
         if cmdline == '':
             for ev in self.get_events():
-                print ev
+                print(ev)
             self.clear_events()
             return True
         else:
@@ -366,24 +374,24 @@ class HMPShell(QMPShell):
             try:
                 idx = int(cmdline.split()[1])
                 if not 'return' in self.__cmd_passthrough('info version', idx):
-                    print 'bad CPU index'
+                    print('bad CPU index')
                     return True
                 self.__cpu_index = idx
             except ValueError:
-                print 'cpu command takes an integer argument'
+                print('cpu command takes an integer argument')
                 return True
         resp = self.__cmd_passthrough(cmdline, self.__cpu_index)
         if resp is None:
-            print 'Disconnected'
+            print('Disconnected')
             return False
         assert 'return' in resp or 'error' in resp
         if 'return' in resp:
             # Success
             if len(resp['return']) > 0:
-                print resp['return'],
+                print(resp['return'], end=' ')
         else:
             # Error
-            print '%s: %s' % (resp['error']['class'], resp['error']['desc'])
+            print('%s: %s' % (resp['error']['class'], resp['error']['desc']))
         return True
 
     def show_banner(self):
