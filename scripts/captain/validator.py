@@ -296,6 +296,7 @@ def validate_system(config_path):
     valid = True
 
     ## Instances
+    instances = []
     try:
         instances = config.items("Instances")
         if not instances:

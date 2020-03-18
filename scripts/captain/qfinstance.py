@@ -165,7 +165,8 @@ class QFInstance:
         # Hardwired features
         qflex_command.append("-nographic")
         qflex_command.append("-exton")
-        # qflex_command.extend(["-accel", "tcg,thread=single"]) TODO CHECK THIS!
+        if simulation_type in ["checkpoint", "timing", "trace"]:
+            qflex_command.extend(["-accel", "tcg,thread=single"])
         qflex_command.extend(["-rtc", "clock=vm"])
         # qflex_command.extend(["-append", "'root=/dev/sda2'"])
         # qflex_command.extend(["-append", "'console=ttyAMA0'"])

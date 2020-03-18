@@ -205,7 +205,8 @@ class QFSystem(object):
         try:
             if not self.__exit:
                 self.__exit = True
-                callerframerecord = inspect.stack()[1]
+                stack = inspect.stack()
+                callerframerecord = stack[1 if len(stack) > 1 else 0]
                 frame = callerframerecord[0]
                 self.__exit_info = inspect.getframeinfo(frame)
                 self.cleanup()
