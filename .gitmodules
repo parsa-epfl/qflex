@@ -1,10 +1,10 @@
 [submodule "flexus"]
 	path = flexus
-	url = https://github.com/parsa-epfl/flexus.git
+	url = git@github.com:parsa-epfl/flexus-private.git
 	ignore = dirty
 [submodule "libqflex"]
 	path = libqflex
-	url = https://github.com/parsa-epfl/libqflex.git
+	url = git@github.com:parsa-epfl/libqflex-private.git
 	ignore = dirty
 [submodule "images"]
 	path = images
@@ -12,7 +12,7 @@
 	ignore = dirty
 [submodule "qemu"]
 	path = qemu
-	url = https://github.com/parsa-epfl/qemu.git
+	url = git@github.com:parsa-epfl/qemu-private.git
 	ignore = dirty
 [submodule "3rdparty/ns3"]
 	path = 3rdparty/ns3
