@@ -5,15 +5,16 @@ licenses governing all the software components.
 
 ### Software developed externally (not by the QFlex group)
 
-    * [NS-3](https://www.gnu.org/copyleft/gpl.html)
-    * [QEMU](http://wiki.qemu.org/License)
+    * [NS-3] (https://www.gnu.org/copyleft/gpl.html)
+    * [QEMU] (http://wiki.qemu.org/License)
     * [SimFlex] (http://parsa.epfl.ch/simflex/)
+    * [GNU PTH] (https://www.gnu.org/software/pth/)
 
 ### Software developed internally (by the QFlex group)
 **QFlex License**
 
 QFlex
-Copyright (c) 2016, Parallel Systems Architecture Lab, EPFL
+Copyright (c) 2020, Parallel Systems Architecture Lab, EPFL
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
