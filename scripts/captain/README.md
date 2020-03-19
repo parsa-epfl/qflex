@@ -6,9 +6,6 @@ for a single or multiple QFlex instances.
 It requires a configuration file, `system.ini`,
 which in turn requires one or more configuration files, `instance.ini`,
 one for each of the instances in the system.
-`run_job.py` allows running a series of simulations that follow the SMARTS methodology.
-It requires a configuration file, `job.ini`,
-which is an extension of a system configuration file.
 Sample configuration files can be found under `config`.
 You can find more information on the configuration parameters in the sections below.
 
@@ -126,41 +123,8 @@ More details can be found in QEMU documentation.
 In order to set network connections between multiple instances,
 we use an underlying network simulator, NS3.
 This part is still a work in progress.
-In this section, we configure the details of this simulator.
+Here are the configuration parameters for multi-node:
 
 * **ns3_path**: Path to ns3 network simulator executable.
 * **quantum**: Value of quantum per instance,
 where large numbers can be expressed using numerical representations.
-
-## Job
-A job is a simulation following the SMARTS methodology,
-which includes generating checkpoints for each phase,
-and then running timing simulation for each checkpoint.
-A job configuration file is an extension to the system configuration file.
-It has the same sections with a few additional ones.
-All the simulation details in all instance config files are ignored
-when running a job as the job redefines these details in the job section.
-It also adds a host section that allows Kubernetes deployment,
-a feature we are currently working on.
-Please note all instances in a job must have their flexus simulator
-and images in the same directory for ease of deployment.
-
-### Job Parameters
-
-In a job, all instances are emulated except the master instance,
-on which the SMARTS methodology is applied.
-Three different types of simulation are performed on a system undergoing a job:
-creating phases, generating checkpoints and simulating in timing.
-The parameters needed for these simulations
-(defined in the `simulation` section for an `instance`)
-must be provided in the `job` section.
-This includes `flexus_path`, `flexus_trace_path`, `flexus_timing_path`,
-`user_postload_path`, `phases_name`, `phases_length`, `checkpoints_number`,
-`checkpoints_length`, and `simulation_length`.
-
-* **master_instance**: The name of the master instance,
-selected from one of the instances listed under the `Instances` section
-(described in `System`).
-* **image_repo_path**: Base path to the images directory.
-All image-related files *for all instances* must be in the same directory
-for ease of deployment.
