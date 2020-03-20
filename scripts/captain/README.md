@@ -8,6 +8,13 @@ which in turn requires one or more configuration files, `instance.ini`,
 one for each of the instances in the system.
 Sample configuration files can be found under `config`.
 You can find more information on the configuration parameters in the sections below.
+`captain` relies on three packages mentioned in the `requirements.txt`,
+make sure you have them installed before running `captain`.
+The following command installs these dependencies:
+
+```bash
+$ pip install --user -r requirements.txt
+```
 
 ## Instance
 
