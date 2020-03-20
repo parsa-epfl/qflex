@@ -1,85 +1,337 @@
-flexus.set "-L1d:assoc"                   "2"                  # (Associativity) Set associativity
-flexus.set "-L1d:block_scout"             "0"                  # (BlockScout) Use precise block sharing info
-flexus.set "-L1d:bsize"                   "64"                 # (BlockSize) Block size
-flexus.set "-L1d:clean_evict"             "1"                  # (CleanEvictions) Issue clean evictions
-flexus.set "-L1d:downgrade_lru"           "0"                  # (DowngradeLRU) Move block to LRU position when a Downgrade is recieved for a block in Modified or Exclusive state
-flexus.set "-L1d:erb_size"                "8"                  # (ERBSize) Evicted Region Buffer size
-flexus.set "-L1d:gzip_flexpoints"         "1"                  # (GZipFlexpoints) Compress flexpoints with gzip
-flexus.set "-L1d:level"                   "eL1"                # (CacheLevel) CacheLevel
-flexus.set "-L1d:mt_width"                "1"                  # (MTWidth) Number of threads sharing this cache
-flexus.set "-L1d:notify_reads"            "0"                  # (NotifyReads) Notify on reads (does not notify on fast-hit)
-flexus.set "-L1d:notify_writes"           "0"                  # (NotifyWrites) Notify on writes
-flexus.set "-L1d:protocol"                "InclusiveMESI"      # (Protocol) Name of the coherence protocol (InclusiveMESI)
-flexus.set "-L1d:rsize"                   "1024"               # (RegionSize) Region size in bytes
-flexus.set "-L1d:rt_assoc"                "16"                 # (RTAssoc) RegionTracker Associativity
-flexus.set "-L1d:rt_repl"                 "LRU"                # (RTReplPolicy) RegionTracker replacement policy (SetLRU | RegionLRU)
-flexus.set "-L1d:rt_size"                 "8192"               # (RTSize) RegionTracker size (number of regions tracked)
-flexus.set "-L1d:size"                    "32768"              # (Size) Cache size in bytes
-flexus.set "-L1d:skew_block_set"          "0"                  # (SkewBlockSet) skew block set indices based on rt way
-flexus.set "-L1d:snoop_lru"               "0"                  # (SnoopLRU) Move block to LRU position when a Snoop (ReturnReq) is recieved for a block in Modified or Exclusive state
-flexus.set "-L1d:std_array"               "1"                  # (StdArray) Use Standard Tag Array instead of RegionTracker
-flexus.set "-L1d:text_flexpoints"         "0"                  # (TextFlexpoints) Store flexpoints as text files (compatible with old FastCache component)
-flexus.set "-L1d:trace_tracker_on"        "0"                  # (TraceTracker) Turn trace tracker on/off
-flexus.set "-L1d:using_traces"            "0"                  # (UsingTraces) References are coming from traces (allow certain inconsistancies
-flexus.set "-L1i:assoc"                   "2"                  # (Associativity) Set associativity
-flexus.set "-L1i:block_scout"             "0"                  # (BlockScout) Use precise block sharing info
-flexus.set "-L1i:bsize"                   "64"                 # (BlockSize) Block size
-flexus.set "-L1i:clean_evict"             "1"                  # (CleanEvictions) Issue clean evictions
-flexus.set "-L1i:downgrade_lru"           "0"                  # (DowngradeLRU) Move block to LRU position when a Downgrade is recieved for a block in Modified or Exclusive state
-flexus.set "-L1i:erb_size"                "8"                  # (ERBSize) Evicted Region Buffer size
-flexus.set "-L1i:gzip_flexpoints"         "0"                  # (GZipFlexpoints) Compress flexpoints with gzip
-flexus.set "-L1i:level"                   "eL1I"               # (CacheLevel) CacheLevel
-flexus.set "-L1i:mt_width"                "1"                  # (MTWidth) Number of threads sharing this cache
-flexus.set "-L1i:notify_reads"            "0"                  # (NotifyReads) Notify on reads (does not notify on fast-hit)
-flexus.set "-L1i:notify_writes"           "0"                  # (NotifyWrites) Notify on writes
-flexus.set "-L1i:protocol"                "InclusiveMESI"      # (Protocol) Name of the coherence protocol (InclusiveMESI)
-flexus.set "-L1i:rsize"                   "1024"               # (RegionSize) Region size in bytes
-flexus.set "-L1i:rt_assoc"                "16"                 # (RTAssoc) RegionTracker Associativity
-flexus.set "-L1i:rt_repl"                 "SetLRU"             # (RTReplPolicy) RegionTracker replacement policy (SetLRU | RegionLRU)
-flexus.set "-L1i:rt_size"                 "8192"               # (RTSize) RegionTracker size (number of regions tracked)
-flexus.set "-L1i:size"                    "32768"              # (Size) Cache size in bytes
-flexus.set "-L1i:skew_block_set"          "0"                  # (SkewBlockSet) skew block set indices based on rt way
-flexus.set "-L1i:snoop_lru"               "0"                  # (SnoopLRU) Move block to LRU position when a Snoop (ReturnReq) is recieved for a block in Modified or Exclusive state
-flexus.set "-L1i:std_array"               "1"                  # (StdArray) Use Standard Tag Array instead of RegionTracker
-flexus.set "-L1i:text_flexpoints"         "1"                  # (TextFlexpoints) Store flexpoints as text files (compatible with old FastCache component)
-flexus.set "-L1i:trace_tracker_on"        "0"                  # (TraceTracker) Turn trace tracker on/off
-flexus.set "-L1i:using_traces"            "0"                  # (UsingTraces) References are coming from traces (allow certain inconsistancies
-flexus.set "-L2:CMPWidth"                 "1"                  # (CMPWidth) Number of cores per CMP chip (0 = sys width)
-flexus.set "-L2:always_multicast"         "0"                  # (AlwaysMulticast) Perform multicast instead of serial snooping
-flexus.set "-L2:assoc"                    "8"                  # (Associativity) Set associativity
-flexus.set "-L2:bsize"                    "64"                 # (BlockSize) Block size
-flexus.set "-L2:clean_evict"              "0"                  # (CleanEvictions) Issue clean evictions
-flexus.set "-L2:coherence_unit"           "64"                 # (CoherenceUnit) Coherence Unit
-flexus.set "-L2:directory_type"           "Infinite:Loc=Distributed:Interleaving=64" # (DirectoryType) Directory Type
-flexus.set "-L2:erb_size"                 "8"                  # (ERBSize) Evicted Region Buffer size
-flexus.set "-L2:level"                    "eL2"                # (CacheLevel) CacheLevel
-flexus.set "-L2:protocol"                 "SingleCMP"          # (Protocol) Protocol Type
-flexus.set "-L2:repl"                     "LRU"             # (ReplPolicy) Cache replacement policy (LRU | SetLRU | RegionLRU)
-flexus.set "-L2:rsize"                    "1024"               # (RegionSize) Region size in bytes
-flexus.set "-L2:rt_assoc"                 "16"                 # (RTAssoc) RegionTracker Associativity
-flexus.set "-L2:rt_size"                  "8192"               # (RTSize) RegionTracker size (number of regions tracked)
-flexus.set "-L2:seperate_id"              "1"                  # (SeparateID) Track Instruction and Data caches separately
-flexus.set "-L2:size"                     "8388608"            # (Size) Cache size in bytes
-flexus.set "-L2:std_array"                "1"                  # (StdArray) Use Standard Tag Array (true) or RegionTracker (false) default is true
-flexus.set "-L2:trace_tracker_on"         "0"                  # (TraceTracker) Turn trace tracker on/off
-flexus.set "-bpwarm:cores"                "1"                  # (Cores) Number of cores
-flexus.set "-feeder:CMPwidth"             "1"                  # (CMPWidth) Number of cores per CMP chip (0 = sys width)
-flexus.set "-feeder:decouple_addr_spaces" "0"                  # (DecoupleInstrDataSpaces) Decouple instruction from data address spaces
-flexus.set "-feeder:housekeeping_period"  "1000"               # (HousekeepingPeriod) Simics cycles between housekeeping events
-flexus.set "-feeder:ifetch"               "1"                  # (TrackIFetch) Track and report instruction fetches
-flexus.set "-feeder:send_non_allocating_stores" "0"                  # (SendNonAllocatingStores) Send NonAllocatingStores on/off
-flexus.set "-feeder:stick"                "0"                  # (SystemTickFrequency) CPU System tick frequency. 0.0 leaves frequency unchanged
-flexus.set "-magic-break:ckpt_cycle"      "0"                  # (CkptCycleInterval) # of cycles between checkpoints.
-flexus.set "-magic-break:ckpt_cycle_name" "0"                  # (CkptCycleName) Base cycle # from which to build checkpoint names.
-flexus.set "-magic-break:ckpt_iter"       "0"                  # (CheckpointOnIteration) Checkpoint simulation when CPU 0 reaches each iteration.
-flexus.set "-magic-break:ckpt_trans"      "-1"                 # (CheckpointEveryXTransactions) Quiesce and save every X transactions. -1 disables
-flexus.set "-magic-break:end_iter"        "-1"                 # (TerminateOnIteration) Terminate simulation when CPU 0 reaches iteration.  -1 disables
-flexus.set "-magic-break:end_trans"       "-1"                 # (TerminateOnTransaction) Terminate simulation after ## transactions.  -1 disables
-flexus.set "-magic-break:first_trans"     "0"                  # (FirstTransactionIs) Transaction number for first transaction.
-flexus.set "-magic-break:iter"            "0"                  # (EnableIterationCounts) Enable Iteration Counts
-flexus.set "-magic-break:min_cycle"       "0"                  # (CycleMinimum) Minimum number of cycles to run when TerminateOnTransaction is enabled.
-flexus.set "-magic-break:stats_trans"     "10000"              # (TransactionStatsInterval) Statistics interval on ## transactions.  -1 disables
-flexus.set "-magic-break:stop_cycle"      "0"                  # (StopCycle) Cycle on which to halt simulation.
-flexus.set "-magic-break:stop_on_magic"   "-1"                 # (TerminateOnMagicBreak) Terminate simulation on a specific magic breakpoint
-flexus.set "-magic-break:trans"           "1"                  # (EnableTransactionCounts) Enable Transaction Counts
-flexus.set "-magic-break:trans_type"      "0"                  # (TransactionType) Workload type.  0=TPCC/JBB  1=WEB
+### ########################################     TRACE     ########################################
+
+### bpwarm
+# BPWarm [trace]
+flexus.set "-bpwarm:cores"                                      "1" # "Number of cores" (Cores)
+
+
+### feeder
+# DecoupledFeeder [trace]
+flexus.set "-feeder:stick"                                    "0.0" # "CPU System tick frequency. 0.0 leaves frequency unchanged" (SystemTickFrequency)
+flexus.set "-feeder:housekeeping_period"                     "1000" # "Simics cycles between housekeeping events" (HousekeepingPeriod)
+flexus.set "-feeder:ifetch"                                     "1" # "Track and report instruction fetches" (TrackIFetch)
+flexus.set "-feeder:CMPwidth"                                   "1" # "Number of cores per CMP chip (0 = sys width)" (CMPWidth)
+flexus.set "-feeder:send_non_allocating_stores"                 "0" # "Send NonAllocatingStores on/off" (SendNonAllocatingStores)
+
+
+### L1d
+# FastCache [trace]
+flexus.set "-L1d:mt_width"                                      "1" # "Number of threads sharing this cache" (MTWidth)
+flexus.set "-L1d:size"                                      "32768" # "Cache size in bytes" (Size)
+flexus.set "-L1d:assoc"                                         "2" # "Set associativity" (Associativity)
+flexus.set "-L1d:bsize"                                        "64" # "Block size" (BlockSize)
+flexus.set "-L1d:clean_evict"                                   "1" # "Issue clean evictions" (CleanEvictions)
+flexus.set "-L1d:level"                                       "eL1" # "CacheLevel" (CacheLevel)
+flexus.set "-L1d:notify_reads"                                  "0" # "Notify on reads (does not notify on fast-hit)" (NotifyReads)
+flexus.set "-L1d:notify_writes"                                 "0" # "Notify on writes" (NotifyWrites)
+flexus.set "-L1d:trace_tracker_on"                              "0" # "Turn trace tracker on/off" (TraceTracker)
+flexus.set "-L1d:rsize"                                      "1024" # "Region size in bytes" (RegionSize)
+flexus.set "-L1d:rt_assoc"                                     "16" # "RegionTracker Associativity" (RTAssoc)
+flexus.set "-L1d:rt_size"                                    "8192" # "RegionTracker size (number of regions tracked)" (RTSize)
+flexus.set "-L1d:rt_repl"                                     "LRU" # "RegionTracker replacement policy (SetLRU | RegionLRU)" (RTReplPolicy)
+flexus.set "-L1d:erb_size"                                      "8" # "Evicted Region Buffer size" (ERBSize)
+flexus.set "-L1d:std_array"                                     "1" # "Use Standard Tag Array instead of RegionTracker" (StdArray)
+flexus.set "-L1d:block_scout"                                   "0" # "Use precise block sharing info" (BlockScout)
+flexus.set "-L1d:skew_block_set"                                "0" # "skew block set indices based on rt way" (SkewBlockSet)
+flexus.set "-L1d:protocol"                          "InclusiveMESI" # "Name of the coherence protocol (InclusiveMOESI)" (Protocol)
+flexus.set "-L1d:using_traces"                                  "0" # "References are coming from traces (allow certain inconsistancies" (UsingTraces)
+flexus.set "-L1d:text_flexpoints"                               "1" # "Store flexpoints as text files (compatible with old FastCache component)" (TextFlexpoints)
+flexus.set "-L1d:gzip_flexpoints"                               "0" # "Compress flexpoints with gzip" (GZipFlexpoints)
+flexus.set "-L1d:downgrade_lru"                                 "0" # "Move block to LRU position when a Downgrade is recieved for a block in Modified or Exclusive state" (DowngradeLRU)
+flexus.set "-L1d:snoop_lru"                                     "0" # "Move block to LRU position when a Snoop (ReturnReq) is recieved for a block in Modified or Exclusive state" (SnoopLRU)
+### L1i
+# FastCache [trace]
+flexus.set "-L1i:mt_width"                                      "1" # "Number of threads sharing this cache" (MTWidth)
+flexus.set "-L1i:size"                                      "49152" # "Cache size in bytes" (Size)
+flexus.set "-L1i:assoc"                                         "3" # "Set associativity" (Associativity)
+flexus.set "-L1i:bsize"                                        "64" # "Block size" (BlockSize)
+flexus.set "-L1i:clean_evict"                                   "1" # "Issue clean evictions" (CleanEvictions)
+flexus.set "-L1i:level"                                      "eL1I" # "CacheLevel" (CacheLevel)
+flexus.set "-L1i:notify_reads"                                  "0" # "Notify on reads (does not notify on fast-hit)" (NotifyReads)
+flexus.set "-L1i:notify_writes"                                 "0" # "Notify on writes" (NotifyWrites)
+flexus.set "-L1i:trace_tracker_on"                              "0" # "Turn trace tracker on/off" (TraceTracker)
+flexus.set "-L1i:rsize"                                      "1024" # "Region size in bytes" (RegionSize)
+flexus.set "-L1i:rt_assoc"                                     "16" # "RegionTracker Associativity" (RTAssoc)
+flexus.set "-L1i:rt_size"                                    "8192" # "RegionTracker size (number of regions tracked)" (RTSize)
+flexus.set "-L1i:rt_repl"                                     "LRU" # "RegionTracker replacement policy (SetLRU | RegionLRU)" (RTReplPolicy)
+flexus.set "-L1i:erb_size"                                      "8" # "Evicted Region Buffer size" (ERBSize)
+flexus.set "-L1i:std_array"                                     "1" # "Use Standard Tag Array instead of RegionTracker" (StdArray)
+flexus.set "-L1i:block_scout"                                   "0" # "Use precise block sharing info" (BlockScout)
+flexus.set "-L1i:skew_block_set"                                "0" # "skew block set indices based on rt way" (SkewBlockSet)
+flexus.set "-L1i:protocol"                          "InclusiveMESI" # "Name of the coherence protocol (InclusiveMOESI)" (Protocol)
+flexus.set "-L1i:using_traces"                                  "0" # "References are coming from traces (allow certain inconsistancies" (UsingTraces)
+flexus.set "-L1i:text_flexpoints"                               "1" # "Store flexpoints as text files (compatible with old FastCache component)" (TextFlexpoints)
+flexus.set "-L1i:gzip_flexpoints"                               "0" # "Compress flexpoints with gzip" (GZipFlexpoints)
+flexus.set "-L1i:downgrade_lru"                                 "0" # "Move block to LRU position when a Downgrade is recieved for a block in Modified or Exclusive state" (DowngradeLRU)
+flexus.set "-L1i:snoop_lru"                                     "0" # "Move block to LRU position when a Snoop (ReturnReq) is recieved for a block in Modified or Exclusive state" (SnoopLRU)
+### L2
+# FastCMPCache [trace]
+flexus.set "-L2:CMPWidth"                                       "1" # "Number of cores per CMP chip (0 = sys width)" (CMPWidth)
+flexus.set "-L2:size"                                     "2097152" # "Cache size in bytes" (Size)
+flexus.set "-L2:assoc"                                         "16" # "Set associativity" (Associativity)
+flexus.set "-L2:bsize"                                         "64" # "Block size" (BlockSize)
+flexus.set "-L2:clean_evict"                                    "0" # "Issue clean evictions" (CleanEvictions)
+flexus.set "-L2:level"                                        "eL2" # "CacheLevel" (CacheLevel)
+flexus.set "-L2:trace_tracker_on"                               "0" # "Turn trace tracker on/off" (TraceTracker)
+flexus.set "-L2:repl"                                         "LRU" # "RegionTracker replacement policy (SetLRU | RegionLRU)" (RTReplPolicy)
+flexus.set "-L2:rsize"                                       "1024" # "Region size in bytes" (RegionSize)
+flexus.set "-L2:rt_assoc"                                      "16" # "RegionTracker Associativity" (RTAssoc)
+flexus.set "-L2:rt_size"                                     "8192" # "RegionTracker size (number of regions tracked)" (RTSize)
+flexus.set "-L2:erb_size"                                       "8" # "Evicted Region Buffer size" (ERBSize)
+flexus.set "-L2:std_array"                                      "1" # "Use Standard Tag Array instead of RegionTracker" (StdArray)
+flexus.set "-L2:directory_type"                     "Infinite:Loc=Distributed:Interleaving=64" # "Directory Type" (DirectoryType)
+flexus.set "-L2:protocol"                               "SingleCMP" # "Protocol Type" (Protocol)
+flexus.set "-L2:always_multicast"                               "0" # "Perform multicast instead of serial snooping" (AlwaysMulticast)
+flexus.set "-L2:seperate_id"                                    "1" # "Track Instruction and Data caches separately" (SeparateID)
+flexus.set "-L2:coherence_unit"                                "64" # "Coherence Unit" (CoherenceUnit)
+
+
+### ########################################     TIMING     ########################################
+
+### mmu
+# MMU [trace+timing]
+flexus.set "-mmu:cores"                                         "1" # "Number of cores" (Cores)
+flexus.set "-mmu:itlbsize"                                     "64" # "Size of the Instruction TLB" (iTLBSize)
+flexus.set "-mmu:dtlbsize"                                     "64" # "Size of the Data TLB" (dTLBSize)
+flexus.set "-mmu:perfecttlb"                                "false" # "TLB never misses" (PerfectTLB)
+
+
+### fag
+# FetchAddressGenerate [timing]
+flexus.set "-fag:faddrs"                                        "3" # "Max fetch addresses generated per cycle" (MaxFetchAddress)
+flexus.set "-fag:bpreds"                                        "2" # "Max branches predicted per cycle" (MaxBPred)
+flexus.set "-fag:threads"                                       "1" # "Number of threads under control of this FAG" (Threads)
+
+
+### ufetch
+# uFetch [timing]
+flexus.set "-ufetch:faq"                                       "24" # "Fetch address queue size" (FAQSize)
+flexus.set "-ufetch:flines"                                     "2" # "Max i-cache lines fetched per cycle" (MaxFetchLines)
+flexus.set "-ufetch:finst"                                      "3" # "Max instructions fetched per cycle" (MaxFetchInstructions)
+flexus.set "-ufetch:iline"                                     "64" # "Icache line size in bytes" (ICacheLineSize)
+flexus.set "-ufetch:perfect"                                    "0" # "Use a perfect ICache" (PerfectICache)
+flexus.set "-ufetch:prefetch"                                   "1" # "Enable Next-line Prefetcher" (PrefetchEnabled)
+flexus.set "-ufetch:clean_evict"                                "1" # "Enable eviction messages" (CleanEvict)
+flexus.set "-ufetch:size"                                   "49152" # "ICache size in bytes" (Size)
+flexus.set "-ufetch:associativity"                              "3" # "ICache associativity" (Associativity)
+flexus.set "-ufetch:miss_queue_size"                            "4" # "Maximum size of the fetch miss queue" (MissQueueSize)
+flexus.set "-ufetch:threads"                                    "1" # "Number of threads under control of this uFetch" (Threads)
+flexus.set "-ufetch:send_acks"                                  "1" # "Send acknowledgements when we received data" (SendAcks)
+flexus.set "-ufetch:use_reply_channel"                          "1" # "Send replies on Reply Channel and only Evicts on Snoop Channel" (UseReplyChannel)
+flexus.set "-ufetch:evict_on_snoop"                             "0" # "Send evicts on Snoop Channel (otherwise use Request Channel)" (EvictOnSnoop)
+
+
+### decoder
+# armDecoder [timing]
+flexus.set "-decoder:fiq"                                       "8" # "Fetch instruction queue size" (FIQSize)
+flexus.set "-decoder:dispatch"                                  "3" # "Maximum dispatch per cycle" (DispatchWidth)
+flexus.set "-decoder:multithread"                               "0" # "Enable multi-threaded execution" (Multithread)
+
+
+### uarcharm
+# uarcharm [timing]
+flexus.set "-uarcharm:rob"                                    "128" # "Reorder buffer size" (ROBSize)
+flexus.set "-uarcharm:sb"                                      "32" # "Store buffer size" (SBSize)
+flexus.set "-uarcharm:naw_bypass_sb"                            "0" # "Allow Non-Allocating-Writes to bypass store-buffer" (NAWBypassSB)
+flexus.set "-uarcharm:naw_wait_at_sync"                         "0" # "Force MEMBAR #Sync to wait for non-allocating writes to finish" (NAWWaitAtSync)
+flexus.set "-uarcharm:retire"                                   "3" # "Retirement width" (RetireWidth)
+flexus.set "-uarcharm:memports"                                 "2" # "Memory Ports" (MemoryPorts)
+flexus.set "-uarcharm:snoopports"                               "1" # "Snoop Ports" (SnoopPorts)
+flexus.set "-uarcharm:storeprefetch"                           "30" # "Simultaneous store prefeteches" (StorePrefetches)
+flexus.set "-uarcharm:prefetch_early"                           "0" # "Issue store prefetch requests when address resolves" (PrefetchEarly)
+flexus.set "-uarcharm:consistency"                              "1" # "Consistency Model" (ConsistencyModel)
+flexus.set "-uarcharm:coherence"                               "64" # "Coherence Unit" (CoherenceUnit)
+flexus.set "-uarcharm:break_on_resynch"                         "0" # "Break on resynchronizer" (BreakOnResynchronize)
+flexus.set "-uarcharm:spin_control"                             "0" # "Enable spin control" (SpinControl)
+flexus.set "-uarcharm:spec_order"                               "0" # "Speculate on Memory Order" (SpeculativeOrder)
+flexus.set "-uarcharm:spec_atomic_val"                          "0" # "Speculate on the Value of Atomics" (SpeculateOnAtomicValue)
+flexus.set "-uarcharm:spec_atomic_val_perfect"                  "0" # "Use perfect atomic value prediction" (SpeculateOnAtomicValuePerfect)
+flexus.set "-uarcharm:spec_ckpts"                               "0" # "Number of checkpoints allowed.  0 for infinite" (SpeculativeCheckpoints)
+flexus.set "-uarcharm:ckpt_threshold"                           "0" # "Number of instructions between checkpoints.  0 disables periodic checkpoints" (CheckpointThreshold)
+flexus.set "-uarcharm:early_sgp"                                "0" # "Notify SGP Early" (EarlySGP)
+flexus.set "-uarcharm:track_parallel"                           "0" # "Track which memory accesses can proceed in parallel" (TrackParallelAccesses)
+flexus.set "-uarcharm:in_order_memory"                          "0" # "Only allow ROB/SB head to issue to memory" (InOrderMemory)
+flexus.set "-uarcharm:in_order_execute"                         "0" # "Ensure that instructions execute in order" (InOrderExecute)
+flexus.set "-uarcharm:multithread"                              "0" # "Enable multi-threaded execution" (Multithread)
+flexus.set "-uarcharm:on-chip-se"                               "1" # "On-Chip Side-Effect latency" (OnChipLatency)
+flexus.set "-uarcharm:off-chip-se"                              "90" # "Off-Chip Side-Effect latency" (OffChipLatency)
+flexus.set "-uarcharm:numIntAlu"                                "2" # "Number of integer ALUs" (NumIntAlu)
+flexus.set "-uarcharm:intAluOpLatency"                          "1" # "End-to-end latency of an integer ALU operation" (IntAluOpLatency)
+flexus.set "-uarcharm:intAluOpPipelineResetTime"                "1" # "Number of cycles required between subsequent integer ALU operations" (IntAluOpPipelineResetTime)
+flexus.set "-uarcharm:numIntMult"                               "1" # "Number of integer MUL/DIV units" (NumIntMult)
+flexus.set "-uarcharm:intMultOpLatency"                         "3" # "End-to-end latency of an integer MUL operation" (IntMultOpLatency)
+flexus.set "-uarcharm:intMultOpPipelineResetTime"               "1" # "Number of cycles required between subsequent integer MUL operations" (IntMultOpPipelineResetTime)
+flexus.set "-uarcharm:intDivOpLatency"                         "16" # "End-to-end latency of an integer DIV operation" (IntDivOpLatency)
+flexus.set "-uarcharm:intDivOpPipelineResetTime"                "6" # "Number of cycles required between subsequent integer DIV operations" (IntDivOpPipelineResetTime)
+flexus.set "-uarcharm:numFpAlu"                                 "1" # "Number of FP ALUs" (NumFpAlu)
+flexus.set "-uarcharm:fpAddOpLatency"                           "3" # "End-to-end latency of an FP ADD/SUB operation" (FpAddOpLatency)
+flexus.set "-uarcharm:fpAddOpPipelineResetTime"                 "1" # "Number of cycles required between subsequent FP ADD/SUB operations" (FpAddOpPipelineResetTime)
+flexus.set "-uarcharm:fpCmpOpLatency"                           "1" # "End-to-end latency of an FP compare operation" (FpCmpOpLatency)
+flexus.set "-uarcharm:fpCmpOpPipelineResetTime"                 "1" # "Number of cycles required between subsequent FP compare operations" (FpCmpOpPipelineResetTime)
+flexus.set "-uarcharm:fpCvtOpLatency"                           "4" # "End-to-end latency of an FP convert operation" (FpCvtOpLatency)
+flexus.set "-uarcharm:fpCvtOpPipelineResetTime"                 "1" # "Number of cycles required between subsequent FP convert operations" (FpCvtOpPipelineResetTime)
+flexus.set "-uarcharm:numFpMult"                                "1" # "Number of FP MUL/DIV units" (NumFpMult)
+flexus.set "-uarcharm:fpMultOpLatency"                          "5" # "End-to-end latency of an FP MUL operation" (FpMultOpLatency)
+flexus.set "-uarcharm:fpMultOpPipelineResetTime"                "2" # "Number of cycles required between subsequent FP MUL operations" (FpMultOpPipelineResetTime)
+flexus.set "-uarcharm:fpDivOpLatency"                           "6" # "End-to-end latency of an FP DIV operation" (FpDivOpLatency)
+flexus.set "-uarcharm:fpDivOpPipelineResetTime"                 "5" # "Number of cycles required between subsequent FP DIV operations" (FpDivOpPipelineResetTime)
+flexus.set "-uarcharm:fpSqrtOpLatency"                          "6" # "End-to-end latency of an FP SQRT operation" (FpSqrtOpLatency)
+flexus.set "-uarcharm:fpSqrtOpPipelineResetTime"                "5" # "Number of cycles required between subsequent FP SQRT operations" (FpSqrtOpPipelineResetTime)
+
+
+### L1d
+# Cache [timing]
+flexus.set "-L1d:cores"                                         "1" # "Number of cores" (Cores)
+flexus.set "-L1d:bsize"                                        "64" # "Block size" (BlockSize)
+flexus.set "-L1d:ports"                                         "2" # "Number of ports on data and tag arrays" (Ports)
+flexus.set "-L1d:banks"                                         "1" # "number of banks on the data and tag arrays" (Banks)
+flexus.set "-L1d:tag_lat"                                       "1" # "Total latency of tag pipeline" (TagLatency)
+flexus.set "-L1d:dup_tag_issue_lat"                             "1" # "Minimum delay between issues to tag pipeline" (TagIssueLatency)
+flexus.set "-L1d:data_lat"                                      "2" # "Total latency of data pipeline" (DataLatency)
+flexus.set "-L1d:data_issue_lat"                                "1" # "Minimum delay between issues to data pipeline" (DataIssueLatency)
+flexus.set "-L1d:level"                                       "eL1" # "CacheLevel" (CacheLevel)
+flexus.set "-L1d:queue_size"                                    "8" # "Size of input and output queues" (QueueSizes)
+flexus.set "-L1d:pre_queue_size"                                "4" # "Size of input arbitration queues" (PreQueueSizes)
+flexus.set "-L1d:maf"                                          "32" # "Number of MAF entries" (MAFSize)
+flexus.set "-L1d:maf_targets"                                   "0" # "Number of MAF targets per request" (MAFTargetsPerRequest)
+flexus.set "-L1d:eb"                                           "32" # "Number of Evict Buffer entries" (EvictBufferSize)
+flexus.set "-L1d:snoops"                                        "8" # "Number of Snoop Buffer entries" (SnoopBufferSize)
+flexus.set "-L1d:probe_fetchmiss"                               "0" # "Probe hierarchy on Ifetch miss" (ProbeFetchMiss)
+flexus.set "-L1d:bustime_nodata"                                "1" # "Bus transfer time - no data" (BusTime_NoData)
+flexus.set "-L1d:bustime_data"                                  "2" # "Bus transfer time - data" (BusTime_Data)
+flexus.set "-L1d:allow_evict_clean"                             "1" # "Cause the cache to evict clean blocks" (EvictClean)
+flexus.set "-L1d:evict_writable_has_data"                       "1" # "Send data with EvictWritable messages" (EvictWritableHasData)
+flexus.set "-L1d:evict_on_snoop"                                "0" # "Send evictions on Snoop channel" (EvictOnSnoop)
+flexus.set "-L1d:fast_evict_clean"                              "0" # "Send clean evicts without reserving data bus" (FastEvictClean)
+flexus.set "-L1d:no_bus"                                        "0" # "No bus model (i.e., infinite BW, no latency)" (NoBus)
+flexus.set "-L1d:trace_address"                                 "0" # "Address to initiate tracing" (TraceAddress)
+flexus.set "-L1d:cache_type"                        "InclusiveMESI:snoop_lru=false" # "Type of cache (InclusiveMOESI)" (CacheType)
+flexus.set "-L1d:array_config"                      "STD:size=32768:assoc=2:repl=LRU" # "Configuration of cache array (STD:sets=1024:assoc=16:repl=LRU" (ArrayConfiguration)
+flexus.set "-L1d:use_reply_channel"                             "1" # "Separate Reply and Snoop channels on BackSide" (UseReplyChannel)
+flexus.set "-L1d:text_flexpoints"                               "0" # "Store flexpoints as text files (compatible with old FastCache component)" (TextFlexpoints)
+flexus.set "-L1d:gzip_flexpoints"                               "1" # "Compress flexpoints with gzip" (GZipFlexpoints)
+
+
+### L2
+# CMPCache [timing]
+flexus.set "-L2:cores"                                          "2" # "Number of cores" (Cores)
+flexus.set "-L2:bsize"                                         "64" # "Block size" (BlockSize)
+flexus.set "-L2:banks"                                          "1" # "number of directory banks in each group" (Banks)
+flexus.set "-L2:bank_interleaving"                             "64" # "interleaving between directory banks (64 bytes)" (BankInterleaving)
+flexus.set "-L2:groups"                                         "1" # "number of directory bank groups" (Groups)
+flexus.set "-L2:group_interleaving"                          "4096" # "interleaving between directory bank groups (1024 bytes)" (GroupInterleaving)
+flexus.set "-L2:dir_lat"                                        "1" # "Total latency of directory lookup" (DirLatency)
+flexus.set "-L2:dir_issue_lat"                                  "1" # "Minimum delay between issues to the directory" (DirIssueLatency)
+flexus.set "-L2:tag_lat"                                        "1" # "Total latency of tag array lookup" (TagLatency)
+flexus.set "-L2:tag_issue_lat"                                  "1" # "Minimum delay between issues to the tag array" (TagIssueLatency)
+flexus.set "-L2:data_lat"                                       "3" # "Total latency of data array lookup" (DataLatency)
+flexus.set "-L2:data_issue_lat"                                 "1" # "Minimum delay between issues to the data array" (DataIssueLatency)
+flexus.set "-L2:queue_size"                                    "32" # "Size of input and output queues" (QueueSize)
+flexus.set "-L2:maf_size"                                     "256" # "Number of MAF entries" (MAFSize)
+flexus.set "-L2:dir_eb_size"                                   "16" # "Number of Evict Buffer entries for the directory" (DirEvictBufferSize)
+flexus.set "-L2:cache_eb_size"                                "256" # "Number of Evict Buffer entries for the cache" (CacheEvictBufferSize)
+flexus.set "-L2:policy"                          "NonInclusiveMESI" # "Coherence policy for higher caches (NonInclusiveMESI)" (Policy)
+flexus.set "-L2:controller"                               "Default" # "Type of controller (Default or Detailed)" (ControllerType)
+flexus.set "-L2:dir_type"                                     "inf" # "Type of directory (infinite, std, region, etc.)" (DirectoryType)
+flexus.set "-L2:dir_config"                          "skew_shift=0" # "Configuration of directory array (sets=1024:assoc=16)" (DirectoryConfig)
+flexus.set "-L2:level"                                        "eL2" # "CacheLevel" (CacheLevel)
+flexus.set "-L2:allow_evict_clean"                              "0" # "Cause the cache to evict clean blocks" (EvictClean)
+flexus.set "-L2:array_config"                       "STD:total_sets=2048:assoc=16:repl=LRU" # "Configuration of cache array (STD:sets=1024:assoc=16:repl=LRU" (ArrayConfiguration)
+
+
+### nic
+# MultiNic2 [timing]
+flexus.set "-nic:vc"                                            "3" # "Virtual channels" (VChannels)
+flexus.set "-nic:recv-capacity"                                 "4" # "Recv Queue Capacity" (RecvCapacity)
+flexus.set "-nic:send-capacity"                                 "4" # "Send Queue Capacity" (SendCapacity)
+
+
+### network
+# MemoryNetwork [timing]
+flexus.set "-network:topology-file"             "1x3-mesh.topology" # "Network topology file" (NetworkTopologyFile)
+flexus.set "-network:nodes"                                     "3" # "Number of Nodes" (NumNodes)
+flexus.set "-network:virtual-channels"                          "3" # "Number of virtual channels" (VChannels)
+
+
+### net-mapper
+# SplitDestinationMapper [timing]
+flexus.set "-net-mapper:Cores"                                  "1" # "Number of cores" (Cores)
+flexus.set "-net-mapper:MemControllers"                         "1" # "Number of memory controllers" (MemControllers)
+flexus.set "-net-mapper:Directories"                            "1" # "Number of directories" (Directories)
+flexus.set "-net-mapper:Banks"                                  "1" # "Number of banks" (Banks)
+flexus.set "-net-mapper:DirInterleaving"                       "64" # "Interleaving between directories (in bytes)" (DirInterleaving)
+flexus.set "-net-mapper:MemInterleaving"                       "64" # "Interleaving between memory controllers (in bytes)" (MemInterleaving)
+flexus.set "-net-mapper:DirXORShift"                           "-1" # "XOR high order bits after shifting this many bits when calculating directory index" (DirXORShift)
+flexus.set "-net-mapper:MemXORShift"                           "-1" # "XOR high order bits after shifting this many bits when calculating memory index" (MemXORShift)
+flexus.set "-net-mapper:DirLocation"                  "Distributed" # "Directory location (Distributed|AtMemory)" (DirLocation)
+flexus.set "-net-mapper:MemLocation"                            "0" # "Memory controller locations (ex: '8,15,24,31,32,39,48,55')" (MemLocation)
+flexus.set "-net-mapper:MemReplyToDir"                          "1" # "Send memory replies to the directory (instead of original requester)" (MemReplyToDir)
+flexus.set "-net-mapper:MemAcksNeedData"                        "1" # "When memory replies directly to requester, require data with final ack" (MemAcksNeedData)
+flexus.set "-net-mapper:TwoPhaseWB"                             "0" # "2 Phase Write-Back sends NAcks to requester, not directory" (TwoPhaseWB)
+flexus.set "-net-mapper:LocalDir"                               "0" # "Treate directory as always being local to the requester" (LocalDir)
+
+
+### memory
+# MemoryLoopback [timing]
+flexus.set "-memory:time"                                      "90" # "Access time" (Delay)
+flexus.set "-memory:max_requests"                              "64" # "Maximum requests queued in loopback" (MaxRequests)
+flexus.set "-memory:UseFetchReply"                              "1" # "Send FetchReply in response to FetchReq (instead of MissReply)" (UseFetchReply)
+
+
+### memory-map
+# MemoryMap [timing]
+flexus.set "-memory-map:pagesize"                            "4096" # "Page size in bytes (used by statistics only)" (PageSize)
+flexus.set "-memory-map:nodes"                                  "1" # "Number of Nodes" (NumNodes)
+flexus.set "-memory-map:round_robin"                            "1" # "Use static round-robin page allocation" (RoundRobin)
+flexus.set "-memory-map:write_page_map"                         "1" # "Write page map as pages are created" (CreatePageMap)
+flexus.set "-memory-map:page_map"                               "0" # "Load Page Map on start" (ReadPageMap)
+
+
+### magic-break
+# MagicBreak MagicBreak [timing+trace]
+flexus.set "-magic-break:iter"                                  "0" # "Enable Iteration Counts" (EnableIterationCounts)
+flexus.set "-magic-break:stop_on_magic"                        "-1" # "Terminate simulation on a specific magic breakpoint" (TerminateOnMagicBreak)
+flexus.set "-magic-break:end_iter"                             "-1" # "Terminate simulation when CPU 0 reaches iteration.  -1 disables" (TerminateOnIteration)
+flexus.set "-magic-break:ckpt_iter"                             "0" # "Checkpoint simulation when CPU 0 reaches each iteration." (CheckpointOnIteration)
+flexus.set "-magic-break:end_trans"                            "-1" # "Terminate simulation after ## transactions.  -1 disables" (TerminateOnTransaction)
+flexus.set "-magic-break:trans"                                 "1" # "Enable Transaction Counts" (EnableTransactionCounts)
+flexus.set "-magic-break:trans_type"                            "0" # "Workload type.  0=TPCC/JBB  1=WEB" (TransactionType)
+flexus.set "-magic-break:stats_trans"                        "1000" # "Statistics interval on ## transactions.  -1 disables" (TransactionStatsInterval)
+flexus.set "-magic-break:ckpt_trans"                           "-1" # "Quiesce and save every X transactions. -1 disables" (CheckpointEveryXTransactions)
+flexus.set "-magic-break:first_trans"                           "0" # "Transaction number for first transaction." (FirstTransactionIs)
+flexus.set "-magic-break:min_cycle"                             "0" # "Minimum number of cycles to run when TerminateOnTransaction is enabled." (CycleMinimum)
+flexus.set "-magic-break:stop_cycle"                            "0" # "Cycle on which to halt simulation." (StopCycle)
+flexus.set "-magic-break:ckpt_cycle"                            "0" # "# of cycles between checkpoints." (CkptCycleInterval)
+flexus.set "-magic-break:ckpt_cycle_name"                       "0" # "Base cycle # from which to build checkpoint names." (CkptCycleName)
+
+### DRAMSim [timing]
+flexus.set "-memory:device-file"   "/qflex/flexus/components/DRAMController/DRAMSim2/ini/DDR4_micron_16M_8B_x8_sg15.ini"	#To be updated
+flexus.set "-memory:memory-system-file"                "/qflex/flexus/components/DRAMController/DRAMSim2/system.ini"		#To be updated
+flexus.set "-memory:interleaving"                              "64" # address interleaving for memory controllers (in bytes)
+flexus.set "-memory:frequency"                               "2000" # "CPU frequency"
+flexus.set "-memory:dyn_size"                                   "1" # "0 - fix DRAM size statically based on 'memory:size', 1- dynamically adjust DRAM size based on the workload"
+flexus.set "-memory:size"                                    "8192" # "Total memory size in MB"
+flexus.set "-memory:max_replies"                               "32" # "Maximum replies queued in loopback" (MaxReplies)
+flexus.set "-memory:max_requests"                              "32" # "Maximum requests queued in loopback" (MaxRequests)
+flexus.set "-memory:InterconnectDelay"                         "20" # Circuitry delay in nanoseconds
+
+### Custom
+flexus.set "-L1d:array_config"                      "STD:size=32768:assoc=2:repl=LRU" #
+flexus.set "-L1d:size"                                      "32768" #
+flexus.set "-L2:array_config"                           "STD:total_sets=2048:assoc=16:repl=LRU" #
+flexus.set "-L2:size"                                     "2097152" #
+flexus.set "-L2:assoc"                                         "16" #
+
+### Adjust according to the system width
+flexus.set "-L2:banks"                                          "1" #
+flexus.set "-L2:cores"                                          "2" #
+flexus.set "-L2:CMPWidth"                                       "1" #
+flexus.set "-network:nodes"                                     "3" #
+flexus.set "-network:topology-file"             "/qflex/flexus/simulators/KnottyKraken/1x3-mesh.topology"	#To be updated
+flexus.set "-net-mapper:Cores"                                  "1" #
+flexus.set "-net-mapper:Directories"                            "1" #
+flexus.set "-net-mapper:Banks"                                  "1" #
+flexus.set "-net-mapper:MemControllers"                         "1" #
+flexus.set "-net-mapper:MemLocation"                            "0" #
+flexus.set "-memory-map:nodes"                                  "1" #
+flexus.set "-feeder:CMPwidth"                                   "1" #
