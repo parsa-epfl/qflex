@@ -1,7 +1,7 @@
 # QFlex #
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.504368.svg)](https://doi.org/10.5281/zenodo.504368)
 
-QFlex is a full-system cycle-accurate computer architecture simulator of multi-node computer systems. QFlex is a multi-layer software stack composed of QEMU, Flexus, and NS-3. QEMU is a widely-used machine emulator, which allows to boot any machine and execute unmodified applications and operating systems. Flexus is a cycle-accurate modeling tool of complete servers, which enables modeling modern CPUs, with various core types, network-on-chip topologies, and cache organizations; and various DRAM-based memory systems. NS-3 is a popular network simulator that allows to glue all the simulated server nodes together with different network integration characteristics. 
+QFlex is a full-system cycle-accurate computer architecture simulator of multi-node computer systems. QFlex is a multi-layer software stack composed of QEMU, Flexus, and NS-3. QEMU is a widely-used machine emulator, which allows to boot any machine and execute unmodified applications and operating systems. Flexus is a cycle-accurate tool for modelling complete servers, encompassing modern CPUs with various core types, network-on-chip topologies, cache organizations, and various DRAM-based memory systems. NS-3 is a popular network simulator that glues all simulated server nodes together with different network integration characteristics. 
 
 More information is available in the QFlex [website][qfw].
 
@@ -15,13 +15,13 @@ licensing terms of the various components. For more information, please refer to
 
 # Running QFlex #
 
-Instructions on how to run QFlex are available [here][qfd]. Along with QFlex, we provide an image of one of the CloudSuite benchmarks, [Data Caching][csdc], running on Debian 8 for 64-bit ARM. This way, QFlex users can easily perform a microarchitectural study of the aforesaid benchmark.
+Instructions on how to run QFlex are available [here][qfd]. Along with QFlex, we provide an image of one of the CloudSuite benchmarks, [Data Caching][csdc], running on Debian 8 for 64-bit ARM. This way, QFlex users can easily perform a microarchitectural study of the aforementioned benchmark.
 
 QFlex is still a work in progress, and at this stage, we provide limited functionality. Currently, QFlex is able perform full-system trace-based simulation of a single server node. Hence, no timing models are available yet.
 
 # Support #
 
-We encourage QFlex users to use GitHub issues for requests for enhacements, questions or bug fixes.
+We encourage QFlex users to use GitHub issues for requests for enhancements, questions or bug fixes.
 
 [qfw]: http://qflex.epfl.ch/
 [qfl]: http://qflex.epfl.ch/license/

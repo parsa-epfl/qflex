@@ -1,0 +1,117 @@
+#!/usr/bin/python
+
+#  DO-NOT-REMOVE begin-copyright-block
+# QFlex consists of several software components that are governed by various
+# licensing terms, in addition to software that was developed internally.
+# Anyone interested in using QFlex needs to fully understand and abide by the
+# licenses governing all the software components.
+#
+# ### Software developed externally (not by the QFlex group)
+#
+#     * [NS-3] (https://www.gnu.org/copyleft/gpl.html)
+#     * [QEMU] (http://wiki.qemu.org/License)
+#     * [SimFlex] (http://parsa.epfl.ch/simflex/)
+#     * [GNU PTH] (https://www.gnu.org/software/pth/)
+#
+# ### Software developed internally (by the QFlex group)
+# **QFlex License**
+#
+# QFlex
+# Copyright (c) 2020, Parallel Systems Architecture Lab, EPFL
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without modification,
+# are permitted provided that the following conditions are met:
+#
+#     * Redistributions of source code must retain the above copyright notice,
+#       this list of conditions and the following disclaimer.
+#     * Redistributions in binary form must reproduce the above copyright notice,
+#       this list of conditions and the following disclaimer in the documentation
+#       and/or other materials provided with the distribution.
+#     * Neither the name of the Parallel Systems Architecture Laboratory, EPFL,
+#       nor the names of its contributors may be used to endorse or promote
+#       products derived from this software without specific prior written
+#       permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE PARALLEL SYSTEMS ARCHITECTURE LABORATORY,
+# EPFL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+# GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+# THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  DO-NOT-REMOVE end-copyright-block
+
+import sys
+import logging
+import argparse
+
+from qfsystem import QFSystem
+
+def run_system(argv):
+    # Parse arguments
+    help_text = """Captain:
+    Runs a single or multiple QFlex instances (QFInstance) as specified in a system config file.
+    Each QFInstance is configured in an instance config file.
+    Captain handles setting up the NS3 network when running multiple instances.
+    Captain provides a QMP shell to interface with the QFInstance"""
+
+    parser = argparse.ArgumentParser(description=help_text, formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument(dest="file", metavar="SETUP_FILE", help="run QFlex instance(s) based on the system config file")
+    parser.add_argument("-p", action="store_true", dest="print_command", help="print QFlex commands for all instances instead of launching the system")
+    parser.add_argument("-qmp", action="store_true", dest="qmp", help="launch a qmp shell to interface with the running QEMU instances")
+    parser.add_argument("-o", dest="output_path", help="save output of each instance in a log file of the same name under given directory")
+    parser.add_argument("-f", dest="log_file", help="redirect logs to a file")
+    parser.add_argument("-v", dest="log_level", help="set the verbosity of the logs", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
+    args = parser.parse_args(argv)
+
+    # Configure logging
+    if __name__ == "__main__":
+        if args.log_level:
+            log_level = args.log_level
+        else:
+            log_level = "INFO"
+
+        if args.log_file:
+            logging.basicConfig(filename=args.log_file, level=log_level, format="%(levelname)s: %(message)s")
+        else:
+            logging.basicConfig(level=log_level, format="%(levelname)s: %(message)s")
+
+    # Parse system config file
+    qflex_system = QFSystem(args.file)
+    if not qflex_system.parse_system():
+        return False
+
+    # Print command and exit
+    if args.print_command:
+        qflex_system.print_cmd()
+        return True
+
+    # Set save output
+    if args.output_path:
+        qflex_system.set_save_output(args.output_path)
+
+    # Set QMP interface
+    if args.qmp:
+        qflex_system.set_qmp()
+
+    # Start system
+    qflex_system.start_execution()
+
+    # Start QMP interface
+    if args.qmp:
+        qflex_system.start_qmp()
+
+    # Wait for termination
+    while not qflex_system.check_exit():
+        pass
+
+    # Report termination cause
+    # logging.debug("Exit Code: {0}".format(qflex_system.get_exit_message()))
+    return True
+
+if __name__ == "__main__":
+    run_system(sys.argv[1:])
