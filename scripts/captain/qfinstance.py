@@ -203,7 +203,6 @@ class QFInstance:
                         # Hardwired features
                         qflex_command.extend(["-singlestep"])
                         qflex_command.extend(["-d", "nochain"])
-                        qflex_command.extend(["-d", "in_asm"])
 
         # Name
         qflex_command.extend(["-name", self.__name])
@@ -211,7 +210,9 @@ class QFInstance:
         qflex_command.append("-nographic")
         qflex_command.append("-exton")
         if simulation_type in ["checkpoint", "timing", "trace"]:
-            qflex_command.extend(["-accel", "tcg,thread=single"])
+            # qflex_command.extend(["-accel", "tcg,thread=single"])
+            qflex_command.extend(["-qflex_d ", "loop=20,ff"])
+
         qflex_command.extend(["-rtc", "clock=vm"])
         # qflex_command.extend(["-append", "'root=/dev/sda2'"])
         # qflex_command.extend(["-append", "'console=ttyAMA0'"])

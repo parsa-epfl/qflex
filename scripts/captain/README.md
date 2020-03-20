@@ -120,6 +120,8 @@ This is left to be specified per instance, separately in their own instance conf
 The below parameters must also be set.
 This parameter can be set to `off` or can be omitted
 (along with the following parameters) if icount is not needed.
+`icount` must be set to `on` for `trace` and `timing` modes,
+and `off` for `emulation` mode.
 More details can be found in QEMU documentation.
   * **icount_shift**: icount shift amount, in integers.
   * **icount_sleep**: Enable icount sleep mode by setting this parameter to `on`.
