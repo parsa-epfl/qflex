@@ -211,7 +211,7 @@ class QFInstance:
         qflex_command.append("-exton")
         if simulation_type in ["checkpoint", "timing", "trace"]:
             # qflex_command.extend(["-accel", "tcg,thread=single"])
-            qflex_command.extend(["-qflex_d ", "loop=20,ff"])
+            qflex_command.extend(["-qflex_d", "loop=20,ff"])
 
         qflex_command.extend(["-rtc", "clock=vm"])
         # qflex_command.extend(["-append", "'root=/dev/sda2'"])
