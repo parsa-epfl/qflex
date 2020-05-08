@@ -18,10 +18,6 @@
 	path = 3rdparty/ns3
 	url = https://github.com/parsa-epfl/ns3.git
 	ignore = dirty
-[submodule "3rdparty/pth"]
-	path = 3rdparty/pth
-	url = https://github.com/parsa-epfl/pth.git
-	ignore = dirty
 [submodule "tools/qunfigurator"]
 	path = tools/qunfigurator
 	url = https://github.com/parsa-epfl/qunfigurator.git
