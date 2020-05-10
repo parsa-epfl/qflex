@@ -25,4 +25,4 @@ We encourage QFlex users to use GitHub issues for requests for enhancements, que
 [qfw]: http://qflex.epfl.ch/
 [qfl]: http://qflex.epfl.ch/license/
 [qfd]: http://qflex.epfl.ch/download/
-[qfi]: https://github.com/parsa-epfl/images/tree/arm
+[qfi]: https://github.com/parsa-epfl/images
