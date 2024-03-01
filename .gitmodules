@@ -1,8 +1,8 @@
 [submodule "flexus"]
 	path = flexus
-	url = git@github.com:parsa-epfl/flexus.git
-	branch = qflex-8.1
+	url = git@github.com:branylagaffe/flexus.git
+	branch = master
 [submodule "qemu"]
 	path = qemu
-	url = git@github.com:parsa-epfl/qemu.git
-	branch = qflex-8.1
+	url = git@github.com:branylagaffe/qemu.git
+	branch = feat/savevm-external
