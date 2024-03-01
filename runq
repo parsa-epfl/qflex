@@ -20,6 +20,13 @@
 #
 #
 #  ./runq [config_file] [(+|-)argument(=value) ...]
+#
+#   TODO:
+#       - Use the standard argument parser
+#       - Refactor the lazy search (w/ max depth)
+#       - Rename variable for clarity
+#       - Test case
+#       - 
 """
 
 from __future__ import print_function
@@ -29,27 +36,26 @@ import os
 import sys
 
 import shlex
-import functools
-
-
-CONFIG: dict[str, any] = {
-    'smp': '1',
-}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 
 def find(fn):
-    dn = os.path.dirname(fn)
-    if not dn:
-        dn = '.'
 
-    if not os.path.isdir(dn):
+    full_search :str = os.path.dirname(os.path.abspath(fn))
+
+    file_search: str =  os.path.basename(fn)
+
+    if not os.path.exists(full_search):
         return None
+    
+    for root, _, files in os.walk(full_search, followlinks = True):
 
-    for root, _, fs in os.walk(os.path.abspath(dn), followlinks = True):
-        for f in fs:
-            if f.startswith(fn):
+        for f in files:
+            # remove trailing dir if the search path is not the CWD
+            fd = os.path.basename(f)
+            if fd.startswith(file_search) or fd.__eq__(file_search):
+                print(f'f={f}, fd={fd}, fn={fn}')
                 return os.path.join(root, f)
 
     return None
@@ -93,13 +99,12 @@ def test(cs, opts):
     cs.append(cond and last)
 
 def parse_config(file):
-
-    print(f'file={file}')
     args = []
     curr = []
     cond = []
 
     with open(file) as fd:
+
         for cs in fd:
             if cs.startswith(('#', '//')):
                 continue
@@ -142,6 +147,13 @@ def main(*opts):
     QEMU binaires using the computed argmuments
     """
 
+    CONFIG: dict[str, any] = {
+    'SMP': '1',
+    'BIOS': find('edk2-aarch64-code.fd'),
+    }
+
+    ARGS: dict[str, any] = {}
+
     real: list[str] = []
 
     for op in opts:
@@ -153,13 +165,13 @@ def main(*opts):
             continue
 
         if '=' not in op:
-            CONFIG[op.lstrip("+")] = "1"
+            ARGS[op.lstrip("+")] = "1"
             continue
         
         if '=' in op :
             #! if this fail here, this mean that there was an '=' in the value (weird)
             key, value = op.lstrip("+").split('=')
-            CONFIG[key] = value 
+            ARGS[key] = value 
 
 
 
@@ -169,14 +181,21 @@ def main(*opts):
 
     # Refactor the too greedy search function
     config_file:str = find('emu' if use_default_config else real[0])  
-    qemu:str = find('qemu')
+    qemu:str = find('qemu-aarch64')
+
 
 
     if not config_file or not qemu:
+        print(f'config_file={config_file}')
+        print(f'qemu_path={qemu}')
         exit("ERROR: Could not find 'qemu' or a config file")
 
     # always provided
-    CONFIG['root'] = os.path.dirname(os.path.abspath(config_file))
+    CONFIG['ROOT'] = os.path.dirname(os.path.abspath(config_file))
+
+    #! Has to happen before the parsing otherwise no substitution
+    for k, v in CONFIG.items():
+        os.environ[k] = v
 
     args = [qemu]
     c_args = parse_config(config_file)
@@ -186,9 +205,6 @@ def main(*opts):
     # especially for -S -s or -d ...
     args.extend(real[0 if use_default_config else 1:])
 
-    for k, v in CONFIG.items():
-        os.environ[k] = v
-
     if 'dbg' in os.environ:
         args = ['gdb', '--args'] + args
 
@@ -196,7 +212,7 @@ def main(*opts):
         print(' '.join(args))
     else:
         os.execvp(args[0], args)
-
+        # os.execvp("env", ["env"])
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
