@@ -1,19 +1,23 @@
 nographic
+savevm-external
 
 machine
     virt
     gic-version     max
-    virtualization  on 
+    virtualization  on
 
 cpu
     max
     pauth-impdef    on
 
-parallel 
-    none 
+bios
+    ${BIOS}
+
+parallel
+    none
 
 smp
-    ${smp}
+    ${SMP}
 
 m
     2G
@@ -22,21 +26,7 @@ rtc
     clock           vm
 
 
-
 drive
-    file            ${root}/images/efi.img
-    format          raw
-    if              pflash
-
-
-drive
-    file            ${root}/images/varstore.img
-    format          raw
-    if              pflash
-
-drive
-    file            ${root}/images/base.qcow2
+    file            ${ROOT}/images/base.qcow2
     format          qcow2
     if              virtio
-
-savevm-external
