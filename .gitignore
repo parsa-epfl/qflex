@@ -1,4 +1,6 @@
 images/
+qemu-*
+.vscode/
 
 # Created by https://www.toptal.com/developers/gitignore/api/macos,linux,windows,archive,archives,c,c++,cmake,visualstudiocode,assembler,meson,vim
 # Edit at https://www.toptal.com/developers/gitignore?templates=macos,linux,windows,archive,archives,c,c++,cmake,visualstudiocode,assembler,meson,vim
