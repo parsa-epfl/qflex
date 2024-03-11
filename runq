@@ -171,7 +171,13 @@ def main(*opts):
         if '=' in op :
             #! if this fail here, this mean that there was an '=' in the value (weird)
             key, value = op.lstrip("+").split('=')
+<<<<<<< Updated upstream
             ARGS[key] = value
+||||||| Stash base
+            CONFIG[key] = value 
+=======
+            CONFIG[key] = value
+>>>>>>> Stashed changes
 
 
 
@@ -180,9 +186,17 @@ def main(*opts):
     use_default_config:bool = real[0].startswith('-')
 
     # Refactor the too greedy search function
+<<<<<<< Updated upstream
     config_file:str = find('emu' if use_default_config else real[0])
     qemu:str = find('qemu-aarch64')
 
+||||||| Stash base
+    config_file:str = find('emu' if use_default_config else real[0])  
+    qemu:str = find('qemu')
+=======
+    config_file:str = find('emu' if use_default_config else real[0])
+    qemu:str = find('qemu')
+>>>>>>> Stashed changes
 
 
     if not config_file or not qemu:
