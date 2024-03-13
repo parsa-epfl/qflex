@@ -5,4 +5,4 @@
 [submodule "qemu"]
 	path = qemu
 	url = git@github.com:branylagaffe/qemu.git
-	branch = feat/savevm-external
+	branch = master

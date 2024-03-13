@@ -8,7 +8,19 @@
 #  | |  | |_| | | | | |_| |
 #  |_|  _\__,_|_| |_|\__\_\_____ __  __ _   _
 #  | |_| |__   ___   / _ \| ____|  \/  | | | |  _ __ _   _ _ __  _ __   ___ _ __
+#
+#                     ___
+#   _ __ _   _ _ __  / _ \
+#  | '__| | | | '_ \| | | |
+#  | |  | |_| | | | | |_| |
+#  |_|  _\__,_|_| |_|\__\_\_____ __  __ _   _
+#  | |_| |__   ___   / _ \| ____|  \/  | | | |  _ __ _   _ _ __  _ __   ___ _ __
 #  | __| '_ \ / _ \ | | | |  _| | |\/| | | | | | '__| | | | '_ \| '_ \ / _ \ '__|
+#  | |_| | | |  __/ | |_| | |___| |  | | |_| | | |  | |_| | | | | | | |  __/ |
+#   \__|_| |_|\___|  \__\_\_____|_|  |_|\___/  |_|   \__,_|_| |_|_| |_|\___|_|
+#
+#
+#
 #  | |_| | | |  __/ | |_| | |___| |  | | |_| | | |  | |_| | | | | | | |  __/ |
 #   \__|_| |_|\___|  \__\_\_____|_|  |_|\___/  |_|   \__,_|_| |_|_| |_|\___|_|
 #
@@ -144,6 +156,7 @@ def parse_config(file):
 def main(*opts):
     """
     Get options from the command line, parse them and run the
+    Get options from the command line, parse them and run the
     QEMU binaires using the computed argmuments
     """
 
@@ -168,16 +181,11 @@ def main(*opts):
             ARGS[op.lstrip("+")] = "1"
             continue
 
+
         if '=' in op :
             #! if this fail here, this mean that there was an '=' in the value (weird)
             key, value = op.lstrip("+").split('=')
-<<<<<<< Updated upstream
             ARGS[key] = value
-||||||| Stash base
-            CONFIG[key] = value 
-=======
-            CONFIG[key] = value
->>>>>>> Stashed changes
 
 
 
@@ -186,18 +194,8 @@ def main(*opts):
     use_default_config:bool = real[0].startswith('-')
 
     # Refactor the too greedy search function
-<<<<<<< Updated upstream
     config_file:str = find('emu' if use_default_config else real[0])
     qemu:str = find('qemu-aarch64')
-
-||||||| Stash base
-    config_file:str = find('emu' if use_default_config else real[0])  
-    qemu:str = find('qemu')
-=======
-    config_file:str = find('emu' if use_default_config else real[0])
-    qemu:str = find('qemu')
->>>>>>> Stashed changes
-
 
     if not config_file or not qemu:
         print(f'config_file={config_file}')
