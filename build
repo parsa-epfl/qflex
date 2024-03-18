@@ -12,7 +12,7 @@ cmake ${FLEXUS_ROOT}                        \
     -DSIMULATOR=${SIM}                      \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON      \
     -DCMAKE_CXX_FLAGS="-DFLEXUS -Wno-error=maybe-uninitialized -Wno-error=dangling-pointer" \
-    -DBUILD_DEBUG=yes
+    # -DBUILD_DEBUG=yes
 
 cmake                       \
     --build ${SIM}	    \
