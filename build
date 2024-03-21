@@ -15,5 +15,5 @@ cmake ${FLEXUS_ROOT}                        \
     # -DBUILD_DEBUG=yes
 
 cmake                       \
-    --build ${SIM}	    \
+    --build ${SIM}	        \
     -j4

@@ -85,8 +85,7 @@ OLD QEMU_... api call
       1 API::QEMU_read_unhashed_sysreg
       1 API::QEMU_set_tick_frequency
       2 API::QEMU_trace_mem_hier
-      1 API::QEMU_Trans_Cachecomponents/uArch/microArch.cpp:26
-components/MMU/PageWalk.cpp:2
+      1 API::QEMU_Trans_Cache
       2 API::QEMU_Trans_Instr_Fetch
       2 API::QEMU_Trans_Load
       2 API::QEMU_Trans_Prefetch
