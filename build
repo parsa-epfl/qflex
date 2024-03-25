@@ -5,15 +5,28 @@ set -xev
 SIM=${1:-KeenKraken}
 FLEXUS_ROOT=${2:-$(realpath flexus)}
 
-cmake ${FLEXUS_ROOT}                        \
-    -B ${SIM}                               \
-    -DCMAKE_C_COMPILER=$(which gcc-13)      \
-    -DCMAKE_CXX_COMPILER=$(which g++-13)    \
-    -DSIMULATOR=${SIM}                      \
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON      \
-    -DCMAKE_CXX_FLAGS="-DFLEXUS -Wno-error=maybe-uninitialized -Wno-error=dangling-pointer" \
-    # -DBUILD_DEBUG=yes
+case $SIM in
+    *Kraken)
+        cmake ${FLEXUS_ROOT}                        \
+            -B ${SIM}                               \
+            -DCMAKE_C_COMPILER=$(which gcc-13)      \
+            -DCMAKE_CXX_COMPILER=$(which g++-13)    \
+            -DSIMULATOR=${SIM}                      \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON      \
+            -DCMAKE_CXX_FLAGS="-DFLEXUS -Wno-error=maybe-uninitialized -Wno-error=dangling-pointer" \
+            # -DBUILD_DEBUG=yes
 
-cmake                       \
-    --build ${SIM}	        \
-    -j4
+        cmake                       \
+            --build ${SIM}	        \
+            -j4
+
+        ;;
+
+    [Qq]emu)
+        make -C qemu -j4
+        ;;
+    *)
+        echo "Never heard of '${SIM}'"
+        exit 1
+        ;;
+esac

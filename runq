@@ -8,19 +8,7 @@
 #  | |  | |_| | | | | |_| |
 #  |_|  _\__,_|_| |_|\__\_\_____ __  __ _   _
 #  | |_| |__   ___   / _ \| ____|  \/  | | | |  _ __ _   _ _ __  _ __   ___ _ __
-#
-#                     ___
-#   _ __ _   _ _ __  / _ \
-#  | '__| | | | '_ \| | | |
-#  | |  | |_| | | | | |_| |
-#  |_|  _\__,_|_| |_|\__\_\_____ __  __ _   _
-#  | |_| |__   ___   / _ \| ____|  \/  | | | |  _ __ _   _ _ __  _ __   ___ _ __
 #  | __| '_ \ / _ \ | | | |  _| | |\/| | | | | | '__| | | | '_ \| '_ \ / _ \ '__|
-#  | |_| | | |  __/ | |_| | |___| |  | | |_| | | |  | |_| | | | | | | |  __/ |
-#   \__|_| |_|\___|  \__\_\_____|_|  |_|\___/  |_|   \__,_|_| |_|_| |_|\___|_|
-#
-#
-#
 #  | |_| | | |  __/ | |_| | |___| |  | | |_| | | |  | |_| | | | | | | |  __/ |
 #   \__|_| |_|\___|  \__\_\_____|_|  |_|\___/  |_|   \__,_|_| |_|_| |_|\___|_|
 #
@@ -156,7 +144,6 @@ def parse_config(file):
 def main(*opts):
     """
     Get options from the command line, parse them and run the
-    Get options from the command line, parse them and run the
     QEMU binaires using the computed argmuments
     """
 
@@ -180,7 +167,6 @@ def main(*opts):
         if '=' not in op:
             ARGS[op.lstrip("+")] = "1"
             continue
-
 
         if '=' in op :
             #! if this fail here, this mean that there was an '=' in the value (weird)
