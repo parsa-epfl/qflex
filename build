@@ -3,7 +3,8 @@
 set -xev
 
 SIM=${1:-KeenKraken}
-FLEXUS_ROOT=${2:-$(realpath flexus)}
+DEV=${2:-yes}
+FLEXUS_ROOT=${3:-$(realpath flexus)}
 
 case $SIM in
     *Kraken)
@@ -14,7 +15,7 @@ case $SIM in
             -DSIMULATOR=${SIM}                      \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON      \
             -DCMAKE_CXX_FLAGS="-DFLEXUS -Wno-error=maybe-uninitialized -Wno-error=dangling-pointer" \
-            # -DBUILD_DEBUG=yes
+            -DBUILD_DEBUG=${DEV}
 
         cmake                       \
             --build ${SIM}	        \
@@ -22,7 +23,31 @@ case $SIM in
 
         ;;
 
-    [Qq]emu)
+
+
+    [cC][Qq])
+        pushd ./qemu
+
+        if [ "$DEV" = "yes" ]; then
+            ./configure --target-list=aarch64-softmmu       \
+                        --disable-docs                      \
+                        --enable-savevm-external            \
+                        --enable-libqflex                   \
+                        --enable-debug                      \
+                        --extra-cflags="-fsanitize=address" \
+                        --extra-cflags="-fno-omit-frame-pointer"
+
+        else
+            ./configure --target-list=aarch64-softmmu       \
+                        --disable-docs                      \
+                        --enable-savevm-external            \
+                        --enable-libqflex
+
+        fi
+        popd
+        make -C qemu -j4
+        ;;
+    [Qq])
         make -C qemu -j4
         ;;
     *)
