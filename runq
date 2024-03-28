@@ -204,13 +204,12 @@ def main(*opts):
     args.extend(real[0 if use_default_config else 1:])
 
     if 'dbg' in os.environ:
-        args = ['gdb', '--args'] + args
+        args = ['gdb', '--silent', '--args'] + args
 
     if 'dry' in os.environ:
         print(' '.join(args))
     else:
         os.execvp(args[0], args)
-        # os.execvp("env", ["env"])
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
