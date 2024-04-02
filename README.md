@@ -23,13 +23,21 @@ rm -rf ./qemu/middleware
 git clone -b feat/qemu-8.2 https://github.com/parsa-epfl/libqflex qemu/middleware
 ```
 
+## Building `prod` or `dev` version
+Both QEMU and Flexus can be build both for production or developement.
+The developement version enable the maximum debug compilation for GCC, and
+add the address sanitizer (ASAN) with the flag `-fsanitize=address`, while also intoducing the frame pointer with `-fno-omit-frame-pointer`.
+
+To do so, use the debug flag (yes|no) when appropriate.
+
+```sh
+./build [receipt] [(yes|no)]
+```
+
 ## Building QEMU
 
 ```sh
-cd qemu
-./configure --target-list=aarch64-softmmu --disable-docs --enable-savevm-external --enable-libqflex --enable-debug
-make -j4
-cd ..
+./build cq
 ```
 
 ## Building FLEXUS

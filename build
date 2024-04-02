@@ -4,8 +4,9 @@ set -xev
 
 SIM=${1:-KeenKraken}
 DEV=${2:-yes}
-FLEXUS_ROOT=${3:-$(realpath flexus)}
 
+FLEXUS_ROOT=$(realpath flexus)
+QEMU_ROOT=$(realpath qemu)
 case $SIM in
     *Kraken)
         cmake ${FLEXUS_ROOT}                        \
@@ -26,7 +27,7 @@ case $SIM in
 
 
     [cC][Qq])
-        pushd ./qemu
+        pushd $QEMU_ROOT
 
         if [ "$DEV" = "yes" ]; then
             ./configure --target-list=aarch64-softmmu       \
