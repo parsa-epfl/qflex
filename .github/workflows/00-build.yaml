@@ -1,0 +1,112 @@
+
+
+name: Build Binaries
+run-name: '[${{ github.event_name }}] ${{ github.ref_name }} > ${{ github.sha }}'
+
+# When is the workflow actually triggerd
+on:
+  # Manually triggered
+  workflow_dispatch:
+  push:
+    branches:
+      - 'release'
+      - 'main'
+      - 'feat/**'
+    paths-ignore:
+      - 'docs/**'
+  pull_request:
+    branches:
+      - 'release'
+      - 'main'
+      - 'feat/**'
+    paths-ignore:
+      - 'docs/**'
+
+  #TODO: Once 'main' is replaced
+  # schedule:
+  #   # Every Wednesday at midnight
+  #   - cron:  '0 0 * * 3'
+
+# Full concurrent
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+# Develop build only for weekly build
+env:
+  debug: ${{ (github.event_name == 'schedule') && 'yes' || 'no' }}
+
+jobs:
+  # Scan the working directory to trigger build based on
+  # the latest change that have been made to the repo
+  paths-filter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          ref: ${{ github.ref }}
+          filters: |
+            qemu:
+              - 'qemu/**'
+              - 'build'     
+            flexus:
+              - 'flexus/**'
+              - 'build'
+    outputs:
+      qemu: ${{ steps.changes.outputs.qemu }}
+      flexus: ${{ steps.changes.outputs.flexus }}
+   
+  # Build the Kraken if their files have been modified
+  build_simulator:
+    name: Build Simulators
+    needs: paths-filter 
+    if: ${{ (needs.paths-filter.outputs.flexus == 'true') || github.event_name == 'schedule' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        binaries:
+          - KeenKraken
+          - KnottyKraken
+       
+    runs-on: ubuntu-latest
+    container:
+      image: birate/qflex-builder:2024.04
+
+    steps:
+      - name: Checkout QFlex
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Build
+        run: ./build ${{ matrix.binaries }} ${{ env.debug }}
+  
+  # Build QEMU only
+  build_qemu:
+    name: Build Qemu
+    needs: paths-filter 
+    if: ${{ (needs.paths-filter.outputs.qemu == 'true') || github.event_name == 'schedule' }}
+        
+    runs-on: ubuntu-latest
+    container:
+      image: birate/qflex-builder:2024.04
+
+    steps:
+      - name: Checkout QFlex
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+      
+      # Special checkout for QEMU (yet) 
+      - name: Checkout libqflex
+        uses: actions/checkout@v4
+        with:
+          repository: parsa-epfl/libqflex
+          ref: feat/qemu-8.2
+          path: qemu/middleware
+
+      - name: Build
+        run: ./build qemu ${{ env.debug }}

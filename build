@@ -26,7 +26,7 @@ case $SIM in
 
 
 
-    [cC][Qq])
+    [cC][Qq]|qemu)
         pushd $QEMU_ROOT
 
         if [ "$DEV" = "yes" ]; then
