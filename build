@@ -36,13 +36,15 @@ case $SIM in
                         --enable-libqflex                   \
                         --enable-debug                      \
                         --extra-cflags="-fsanitize=address" \
-                        --extra-cflags="-fno-omit-frame-pointer"
+                        --extra-cflags="-fno-omit-frame-pointer" \
+                        --extra-ldflags="-Wl,--no-as-needed,-ldl"
 
         else
             ./configure --target-list=aarch64-softmmu       \
                         --disable-docs                      \
                         --enable-savevm-external            \
-                        --enable-libqflex
+                        --enable-libqflex                   \
+                        --extra-ldflags="-Wl,--no-as-needed,-ldl"
 
         fi
         popd

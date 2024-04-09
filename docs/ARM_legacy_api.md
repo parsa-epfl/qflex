@@ -111,3 +111,11 @@ OLD QEMU_... api location
       core/qemu/startup.cpp:1
       core/qemu/mai_api.hpp:5
       core/qemu/configuration_api.hpp:3
+
+OLD MMU missing implementation
+=========================
+
+      MAIR_EL: register containing memory encoding types that are stored in the translation entries.
+      NS, AP, XN, PXN: attributes that are associated to each entry in the translation table. They encode information regarding permissions to execute and counters of utilization.
+      Nested permissions: the official ARM v8 manual includes references to nested permissions that are checked at every level of the translation table allowing for a finer granularity in the access control management.
+      Cacheability: it is not possible to store the translation tables in the cache for a faster access. Current implementation considers only specialized hardware for table walk.
