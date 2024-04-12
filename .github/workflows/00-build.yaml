@@ -9,16 +9,10 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - 'release'
-      - 'main'
-      - 'feat/**'
     paths-ignore:
       - 'docs/**'
   pull_request:
     branches:
-      - 'release'
-      - 'main'
-      - 'feat/**'
     paths-ignore:
       - 'docs/**'
 
