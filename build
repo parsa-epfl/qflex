@@ -15,7 +15,7 @@ case $SIM in
             -DCMAKE_CXX_COMPILER=$(which g++)    \
             -DSIMULATOR=${SIM}                      \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON      \
-            -DCMAKE_CXX_FLAGS="-DFLEXUS -Wno-error=maybe-uninitialized -Wno-error=dangling-pointer" \
+            -DCMAKE_CXX_FLAGS="-DFLEXUS -Wno-error=dangling-pointer" \
             -DBUILD_DEBUG=${DEV}
 
         cmake                       \
