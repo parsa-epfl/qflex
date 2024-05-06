@@ -1,14 +1,13 @@
-# Preparation
+# Quick Getting Started
 
 ## Install packages
 
 The following packages should be installed to build QEMU and FLEXUS
 
 - GNU Compiler (gcc/g++) (with C++14 support) [Which GNU Compiler support which standard](https://gcc.gnu.org/projects/cxx-status.html)
-- cmake
-- meson
-- ninja (maybe as a dependency of meson)
-- boost
+- [cmake](https://cmake.org)
+- (conan)[https://conan.io)
+- (meson)[https://mesonbuild.com]
 - GNU Lib C (min 2.35) _Run `ldd --version` to know about_
 - GNOME Lib C (min 2.72)
 
@@ -28,10 +27,10 @@ Both QEMU and Flexus can be build both for production or developement.
 The developement version enable the maximum debug compilation for GCC, and
 add the address sanitizer (ASAN) with the flag `-fsanitize=address`, while also intoducing the frame pointer with `-fno-omit-frame-pointer`.
 
-To do so, use the debug flag (yes|no) when appropriate.
+To do so, use the debug flag (release|debug) when appropriate.
 
 ```sh
-./build [receipt] [(yes|no)]
+./build [receipt] [(release|debug)]
 ```
 
 ## Building QEMU
@@ -42,8 +41,9 @@ To do so, use the debug flag (yes|no) when appropriate.
 
 ## Building FLEXUS
 ```sh
-./build KeenKraken
-./build KnottyKraken
+ conan profile detect #One time only
+./build keenkraken
+./build knottykraken
 ```
 
 ## Create symlinks
@@ -81,33 +81,8 @@ images/
 ./runq images/busybox
 ```
 
-The filesystem now contains basic tools provided by `/bin/busybox` like `ls`, `cd`, etc. It also contains a `/bin/media` file that is the workload that I am currently running.
-
-When you think the simulation proceeds to the point you want, hit Ctrl-A + Ctrl-C to enter the QEMU monitor, and type the following commands:
-```sh
-stop # stops simulation first
-savevm-external SNAPSHOT_NAME
-```
-
-After that you can type `cont` to continue the simulation or `q` to quit.
-
+The filesystem now contains basic tools provided by `/bin/busybox` like `ls`, `cd`, etc.
 You can modify any command line arguments passed to QEMU in the `emu` file, which just writes those arguments in a prettier format.
-
-## Trace simulation
-
-```sh
-./runq +trace
-```
-
-The simulation log is saved in `debug.log` instead of being displayed in the terminal (the latter is broken). You can change parameters passed to FLEXUS in the `trace.cfg` file.
-
-<!-- ## Timing simulation
-
-```sh
-./runq +timing
-```
-
-You can change parameters passed to FLEXUS in the `timing.cfg` file. -->
 
 # Notes
 

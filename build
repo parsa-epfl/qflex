@@ -2,34 +2,21 @@
 
 set -xev
 
-SIM=${1:-KeenKraken}
-DEV=${2:-yes}
+SIM=${1:-keenkraken}
+BUILD_TYPE=${2:-release}
 
 FLEXUS_ROOT=$(realpath flexus)
 QEMU_ROOT=$(realpath qemu)
 case $SIM in
-    *Kraken)
-        cmake ${FLEXUS_ROOT}                        \
-            -B ${SIM}                               \
-            -DCMAKE_C_COMPILER=$(which gcc)      \
-            -DCMAKE_CXX_COMPILER=$(which g++)    \
-            -DSIMULATOR=${SIM}                      \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON      \
-            -DCMAKE_CXX_FLAGS="-DFLEXUS -Wno-error=maybe-uninitialized -Wno-error=dangling-pointer" \
-            -DBUILD_DEBUG=${DEV}
-
-        cmake                       \
-            --build ${SIM}	        \
-            -j4
-
+    *kraken)
+        conan build $FLEXUS_ROOT -pr $FLEXUS_ROOT/target/_profile/$BUILD_TYPE --name=$SIM -of out -b missing
+        conan export-pkg $FLEXUS_ROOT -pr $FLEXUS_ROOT/target/_profile/$BUILD_TYPE --name=$SIM -of out
         ;;
-
-
 
     [cC][Qq]|qemu)
         pushd $QEMU_ROOT
 
-        if [ "$DEV" = "yes" ]; then
+        if [ "$BUILD_TYPE" = "debug" ]; then
             ./configure --target-list=aarch64-softmmu       \
                         --disable-docs                      \
                         --enable-savevm-external            \

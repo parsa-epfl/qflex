@@ -1,7 +1,7 @@
 
 
 name: Build Binaries
-run-name: '[${{ github.event_name }}] ${{ github.ref_name }} > ${{ github.sha }}'
+run-name: '[${{ github.event_name }}] ${{ github.ref_name }} < ${{ github.actors }}'
 
 # When is the workflow actually triggerd
 on:
@@ -11,10 +11,12 @@ on:
     branches:
     paths-ignore:
       - 'docs/**'
+      - '*.md'
   pull_request:
     branches:
     paths-ignore:
       - 'docs/**'
+      - '*.md'
 
   #TODO: Once 'main' is replaced
   # schedule:
@@ -28,7 +30,7 @@ concurrency:
 
 # Develop build only for weekly build
 env:
-  debug: ${{ (github.event_name == 'schedule') && 'yes' || 'no' }}
+  debug: ${{ (github.event_name == 'schedule') && 'debug' || 'release' }}
 
 jobs:
   # Scan the working directory to trigger build based on
@@ -44,18 +46,18 @@ jobs:
           filters: |
             qemu:
               - 'qemu/**'
-              - 'build'     
+              - 'build'
             flexus:
               - 'flexus/**'
               - 'build'
     outputs:
       qemu: ${{ steps.changes.outputs.qemu }}
       flexus: ${{ steps.changes.outputs.flexus }}
-   
+
   # Build the Kraken if their files have been modified
   build_simulator:
     name: Build Simulators
-    needs: paths-filter 
+    needs: paths-filter
     if: ${{ (needs.paths-filter.outputs.flexus == 'true') || github.event_name == 'schedule' }}
 
     strategy:
@@ -64,7 +66,7 @@ jobs:
         binaries:
           - KeenKraken
           - KnottyKraken
-       
+
     runs-on: ubuntu-latest
     container:
       image: birate/qflex-builder:2024.04
@@ -76,14 +78,14 @@ jobs:
           submodules: true
 
       - name: Build
-        run: ./build ${{ matrix.binaries }} ${{ env.debug }}
-  
+        run: ./build.sh ${{ matrix.binaries }} ${{ env.debug }}
+
   # Build QEMU only
   build_qemu:
     name: Build Qemu
-    needs: paths-filter 
+    needs: paths-filter
     if: ${{ (needs.paths-filter.outputs.qemu == 'true') || github.event_name == 'schedule' }}
-        
+
     runs-on: ubuntu-latest
     container:
       image: birate/qflex-builder:2024.04
@@ -93,8 +95,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-      
-      # Special checkout for QEMU (yet) 
+
+      # Special checkout for QEMU (yet)
       - name: Checkout libqflex
         uses: actions/checkout@v4
         with:
@@ -103,4 +105,4 @@ jobs:
           path: qemu/middleware
 
       - name: Build
-        run: ./build qemu ${{ env.debug }}
+        run: ./build.sh qemu ${{ env.debug }}
