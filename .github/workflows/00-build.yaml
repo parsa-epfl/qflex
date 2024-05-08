@@ -1,7 +1,7 @@
 
 
 name: Build Binaries
-run-name: '[${{ github.event_name }}] ${{ github.ref_name }} < ${{ github.actors }}'
+run-name: '[${{ github.event_name }}] ${{ github.ref_name }}'
 
 # When is the workflow actually triggerd
 on:
@@ -59,26 +59,37 @@ jobs:
     name: Build Simulators
     needs: paths-filter
     if: ${{ (needs.paths-filter.outputs.flexus == 'true') || github.event_name == 'schedule' }}
+    env:
+      CC: gcc-13
+      CXX: g++-13
+
 
     strategy:
       fail-fast: false
       matrix:
         binaries:
-          - KeenKraken
-          - KnottyKraken
+          - keenkraken
+          - knottykraken
 
     runs-on: ubuntu-latest
-    container:
-      image: birate/qflex-builder:2024.04
-
     steps:
       - name: Checkout QFlex
         uses: actions/checkout@v4
         with:
           submodules: true
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.8'
+
+      - name: Install conan
+        run: pip install conan
+
+      - name: Detect current environmment profile
+        run: conan profile detect --force
+
       - name: Build
-        run: ./build.sh ${{ matrix.binaries }} ${{ env.debug }}
+        run: ./build ${{ matrix.binaries }} ${{ env.debug }}
 
   # Build QEMU only
   build_qemu:
@@ -105,4 +116,4 @@ jobs:
           path: qemu/middleware
 
       - name: Build
-        run: ./build.sh qemu ${{ env.debug }}
+        run: ./build qemu ${{ env.debug }}
