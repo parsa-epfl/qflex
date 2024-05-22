@@ -71,7 +71,7 @@ jobs:
           - keenkraken
           - knottykraken
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout QFlex
         uses: actions/checkout@v4
@@ -80,7 +80,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11.8'
+          python-version: '3.11.9'
 
       - name: Install conan
         run: pip install conan
