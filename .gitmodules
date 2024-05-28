@@ -4,5 +4,5 @@
 	branch = maintainer/bryan
 [submodule "qemu"]
 	path = qemu
-	url = git@github.com:branylagaffe/qemu.git
+	url = git@github.com:parsa-epfl/qemu.git
 	branch = master
