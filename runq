@@ -19,13 +19,11 @@
 #  Avoid using the pre-configured arguments by prefixing nothing
 #
 #
-#  ./runq [config_file] [(+|-)argument(=value) ...]
+#  ./runq [config_path] [(+|-)argument(=value) ...]
 #
 #   TODO:
-#       - Use the standard argument parser
 #       - Refactor the lazy search (w/ max depth)
 #       - Rename variable for clarity
-#       - Test case
 #       -
 """
 
@@ -34,9 +32,13 @@ from __future__ import print_function
 
 import os
 import sys
-
 import shlex
+import argparse
 
+# ──────────────────────────────────────────────────────────────────────────────
+
+ARGS = []
+CONFIG: dict[str, any] = {}
 
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -86,39 +88,14 @@ def norm(fn):
     return os.sep.join(ret)
 
 
-def test(cs, opts):
-    last = cs[-1] if cs else True
-    cond = False
-
-    for op in opts:
-        if op == 'OR':
-            continue
-
-        cond = cond or op in os.environ
-
-    cs.append(cond and last)
-
 def parse_config(file):
     args = []
     curr = []
-    cond = []
 
     with open(file) as fd:
 
         for cs in fd:
             if cs.startswith(('#', '//')):
-                continue
-
-            if cs.startswith('IF '):
-                test(cond, cs.split()[1:])
-                continue
-
-            if cs.startswith('ENDIF'):
-                if cond:
-                    cond.pop()
-                continue
-
-            if cond and not cond[-1]:
                 continue
 
             sp = shlex.split(cs)
@@ -140,6 +117,28 @@ def parse_config(file):
 
         return args
 
+def parse_args():
+    # Create an argument parser
+    parser = argparse.ArgumentParser(description='runQ the CLi tool to run QEMU')
+
+    # Add a positional argument for numbers (accepts one or more values)
+    parser.add_argument('config_path', type=str, help='Path to a configuration file')
+    parser.add_argument('--smp', type=int, default=1, help='Number of cores during the simulation')
+    parser.add_argument('--gdb', action='store_true', help='Setup the debugger to run QEMU')
+    parser.add_argument('-d', '--dry', action='store_true', help='Print the arguments instead of executing them')
+
+    # Parse the command-line arguments
+    args = parser.parse_args()
+
+    print(f"CONFIG_FILE: {args.config_path}")
+    if args.smp:
+        print(f"SMP: {args.smp}")
+    if args.gdb:
+        print("DEBUGGING enabled")
+    if args.dry:
+        print("DRY RUN enabled")
+
+    return args
 
 def main(*opts):
     """
@@ -147,69 +146,35 @@ def main(*opts):
     QEMU binaires using the computed argmuments
     """
 
-    CONFIG: dict[str, any] = {
-    'SMP': '1',
-    'BIOS': './qemu/build/pc-bios/edk2-aarch64-code.fd',
-    }
-
-    ARGS: dict[str, any] = {}
-
-    real: list[str] = []
-
-    for op in opts:
-
-        if not op.isascii(): continue
-
-        if not op.startswith('+'):
-            real.append(op)
-            continue
-
-        if '=' not in op:
-            ARGS[op.lstrip("+")] = "1"
-            continue
-
-        if '=' in op :
-            #! if this fail here, this mean that there was an '=' in the value (weird)
-            key, value = op.lstrip("+").split('=')
-            ARGS[key] = value
-
-
-
-    # Checking if we need to use the base config file
-    real = ['-'] if (len(real) == 0) else real
-    use_default_config:bool = real[0].startswith('-')
+    args = parse_args()
 
     # Refactor the too greedy search function
-    config_file:str = find('emu' if use_default_config else real[0])
     qemu:str = find('qemu-aarch64')
 
-    if not config_file or not qemu:
-        print(f'config_file={config_file}')
+    if not args.config_path or not qemu:
         print(f'qemu_path={qemu}')
         exit("ERROR: Could not find 'qemu' or a config file")
 
     # always provided
-    CONFIG['ROOT'] = os.path.dirname(os.path.abspath(config_file))
+    CONFIG['ROOT'] = os.path.dirname(os.path.abspath(args.config_path))
+    CONFIG['SMP'] = str(args.smp)
 
     #! Has to happen before the parsing otherwise no substitution
     for k, v in CONFIG.items():
         os.environ[k] = v
 
-    args = [qemu]
-    c_args = parse_config(config_file)
+    ARGS = [qemu]
+    c_args = parse_config(args.config_path)
 
-    args.extend(c_args)
+    ARGS.extend(c_args)
 
-    # especially for -S -s or -d ...
-    args.extend(real[0 if use_default_config else 1:])
+    if args.gdb:
+        ARGS = ['gdb', '--silent', '--args'] + ARGS
 
-    if 'dbg' in os.environ:
-        args = ['gdb', '--silent', '--args'] + args
-
-    if 'dry' in os.environ:
-        print(' '.join(args))
+    if args.dry:
+        print(' '.join(ARGS))
     else:
-        os.execvp(args[0], args)
+        os.execvp(ARGS[0], ARGS)
 
 if __name__ == '__main__':
-    main(*sys.argv[1:])
+    main()
