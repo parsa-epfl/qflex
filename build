@@ -4,13 +4,21 @@ set -e
 
 SIM=${1:-keenkraken}
 BUILD_TYPE=${2:-release}
+CUSTOM_GCC=${3:-system}
 
 FLEXUS_ROOT=$(realpath flexus)
 QEMU_ROOT=$(realpath qemu)
+
+profile="-pr ${FLEXUS_ROOT}/target/_profile/${BUILD_TYPE}"
+
+if [ "$CUSTOM_GCC" = "custom" ]; then
+    profile="${profile} -pr ${FLEXUS_ROOT}/target/_profile/custom-gcc"
+fi
+
 case $SIM in
     *kraken)
-        conan build $FLEXUS_ROOT -pr $FLEXUS_ROOT/target/_profile/$BUILD_TYPE --name=$SIM -of out -b missing
-        conan export-pkg $FLEXUS_ROOT -pr $FLEXUS_ROOT/target/_profile/$BUILD_TYPE --name=$SIM -of out
+        conan build $FLEXUS_ROOT $profile --name=$SIM -of out -b missing
+        conan export-pkg $FLEXUS_ROOT $profile --name=$SIM -of out
         ;;
     [cC][Qq]|qemu)
         pushd $QEMU_ROOT
