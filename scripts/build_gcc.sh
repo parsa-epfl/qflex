@@ -31,7 +31,7 @@ tmp=$(mktemp -d)
 pushd $tmp
 
 # Download
-wget https://ftp.mpi-inf.mpg.de/mirrors/gnu/mirror/gcc.gnu.org/pub/gcc/release/gcc-${version}/gcc-${version}.tar.xz
+wget https://ftp.mpi-inf.mpg.de/mirrors/gnu/mirror/gcc.gnu.org/pub/gcc/releases/gcc-${version}/gcc-${version}.tar.xz
 # Extract
 tar -xvf gcc-${version}.tar.xz
 # Configure
