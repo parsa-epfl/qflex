@@ -33,6 +33,7 @@ from __future__ import print_function
 import os
 import sys
 import shlex
+import shutil
 import argparse
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -126,11 +127,14 @@ def parse_args():
     parser.add_argument('--smp', type=int, default=1, help='Number of cores during the simulation')
     parser.add_argument('--gdb', action='store_true', help='Setup the debugger to run QEMU')
     parser.add_argument('-d', '--dry', action='store_true', help='Print the arguments instead of executing them')
+    parser.add_argument('-b', '--binary', default=None, type=str, help='Use a different binary to run the config')
 
     # Parse the command-line arguments
     args = parser.parse_args()
 
     print(f"CONFIG_FILE: {args.config_path}")
+    if args.binary:
+        print(f"BINARY: {args.binary}")
     if args.smp:
         print(f"SMP: {args.smp}")
     if args.gdb:
@@ -149,7 +153,7 @@ def main(*opts):
     args = parse_args()
 
     # Refactor the too greedy search function
-    qemu:str = find('qemu-aarch64')
+    qemu:str = shutil.which(args.binary) if args.binary else find('qemu-aarch64')
 
     if not args.config_path or not qemu:
         print(f'qemu_path={qemu}')
