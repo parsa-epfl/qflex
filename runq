@@ -44,9 +44,7 @@ CONFIG: dict[str, any] = {}
 # ──────────────────────────────────────────────────────────────────────────────
 
 def find(fn):
-
     full_search :str = os.path.dirname(os.path.abspath(fn))
-
     file_search: str =  os.path.basename(fn)
 
     if not os.path.exists(full_search):
@@ -96,21 +94,26 @@ def parse_config(file):
     with open(file) as fd:
 
         for cs in fd:
+            # Comments
             if cs.startswith(('#', '//')):
                 continue
 
+            # If line is not parsable -> continue
             sp = shlex.split(cs)
             if not sp:
                 continue
 
+            # If indented normalize the all input into a string
             if cs.startswith((' ', '\t')):
                 curr.append('='.join(list(map(lambda x: norm(x), sp[:2]))))
-
+            # If not indented (root)
             else:
+                # Append the previous arguments into
                 if curr:
                     args.append(','.join(curr))
                     curr = []
 
+                # append dash(-) to root arg
                 args.append('-{}'.format(sp[0]))
 
         if curr:
@@ -128,11 +131,14 @@ def parse_args():
     parser.add_argument('--gdb', action='store_true', help='Setup the debugger to run QEMU')
     parser.add_argument('-d', '--dry', action='store_true', help='Print the arguments instead of executing them')
     parser.add_argument('-b', '--binary', default=None, type=str, help='Use a different binary to run the config')
+    parser.add_argument('-e', '--extra', default="", type=str, help='Add extra arguments to libqflex')
 
     # Parse the command-line arguments
     args = parser.parse_args()
 
     print(f"CONFIG_FILE: {args.config_path}")
+    if args.extra:
+        print(f"EXTRA ARGS: {args.extra}")
     if args.binary:
         print(f"BINARY: {args.binary}")
     if args.smp:
@@ -162,6 +168,7 @@ def main(*opts):
     # always provided
     CONFIG['ROOT'] = os.path.dirname(os.path.abspath(args.config_path))
     CONFIG['SMP'] = str(args.smp)
+    CONFIG['EXTRA'] = args.extra
 
     #! Has to happen before the parsing otherwise no substitution
     for k, v in CONFIG.items():
