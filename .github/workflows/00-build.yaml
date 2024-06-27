@@ -63,7 +63,6 @@ jobs:
       CC: gcc-13
       CXX: g++-13
 
-
     strategy:
       fail-fast: false
       matrix:
@@ -107,13 +106,5 @@ jobs:
         with:
           submodules: true
 
-      # Special checkout for QEMU (yet)
-      - name: Checkout libqflex
-        uses: actions/checkout@v4
-        with:
-          repository: parsa-epfl/libqflex
-          ref: feat/qemu-8.2
-          path: qemu/middleware
-
       - name: Build
-        run: ./build qemu ${{ env.debug }}
+        run: ./build cq ${{ env.debug }}
