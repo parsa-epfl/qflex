@@ -1,7 +1,7 @@
 [submodule "flexus"]
 	path = flexus
 	url = git@github.com:parsa-epfl/flexus.git
-	branch = master
+	branch = maintainer/bryan
 [submodule "qemu"]
 	path = qemu
 	url = git@github.com:parsa-epfl/qemu.git
