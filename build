@@ -40,10 +40,10 @@ case $SIM in
 
         fi
         popd
-        make -C qemu -j4
+        make -C qemu -j
         ;;
     [Qq])
-        make -C qemu -j4
+        make -C qemu -j
         ;;
     *)
         echo "Never heard of '${SIM}'"
