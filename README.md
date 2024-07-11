@@ -59,7 +59,7 @@ ln -s qemu/build/aarch64-softmmu/qemu-system-aarch64 qemu-aarch64
 repository root location.
 
 ```sh
-wget https://github.com/parsa-epfl/qflex/releases/download/2024.05/images.tar.xz
+wget https://github.com/parsa-epfl/qflex/releases/download/2024.07-next/images.tar.xz
 tar -xvf images.tar.xz
 ```
 
