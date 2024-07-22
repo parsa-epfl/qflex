@@ -5,4 +5,4 @@
 [submodule "qemu"]
 	path = qemu
 	url = git@github.com:parsa-epfl/qemu.git
-	branch = master
+	branch = next
