@@ -55,18 +55,18 @@ ln -s qemu/build/aarch64-softmmu/qemu-system-aarch64 qemu-aarch64
 
 ### 6. Add Images
 
-[Download a simple image](https://github.com/parsa-epfl/qflex/releases/download/2024.05/images.tar.xz) and place it the
-repository root location.
-
+[Download a simple image](https://github.com/parsa-epfl/qflex/releases/latest/) and place it the
+repository root location. Release may also contain `checkpoint` ready to experiment with a warmed up timing simulator.
 ```sh
-wget https://github.com/parsa-epfl/qflex/releases/download/2024.07-next/images.tar.xz
+wget https://github.com/parsa-epfl/qflex/releases/latest/download/images.tar.xz
+wget https://github.com/parsa-epfl/qflex/releases/latest/download/ckpt.tar.xz
 tar -xvf images.tar.xz
+tar -xvf ckpt.tar.xz
 ```
 
 The repository tree under images folder should look like this.
 
 ```
-
 images/
 ├── busybox
 └── Busybox
@@ -97,7 +97,6 @@ Made with [contrib.rocks](https://contrib.rocks).
 This software is an open-sourced software licensed under the following license:
 
 ```text
-
 ***Software developed externally (not by the QFlex group)***
 
 QFlex consists of several software components that are governed by various
