@@ -1,0 +1,7 @@
+include .gitignore
+
+Dockerfile
+
+# Pooria Poorsarvi Tehrani: TODO We still need to remove some files as if the same code is built locally and then docker build is called, they might not be overriden in the build step?
+
+

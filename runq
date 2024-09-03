@@ -131,6 +131,7 @@ def parse_args():
     parser.add_argument('-d', '--dry', action='store_true', help='Print the arguments instead of executing them')
     parser.add_argument('-b', '--binary', default=None, type=str, help='Use a different binary to run the config')
     parser.add_argument('-e', '--extra', default="", type=str, help='Add extra arguments to libqflex')
+    parser.add_argument('--docker', action='store_true', help='Run everything in docker')
 
     # Parse the command-line arguments
     args = parser.parse_args()
@@ -156,6 +157,11 @@ def main(*opts):
     """
 
     args = parse_args()
+    if args.docker:
+        rest_of_args = " ".join([i for i in sys.argv if i != '--docker' and i != './runq'])
+        os.system(
+            f"docker run -it --entrypoint ./runq qflex-image {rest_of_args}")
+        return 
 
     # Refactor the too greedy search function
     qemu:str = shutil.which(args.binary) if args.binary else find('qemu-aarch64')

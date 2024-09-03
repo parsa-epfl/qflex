@@ -20,6 +20,9 @@ case $SIM in
         conan build $FLEXUS_ROOT $profile --name=$SIM -of out -b missing
         conan export-pkg $FLEXUS_ROOT $profile --name=$SIM -of out
         ;;
+    docker)
+        docker build . -t qflex-image --build-arg DEBUG_MODE=${BUILD_TYPE}
+        ;;
     [cC][Qq]|qemu)
         pushd $QEMU_ROOT
 
