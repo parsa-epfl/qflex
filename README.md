@@ -10,8 +10,8 @@
 
 ## [🎯 Features](#features)
 
-* ⚡ **Functional-First**. 30 MIPS functional first simulation.
-* 🕰 **Timing-First**. 100 KIPS cycle-accurate simulation.
+* ⚡ **Functional-First**. 1 MIPS/core functional first simulation.
+* 🕰 **Timing-First**. 10 KIPS/core cycle-accurate simulation.
 * 🗂️ **Components-based**. Create custom components.
 * ✨ **Free**. QFlex is completely free and open source.
 
