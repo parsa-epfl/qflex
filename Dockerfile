@@ -87,4 +87,4 @@ RUN ln -s qemu/build/aarch64-softmmu/qemu-system-aarch64 qemu-aarch64
 
 
 
-CMD ["./runq", "images/bb-trace"]
+CMD ["sh"]
