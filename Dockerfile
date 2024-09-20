@@ -79,7 +79,7 @@ RUN ./build cq
 
 RUN ./build keenkraken
 # Pooria Poorsarvi Tehrani: TODO knottykraken has not been tested with this
-RUN ./build knottykraken
+RUN ./build knottykraken debug
 
 RUN ln -s qemu/build/aarch64-softmmu/qemu-system-aarch64 qemu-aarch64
 
