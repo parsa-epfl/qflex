@@ -26,6 +26,8 @@ case $SIM in
         if [ "$BUILD_TYPE" = "debug" ]; then
             ./configure --target-list=aarch64-softmmu       \
                         --disable-docs                      \
+                        --enable-capstone                   \
+                        --enable-slirp                      \
                         --enable-savevm-external            \
                         --enable-libqflex                   \
                         --enable-debug                      \
@@ -35,6 +37,8 @@ case $SIM in
         else
             ./configure --target-list=aarch64-softmmu       \
                         --disable-docs                      \
+                        --enable-capstone                   \
+                        --enable-slirp                      \
                         --enable-savevm-external            \
                         --enable-libqflex
 
