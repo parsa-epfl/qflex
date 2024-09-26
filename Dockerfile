@@ -3,6 +3,9 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+
+ARG DEBUG_MODE=
+
 # Update the package list and install prerequisites
 # Pooria Poorsarvi Tehrani: TODO might not need all of this for installation
 RUN apt-get update && apt-get install -y \
@@ -65,7 +68,9 @@ RUN conan profile detect
 
 RUN apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y git
+    apt-get install -y git && \ 
+    apt-get install -y gdb
+
 
 WORKDIR /qflex
 
@@ -74,12 +79,14 @@ RUN tar -xvf images.tar.xz
 
 COPY . /qflex
 
+RUN rm qemu-aarch64
 
-RUN ./build cq
 
-RUN ./build keenkraken
+RUN ./build cq ${DEBUG_MODE}
+
+RUN ./build keenkraken ${DEBUG_MODE}
 # Pooria Poorsarvi Tehrani: TODO knottykraken has not been tested with this
-RUN ./build knottykraken debug
+RUN ./build knottykraken ${DEBUG_MODE}
 
 RUN ln -s qemu/build/aarch64-softmmu/qemu-system-aarch64 qemu-aarch64
 
