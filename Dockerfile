@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.4
+
 # Pooria Poorsarvi Tehrani: TODO change the base to something way lighter
 FROM ubuntu:24.04
 
@@ -49,9 +51,9 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 
 RUN apt-get update -y
 # Pooria Poorsarvi Tehrani: TODO check if we should move to 14
-RUN apt-get install gcc-13 g++-13 -y
-ENV CC=/usr/bin/gcc-13
-ENV CXX=/usr/bin/g++-13
+RUN apt-get install gcc-14 g++-14 -y
+ENV CC=/usr/bin/gcc-14
+ENV CXX=/usr/bin/g++-14
 
 RUN apt-get install cmake -y
 RUN rm -rf /usr/lib/python3/dist-packages/distro*
@@ -69,22 +71,25 @@ RUN conan profile detect
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y git && \ 
-    apt-get install -y gdb
+    apt-get install -y gdb && \
+    apt-get install -y libcapstone-dev
+
+RUN pip install capstone
 
 
 WORKDIR /qflex
 
-RUN wget https://github.com/parsa-epfl/qflex/releases/download/2024.05/images.tar.xz
+RUN wget https://github.com/parsa-epfl/qflex/releases/download/2024.08-next/images.tar.xz
 RUN tar -xvf images.tar.xz
 
-COPY . /qflex
+COPY --link . /qflex
 
-RUN rm qemu-aarch64
+RUN  rm -f qemu-aarch64
 
 
 RUN ./build cq ${DEBUG_MODE}
 
-RUN ./build keenkraken ${DEBUG_MODE}
+RUN ./build keenkraken
 # Pooria Poorsarvi Tehrani: TODO knottykraken has not been tested with this
 RUN ./build knottykraken ${DEBUG_MODE}
 
