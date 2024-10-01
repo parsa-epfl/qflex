@@ -72,7 +72,9 @@ RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y git && \ 
     apt-get install -y gdb && \
-    apt-get install -y libcapstone-dev
+    apt-get install -y libcapstone-dev\
+    apt-get install -y slirp\
+    apt-get install -y libslirp0 libslirp-dev
 
 RUN pip install capstone
 
@@ -89,7 +91,7 @@ RUN  rm -f qemu-aarch64
 
 RUN ./build cq ${DEBUG_MODE}
 
-RUN ./build keenkraken
+RUN ./build keenkraken ${DEBUG_MODE}
 # Pooria Poorsarvi Tehrani: TODO knottykraken has not been tested with this
 RUN ./build knottykraken ${DEBUG_MODE}
 
