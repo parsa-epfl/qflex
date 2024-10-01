@@ -30,7 +30,7 @@ machine
 
 cpu
     max
-    pauth-impdef    on
+    pauth           off
 
 parallel
     none

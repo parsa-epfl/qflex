@@ -160,7 +160,7 @@ def main(*opts):
     if args.docker:
         rest_of_args = " ".join([i for i in sys.argv if i != '--docker' and i != './runq'])
         os.system(
-            f"docker run -it --entrypoint ./runq qflex-image {rest_of_args}")
+            f"docker run  --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -ti --entrypoint ./runq qflex-image {rest_of_args}")
         return 
 
     # Refactor the too greedy search function

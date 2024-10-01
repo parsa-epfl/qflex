@@ -10,26 +10,26 @@ ARG DEBUG_MODE=
 
 # Update the package list and install prerequisites
 # Pooria Poorsarvi Tehrani: TODO might not need all of this for installation
-RUN apt-get update && apt-get install -y \
-    software-properties-common \
-    build-essential \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    wget \
-    curl \
-    llvm \
-    libncurses5-dev \
-    libncursesw5-dev \
-    xz-utils \
-    tk-dev \
-    libffi-dev \
-    liblzma-dev \
-    lzma \
-    lzma-dev \
-    python3-apt
+RUN apt-get update && apt-get install -y 
+RUN apt-get install -y  software-properties-common 
+RUN apt-get install -y build-essential
+RUN apt-get install -y libssl-dev 
+RUN apt-get install -y zlib1g-dev 
+RUN apt-get install -y libbz2-dev 
+RUN apt-get install -y libreadline-dev 
+RUN apt-get install -y libsqlite3-dev 
+RUN apt-get install -y wget 
+RUN apt-get install -y curl 
+RUN apt-get install -y llvm 
+RUN apt-get install -y libncurses5-dev 
+RUN apt-get install -y libncursesw5-dev 
+RUN apt-get install -y xz-utils 
+RUN apt-get install -y tk-dev 
+RUN apt-get install -y libffi-dev 
+RUN apt-get install -y liblzma-dev 
+RUN apt-get install -y lzma 
+RUN apt-get install -y lzma-dev 
+RUN apt-get install -y python3-apt
 
 # Pooria Poorsarvi Tehrani: TODO maybe move to even a newer version of python
 # Add the deadsnakes PPA for Python 3.10
@@ -68,18 +68,20 @@ RUN apt install ninja-build -y
 RUN conan profile detect
 
 
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y git && \ 
-    apt-get install -y gdb && \
-    apt-get install -y libcapstone-dev
+RUN apt-get upgrade -y 
+RUN apt-get install -y git  
+RUN apt-get install -y gdb 
+RUN apt-get install -y libcapstone-dev
+RUN apt-get install -y slirp
+RUN apt-get install -y libslirp0 
+RUN apt-get install -y libslirp-dev
 
 RUN pip install capstone
 
 
 WORKDIR /qflex
 
-RUN wget https://github.com/parsa-epfl/qflex/releases/download/2024.08-next/images.tar.xz
+RUN wget https://github.com/parsa-epfl/qflex/releases/latest/download/images.tar.xz
 RUN tar -xvf images.tar.xz
 
 COPY --link . /qflex
@@ -89,7 +91,7 @@ RUN  rm -f qemu-aarch64
 
 RUN ./build cq ${DEBUG_MODE}
 
-RUN ./build keenkraken
+RUN ./build keenkraken ${DEBUG_MODE}
 # Pooria Poorsarvi Tehrani: TODO knottykraken has not been tested with this
 RUN ./build knottykraken ${DEBUG_MODE}
 
