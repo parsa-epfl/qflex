@@ -10,8 +10,8 @@
 
 ## [🎯 Features](#features)
 
-* ⚡ **Functional-First**. 30 MIPS functional first simulation.
-* 🕰 **Timing-First**. 100 KIPS cycle-accurate simulation.
+* ⚡ **Functional-First**. 1 MIPS functional first simulation.
+* 🕰 **Timing-First**. 70 KIPS cycle-accurate simulation.
 * 🗂️ **Components-based**. Create custom components.
 * ✨ **Free**. QFlex is completely free and open source.
 
@@ -55,18 +55,17 @@ ln -s qemu/build/aarch64-softmmu/qemu-system-aarch64 qemu-aarch64
 
 ### 6. Add Images
 
-[Download a simple image](https://github.com/parsa-epfl/qflex/releases/download/2024.05/images.tar.xz) and place it the
+[Download a simple image](https://github.com/parsa-epfl/qflex/releases/latest/) and place it the
 repository root location.
 
 ```sh
-wget https://github.com/parsa-epfl/qflex/releases/download/2024.05/images.tar.xz
+wget https://github.com/parsa-epfl/qflex/releases/latest/download/images.tar.xz
 tar -xvf images.tar.xz
 ```
 
 The repository tree under images folder should look like this.
 
 ```
-
 images/
 ├── busybox
 └── Busybox
@@ -78,7 +77,7 @@ images/
 ### 7. Run
 ```sh
 ./runq images/bb-trace # run keenkraken release version
-./runq images/bb-timing-dev # run knottykraken debug version
+./runq images/bb-timing # run knottykraken release version
 ```
 The filesystem now contains basic tools provided by `/bin/busybox` like `ls`, `cd`, etc.
 
@@ -97,7 +96,6 @@ Made with [contrib.rocks](https://contrib.rocks).
 This software is an open-sourced software licensed under the following license:
 
 ```text
-
 ***Software developed externally (not by the QFlex group)***
 
 QFlex consists of several software components that are governed by various

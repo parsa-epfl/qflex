@@ -1,5 +1,3 @@
-
-
 name: Build Binaries
 run-name: '[${{ github.event_name }}] ${{ github.ref_name }}'
 
@@ -18,19 +16,14 @@ on:
       - 'docs/**'
       - '*.md'
 
-  #TODO: Once 'main' is replaced
-  # schedule:
-  #   # Every Wednesday at midnight
-  #   - cron:  '0 0 * * 3'
-
 # Full concurrent
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
-# Develop build only for weekly build
+# Maight be set dynamically
 env:
-  debug: ${{ (github.event_name == 'schedule') && 'debug' || 'release' }}
+  debug: release
 
 jobs:
   # Scan the working directory to trigger build based on
@@ -58,7 +51,7 @@ jobs:
   build_simulator:
     name: Build Simulators
     needs: paths-filter
-    if: ${{ (needs.paths-filter.outputs.flexus == 'true') || github.event_name == 'schedule' }}
+    if: ${{ (needs.paths-filter.outputs.flexus == 'true') }}
     env:
       CC: gcc-13
       CXX: g++-13
@@ -75,7 +68,7 @@ jobs:
       - name: Checkout QFlex
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
@@ -94,7 +87,7 @@ jobs:
   build_qemu:
     name: Build Qemu
     needs: paths-filter
-    if: ${{ (needs.paths-filter.outputs.qemu == 'true') || github.event_name == 'schedule' }}
+    if: ${{ (needs.paths-filter.outputs.qemu == 'true') }}
 
     runs-on: ubuntu-latest
     container:
@@ -104,7 +97,7 @@ jobs:
       - name: Checkout QFlex
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
       - name: Build
         run: ./build cq ${{ env.debug }}
