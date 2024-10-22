@@ -10,8 +10,8 @@
 
 ## [🎯 Features](#features)
 
-* ⚡ **Functional-First**. 1 MIPS/core functional first simulation.
-* 🕰 **Timing-First**. 10 KIPS/core cycle-accurate simulation.
+* ⚡ **Functional-First**. 1 MIPS functional first simulation.
+* 🕰 **Timing-First**. 70 KIPS cycle-accurate simulation.
 * 🗂️ **Components-based**. Create custom components.
 * ✨ **Free**. QFlex is completely free and open source.
 
@@ -56,12 +56,11 @@ ln -s qemu/build/aarch64-softmmu/qemu-system-aarch64 qemu-aarch64
 ### 6. Add Images
 
 [Download a simple image](https://github.com/parsa-epfl/qflex/releases/latest/) and place it the
-repository root location. Release may also contain `checkpoint` ready to experiment with a warmed up timing simulator.
+repository root location.
+
 ```sh
 wget https://github.com/parsa-epfl/qflex/releases/latest/download/images.tar.xz
-wget https://github.com/parsa-epfl/qflex/releases/latest/download/ckpt.tar.xz
 tar -xvf images.tar.xz
-tar -xvf ckpt.tar.xz
 ```
 
 The repository tree under images folder should look like this.
@@ -77,8 +76,9 @@ images/
 
 ### 7. Run
 ```sh
+./runq images/bb # run a bare QEMU emulation
 ./runq images/bb-trace # run keenkraken release version
-./runq images/bb-timing-dev # run knottykraken debug version
+./runq images/bb-timing # run knottykraken release version
 ```
 The filesystem now contains basic tools provided by `/bin/busybox` like `ls`, `cd`, etc.
 

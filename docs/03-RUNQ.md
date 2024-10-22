@@ -26,7 +26,8 @@ nographic
 machine
     virt
     gic-version     max
-    virtualization  on
+    virtualization  off
+    secure          off
 
 cpu
     max
