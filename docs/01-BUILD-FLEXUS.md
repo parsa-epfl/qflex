@@ -77,5 +77,20 @@ This will be hardly used by anyone developping because this require calling this
 ```bash
 conan export-pkg [dir with conanfile.py] -pr [profile] --name=[keenkraken/knottykraken] -of [output dir]
 ```
+
+## Docker
+
+You can both build docker and use it to run qflex through docker.
+
+### Docker Build
+
+```bash
+./build docker {debug}
+```
+
+The debug flag can be empty or set as debug to have the image be built in debug mode.
+
+
+
 ### Flexus Build - Expert mode
 Ask Bryan !!
