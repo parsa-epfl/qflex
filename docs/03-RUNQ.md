@@ -115,10 +115,10 @@ libqflex
 You can also run everything directly from docker by running the following: 
 
 ```bash
-docker run -ti --entrypoint sh --volume <changed_files_to_be_mounted>:/qflex/<changed_files_to_be_mounted> qflex-image
+docker run -ti --entrypoint sh --volume <changed_files_to_be_mounted>:/qflex/<changed_files_to_be_mounted> parsa/qflex
 ```
 
-In order to get qflex-image, please build the docker image locally, for more information please refer to the [BUILD-FLEXUS](./01-BUILD-FLEXUS.md) document.
+In order to get parsa/qflex, please build the docker image locally, for more information please refer to the [BUILD-FLEXUS](./01-BUILD-FLEXUS.md) document.
 
 
 
