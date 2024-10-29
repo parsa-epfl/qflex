@@ -95,6 +95,7 @@ The number of cores can be changed easily using `--smp`.
 - `-d`,`--dry` : Print QEMU start command instead of executing it
 - `-b`,`--binary` : Set a custom binary to uses instead of looking in the current working directory
 - `--gdb` : Start a GDB instance an execute the command in it
+- `--docker` : Run runq from the docker image built locally, for more information on how to build said image please refer to the [BUILD-FLEXUS](./01-BUILD-FLEXUS.md) document.
 
 ### Simulator
 
@@ -108,3 +109,22 @@ libqflex
     debug           vverb
     ${EXTRA}
 ```
+
+## Docker
+
+You can also run everything directly from docker by running the following: 
+
+```bash
+docker run -ti --entrypoint sh --volume <changed_files_to_be_mounted>:/qflex/<changed_files_to_be_mounted> qflex-image
+```
+
+In order to get qflex-image, please build the docker image locally, for more information please refer to the [BUILD-FLEXUS](./01-BUILD-FLEXUS.md) document.
+
+
+
+
+
+
+
+
+
