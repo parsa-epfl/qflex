@@ -28,7 +28,7 @@ case $SIM in
                         --disable-docs                      \
                         --enable-capstone                   \
                         --enable-slirp                      \
-                        --enable-savevm-external            \
+                        --enable-snapvm-external            \
                         --enable-libqflex                   \
                         --enable-debug                      \
                         --extra-cflags="-fsanitize=address" \
@@ -39,7 +39,7 @@ case $SIM in
                         --disable-docs                      \
                         --enable-capstone                   \
                         --enable-slirp                      \
-                        --enable-savevm-external            \
+                        --enable-snapvm-external            \
                         --enable-libqflex
 
         fi
