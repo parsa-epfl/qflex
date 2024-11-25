@@ -8,11 +8,16 @@ env:
 on:
   push:
     branches:
+      - master
+      - next
     paths-ignore:
       - 'docs/**'
       - '*.md'
   pull_request:
+    types: [opened, reopened, edited]
     branches:
+      - master
+      - next
     paths-ignore:
       - 'docs/**'
       - '*.md'
