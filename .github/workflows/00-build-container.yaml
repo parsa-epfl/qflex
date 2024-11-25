@@ -17,6 +17,10 @@ on:
       - 'docs/**'
       - '*.md'
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
 jobs:
 
   build_container:
@@ -35,7 +39,10 @@ jobs:
       - name: Clone QFlex
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
+
+      - name: Pull QEMU's libqflex
+        run: git -C qemu submodule update --init --recursive --force --depth=1 middleware
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
