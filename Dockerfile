@@ -5,7 +5,7 @@ FROM ubuntu:24.04 as build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-ARG DEBUG_MODE=release
+ARG MODE=release
 
 # Update the package list and install prerequisites
 # Pooria Poorsarvi Tehrani: TODO might not need all of this for installation
@@ -19,6 +19,7 @@ RUN apt update && apt install -y --no-install-recommends wget \
                     git                 \
                     gdb                 \
                     libcapstone-dev     \
+                    libzstd-dev         \
                     libslirp-dev        \
                     libglib2.0-dev      \
                     ninja-build         \
@@ -38,14 +39,18 @@ ENV CC=/usr/bin/gcc-14
 ENV CXX=/usr/bin/g++-14
 
 RUN conan profile detect \
-    && mkdir /qflex \
-    && conan build flexus -pr flexus/target/_profile/${DEBUG_MODE} --name=keenkraken -of /qflex/out -b missing \
-    && conan build flexus -pr flexus/target/_profile/${DEBUG_MODE} --name=knottykraken -of /qflex/out -b missing \
-    && conan export-pkg flexus -pr flexus/target/_profile/${DEBUG_MODE} --name=keenkraken -of /qflex/out \
-    && conan export-pkg flexus -pr flexus/target/_profile/${DEBUG_MODE} --name=knottykraken -of /qflex/out \
-    && conan cache clean -v \
-    && conan remove -c "*"  \
-    && ./build cq ${DEBUG_MODE} \
+    && mkdir /qflex
+
+RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=keenkraken -of /qflex/out -b missing \
+    && conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing
+
+RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=keenkraken -of /qflex/out \
+    && conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out
+
+RUN conan cache clean -v \
+    && conan remove -c "*"
+
+RUN ./build cq ${MODE} \
     && cp -v qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
 
 WORKDIR /qflex
@@ -57,7 +62,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 COPY --from=build /qflex /qflex
-RUN apt update && apt install -y --no-install-recommends libcapstone4 libslirp0 python3
+RUN apt update && apt install -y --no-install-recommends libcapstone4 libslirp0 zstd python3
 
 WORKDIR /qflex
 CMD ["bash"]
