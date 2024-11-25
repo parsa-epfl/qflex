@@ -18,14 +18,19 @@ on:
       - '*.md'
 
 jobs:
+
   build_container:
+    name: Build QFlex containers
+
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
-      #matrix:
-      #  binaries:
-      #    - release
-      #    - debug
+      matrix:
+        type:
+          - release
+          - debug
+
     steps:
       - name: Clone QFlex
         uses: actions/checkout@v4
@@ -41,5 +46,6 @@ jobs:
           context: .
           push: false
           tags: parsa/qflex:latest
+          build-args: MODE=${{ matrix.type }}
 
 
