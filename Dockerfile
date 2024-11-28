@@ -51,7 +51,8 @@ RUN conan cache clean -v \
     && conan remove -c "*"
 
 RUN ./build cq ${MODE} \
-    && cp -v qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
+    && cp -rv qemu/build/ /qflex/ \
+    && ln -s /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
 
 WORKDIR /qflex
 RUN cp /qflex-src/runq /qflex/
