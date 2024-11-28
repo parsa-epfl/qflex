@@ -1,5 +1,5 @@
 Custom QEMU Options
-====
+===================
 
 This documents presents the custom options that were added to QEMU which add new features.
 
