@@ -41,17 +41,18 @@ ENV CXX=/usr/bin/g++-14
 RUN conan profile detect \
     && mkdir /qflex
 
-RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=keenkraken -of /qflex/out -b missing \
-    && conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing
+RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=keenkraken -of /qflex/out -b missing
+RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing
 
-RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=keenkraken -of /qflex/out \
-    && conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out
+RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=keenkraken -of /qflex/out
+RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out
 
 RUN conan cache clean -v \
     && conan remove -c "*"
 
-RUN ./build cq ${MODE} \
-    && cp -rv qemu/build/ /qflex/ \
+RUN ./build cq ${MODE}
+
+RUN cp -rv qemu/build/ /qflex/ \
     && ln -s /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
 
 WORKDIR /qflex
