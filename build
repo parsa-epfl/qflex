@@ -21,7 +21,7 @@ case $SIM in
         conan export-pkg $FLEXUS_ROOT $profile --name=$SIM -of out
         ;;
     docker)
-        docker buildx build -t parsa/qflex --build-arg DEBUG_MODE=${BUILD_TYPE} .
+        docker buildx build -t parsa/qflex --build-arg MODE=${BUILD_TYPE} .
         ;;
     [cC][Qq]|qemu)
         pushd $QEMU_ROOT
