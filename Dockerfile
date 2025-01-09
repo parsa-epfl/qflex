@@ -52,19 +52,16 @@ RUN conan cache clean -v \
 
 RUN ./build cq ${MODE}
 
-RUN cp -rv qemu/build/ /qflex/ \
-    && ln -s /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
+RUN ln -s /qflex-src/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
 
 WORKDIR /qflex
 RUN cp /qflex-src/runq /qflex/
-RUN rm -rf /qflex/out/*kraken && rm -rf /qflex-src
+# RUN rm -rf /qflex/out/*kraken && rm -rf /qflex-src
 
-# Second Stage - Run environement
-FROM ubuntu:24.04
-ENV DEBIAN_FRONTEND=noninteractive
+RUN apt install gdb -y
 
-COPY --from=build /qflex /qflex
-RUN apt update && apt install -y --no-install-recommends libcapstone4 libslirp0 zstd python3
+# For prod image we remove the src-files, so if MODE=release we remove the src-files
+RUN if [ "$MODE" = "release" ]; then echo removing src-files; cp /qflex-src/qemu/build /qflex/qemu/build; rm -rf /qflex-src; rm /qflex/qemu-aarch64; /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64; fi
 
 WORKDIR /qflex
 CMD ["bash"]
