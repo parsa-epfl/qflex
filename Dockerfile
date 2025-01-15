@@ -61,7 +61,7 @@ RUN cp /qflex-src/runq /qflex/
 RUN apt install gdb -y
 
 # For prod image we remove the src-files, so if MODE=release we remove the src-files
-RUN if [ "$MODE" = "release" ]; then echo removing src-files; cp /qflex-src/qemu/build /qflex/qemu/build; rm -rf /qflex-src; rm /qflex/qemu-aarch64; /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64; fi
+RUN if [ "$MODE" = "release" ]; then echo removing src-files; cp -r /qflex-src/qemu/build /qflex/qemu/build; rm -rf /qflex-src; rm /qflex/qemu-aarch64; /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64; fi
 
 WORKDIR /qflex
 CMD ["bash"]
