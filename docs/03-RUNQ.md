@@ -95,7 +95,6 @@ The number of cores can be changed easily using `--smp`.
 - `-d`,`--dry` : Print QEMU start command instead of executing it
 - `-b`,`--binary` : Set a custom binary to uses instead of looking in the current working directory
 - `--gdb` : Start a GDB instance an execute the command in it
-- `--docker` : Run runq from the docker image built locally, for more information on how to build said image please refer to the [BUILD-FLEXUS](./01-BUILD-FLEXUS.md) document.
 
 ### Simulator
 
@@ -111,14 +110,19 @@ libqflex
 ```
 
 ## Docker
-
-You can also run everything directly from docker by running the following: 
+In order to get parsa/qflex, build the docker image locally, for more information please refer to the [BUILD-FLEXUS](./01-BUILD-FLEXUS.md) document.
+You can directly enter the docker container to work and run your simulation
 
 ```bash
-docker run -ti --entrypoint sh --volume <changed_files_to_be_mounted>:/qflex/<changed_files_to_be_mounted> parsa/qflex
+docker run -ti --entrypoint bash --rm --volume <images>:/qflex/<images> parsa/qflex-[release|debug]
 ```
 
-In order to get parsa/qflex, please build the docker image locally, for more information please refer to the [BUILD-FLEXUS](./01-BUILD-FLEXUS.md) document.
+You can also run everything directly from docker by running the following:
+
+```bash
+docker run -ti --rm --volume <images>:/qflex/<images> parsa/qflex-[release|debug] [runq command|ex: ./runq images/bb]
+```
+
 
 
 
