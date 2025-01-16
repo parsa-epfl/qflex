@@ -184,7 +184,11 @@ def main(*opts):
     if args.dry:
         print(' '.join(ARGS))
     else:
-        os.execvp(ARGS[0], ARGS)
+        try:
+            os.execvp(ARGS[0], ARGS)
+        except Exception as e:
+            print(f"ERROR: {e}")
+            print(f"couldn't execute ARGS: {ARGS}")
 
 if __name__ == '__main__':
     main()

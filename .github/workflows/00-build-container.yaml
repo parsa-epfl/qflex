@@ -1,0 +1,63 @@
+name: Build QFlex container
+run-name: '[${{ github.event_name }}] ${{ github.ref_name }}'
+
+env:
+  DOCKER_BUILD_SUMMARY: true
+  DOCKER_BUILD_RECORD_UPLOAD: false
+
+on:
+  push:
+    branches:
+      - master
+      - next
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    types: [opened, reopened, edited]
+    branches:
+      - master
+      - next
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+
+  build_container:
+    name: Build QFlex containers
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        type:
+          - release
+          - debug
+
+    steps:
+      - name: Clone QFlex
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Pull QEMU's libqflex
+        run: git -C qemu submodule update --init --recursive --force --depth=1 middleware
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: parsa/qflex:latest
+          build-args: MODE=${{ matrix.type }}
+
+

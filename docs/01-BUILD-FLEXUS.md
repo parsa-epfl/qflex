@@ -4,6 +4,16 @@ BUILD FLEXUS
 Installing QFlex require building both QEMU and Flexus (the uArch simulators).
 This part focus on building __Flexus__
 
+## Docker
+It is the easiest way of building __Flexus__
+You can both build docker and use it to run qflex through docker.
+
+```bash
+./build docker {debug}
+```
+
+The debug flag can be empty or set as debug to have the image be built in debug mode.
+
 ## Flexus
 
 Before anything make sure you have the
@@ -77,5 +87,6 @@ This will be hardly used by anyone developping because this require calling this
 ```bash
 conan export-pkg [dir with conanfile.py] -pr [profile] --name=[keenkraken/knottykraken] -of [output dir]
 ```
+
 ### Flexus Build - Expert mode
 Ask Bryan !!
