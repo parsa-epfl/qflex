@@ -2,7 +2,7 @@
 
 set -e
 
-SIM=${1:-keenkraken}
+SIM=${1:-knottykraken}
 BUILD_TYPE=${2:-release}
 CUSTOM_GCC=${3:-system}
 
