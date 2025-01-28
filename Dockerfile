@@ -39,7 +39,9 @@ WORKDIR /qflex
 RUN conan profile detect --force
 
 RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing
+RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out -b missing
 RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out
+RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out
 
 RUN conan cache clean -v \
     && conan remove -c "*"
