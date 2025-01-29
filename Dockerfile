@@ -25,6 +25,7 @@ RUN apt update && apt install -y --no-install-recommends wget \
                     cmake               \
                     meson               \
                     gcc-14 g++-14       \
+                    libpixman-1-dev     \
                     python3 python3-venv python3-pip python3-setuptools python3-wheel   \
                     && rm -rf /var/lib/apt/lists/*                              \
                     && rm -rf /usr/lib/python3/dist-packages/distro*
