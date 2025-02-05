@@ -30,3 +30,12 @@ Both procedures can expect to read ZSTD compress QEMU' state file. This means th
 ## Encode
 
 The encoding creates a `.patch` file that has the same name as the file it will recreate if applied to the previous snapshot.
+
+## Merge
+
+`xdelta3` has a merge feature, which allows to merge multiple patch into one single file. This can be usefull if you need to decode `snapshot_21` with actuallny needing to decode any of the previous snapshots. The command is better explained if you access `xdelta -h`, but here is a sample to merge 3 patch togheter.
+
+```bash
+# Notice that the last patch nor the output patch do need the flag `-m`
+xdelta3 merge -m snapshot_1.patch -m snapshot_2.patch snapshot_3.patch merged.patch
+```
