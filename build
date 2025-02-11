@@ -34,7 +34,6 @@ case $SIM in
                         --enable-libqflex                   \
                         --enable-snapvm-external            \
                         --enable-debug                      \
-                        --extra-cflags="-fsanitize=address" \
                         --extra-cflags="-fno-omit-frame-pointer"
 
         else
