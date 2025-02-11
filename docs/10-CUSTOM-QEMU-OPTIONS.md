@@ -6,12 +6,14 @@ This documents presents the custom options that were added to QEMU which add new
 ## libqflex
 The flag `-libqflex` contain 6 arguments/options.
 
-* `mode`: either `trace` or `timing`. This setup QEMU for either Keenkraken or KnottyKraken.
+* `mode`: defaulted to `timing`. This setup QEMU for KnottyKraken. This is kept for compatibility, because it used to trigger a Trace mode, which has been deleted
 * `lib-path`: path of the `.so` to load. This should point to the right shared object based on the type of simulation.
 * `cfg-path`: path of the file that will be used to configure the simulation.
 * `ckpt-path`: path to the folder that will be used to load the micro-architectural state of KnottyKraken
 * `cycles`: splited in 3 parts `[max cycle]:[stat dump interval]:[log dump delay]`. `[max cycle]` is the maximum number of cycles to simulate before KnottyKraken quit. `[stat dump interval]` sets the interval of cycles between each dump. `[log dump delay]` prevents any log output until the simulation reach the number of cycles set. Only `[max cycle]` is needed.
+* `freq`: @see [21-FLEXUS-SPLIT-FREQUENCY.md](./21-FLEXUS-SPLIT-FREQUENCY.md)
 * `debug`: the type of log output, default is `vverb`;
+
 
 ## snapvm-external
 This feature is composed of 2 top level options: `snapvm-external` and `loadvm-external`.
@@ -20,7 +22,7 @@ This feature is composed of 2 top level options: `snapvm-external` and `loadvm-e
 
 `-loadvm-external` will always superseed the regular `loadvm` and there for should not be used togehter. This must have a nameless arugments. The arguments must be a filename located at `-snapvm-external path=`, likely with the `.zst` file extension.
 
-```toml
+```
 snapvm-external
     path            ${ROOT}/Busybox/external
 
