@@ -55,7 +55,6 @@ def find(fn):
             # remove trailing dir if the search path is not the CWD
             fd = os.path.basename(f)
             if fd.startswith(file_search) or fd.__eq__(file_search):
-                print(f'f={f}, fd={fd}, fn={fn}')
                 return os.path.join(root, f)
 
     return None
