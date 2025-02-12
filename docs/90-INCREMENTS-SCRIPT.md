@@ -52,7 +52,7 @@ The encoding creates a `.patch` file that has the same name as the file it will 
 
 ## Merge
 
-`xdelta3` has a merge feature, which allows to merge multiple patch into one single file. This can be usefull if you need to decode `snapshot_21` with actuallny needing to decode any of the previous snapshots. The command is better explained if you access `xdelta -h`, but here is a sample to merge 3 patch togheter.
+`xdelta3` has a merge feature, which allows to merge multiple patch into one single file. This can be usefull if you need to decode `snapshot_21` without actullny needing to decode any of the previous snapshots. The command is better explained if you access `xdelta -h`, but here is a sample to merge 3 patch togheter.
 
 ```bash
 # Notice that the last patch nor the output patch do need the flag `-m`
