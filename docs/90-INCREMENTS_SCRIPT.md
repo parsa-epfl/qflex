@@ -24,6 +24,25 @@ In the following order:
 * The top most, respectively, first read file is the latest snapshot.
 * Bottom most, respectively, the last read file is the base layers.
 
+```txt
+snapshot_4.zstd
+snapshot_3.zstd
+snapshot_2.zstd
+snapshot_1.zstd
+snapshot_0.zstd
+```
+
+In the upper exemple, `snapshot_0.zstd` is the base layer, also the first snapshot made. Opposed to `snapshot_4.zstd`, the last snapshot made in time.
+
+
+To generate this kind of file, the following command line is suggested.
+
+```bash
+ls -t snapshot_*.zstd > increments.txt
+```
+> [!WARNING]
+> Be sure to check the generated file afterward because the `-t` flag sort file by time of creation, cf. `-t     sort by time, newest first; see --time`
+
 ### Compression
 Both procedures can expect to read ZSTD compress QEMU' state file. This means that the file must be decompressed before creating a file, or before being used to recreate a file. This option can be enabled using `--zstd`.
 
@@ -39,3 +58,5 @@ The encoding creates a `.patch` file that has the same name as the file it will 
 # Notice that the last patch nor the output patch do need the flag `-m`
 xdelta3 merge -m snapshot_1.patch -m snapshot_2.patch snapshot_3.patch merged.patch
 ```
+
+
