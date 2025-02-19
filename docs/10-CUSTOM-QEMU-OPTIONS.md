@@ -13,7 +13,10 @@ The flag `-libqflex` contain 6 arguments/options.
 * `cycles`: splited in 3 parts `[max cycle]:[stat dump interval]:[log dump delay]`. `[max cycle]` is the maximum number of cycles to simulate before KnottyKraken quit. `[stat dump interval]` sets the interval of cycles between each dump. `[log dump delay]` prevents any log output until the simulation reach the number of cycles set. Only `[max cycle]` is needed.
 * `freq`: @see [21-FLEXUS-SPLIT-FREQUENCY.md](./21-FLEXUS-SPLIT-FREQUENCY.md)
 * `debug`: the type of log output, default is `vverb`.
-
+    * `crit`: Only critical issue, mostly nothing, speed up simulation a lot.
+    * `dev`: Information about core switching, and instruction retiremments.
+    * `verb`: Log all cache lookup and validation
+    * `vverb`: All possible inforamtion, about each cycles, slow down simulation a lot.
 
 ## snapvm-external
 This feature is composed of 2 top level options: `snapvm-external` and `loadvm-external`.
