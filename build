@@ -2,26 +2,80 @@
 
 set -e
 
-SIM=${1:-knottykraken}
-BUILD_TYPE=${2:-release}
-CUSTOM_GCC=${3:-system}
-
 FLEXUS_ROOT=$(realpath flexus)
 QEMU_ROOT=$(realpath qemu)
 
-profile="-pr ${FLEXUS_ROOT}/target/_profile/${BUILD_TYPE}"
+# Default values
+BUILD_TYPE="release"
+CUSTOM_GCC=0
+NIX=0
 
-if [ "$CUSTOM_GCC" = "custom" ]; then
-    profile="${profile} -pr ${FLEXUS_ROOT}/target/_profile/custom-gcc"
+
+# Print help message
+print_help() {
+    echo "Usage: $0 [options] <sim>"
+    echo "Options:"
+    echo "  -b, --build-type <type>  Build type (default: release)"
+    echo "  -c, --custom-gcc <gcc>   Use custom GCC (default: false)"
+    echo "  -n, --nix                Will use raw cmake command to comply with Nix"
+    echo "  -h, --help               Print this help message"
+    exit 0
+}
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        -b|--build-type)
+            # Accept all type present in CMake (release, relwithdebinfo, debug)
+            BUILD_TYPE="$2"
+            shift
+            shift
+            ;;
+        -c|--custom-gcc)
+            # Will use a custom GCC installed in /opt/qflex
+            CUSTOM_GCC=1
+            shift
+            ;;
+        -n|--nix)
+            # Build Flexus without Conan (dumb IMO)
+            NIX=1
+            shift
+            ;;
+        -h|--help)
+            print_help
+            ;;
+        *)
+            # simulator, supported every directory name in flexus/target (knottykraken, semikraken)
+            SIM="$1"
+            shift
+            break
+            ;;
+    esac
+done
+
+# Check if SIM is set
+if [ -z "$SIM" ]; then
+    echo "Error: <sim> argument is required"
+    print_help
 fi
+
+profile="-pr ${FLEXUS_ROOT}/target/_profile/${BUILD_TYPE}"
 
 case $SIM in
     *kraken)
+        if [[ $NIX -gt 0 ]]; then
+            # Shanqing needed that. I wont support it.
+            cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSIMULATOR=$SIM -G Ninja $FLEXUS_ROOT
+            exit 0
+        fi
+
+        if [ $CUSTOM_GCC ]; then
+            profile="${profile} -pr ${FLEXUS_ROOT}/target/_profile/custom-gcc"
+        fi
+
         conan build $FLEXUS_ROOT $profile --name=$SIM -of out -b missing
         conan export-pkg $FLEXUS_ROOT $profile --name=$SIM -of out
-        ;;
-    docker)
-        docker buildx build -t parsa/qflex-${BUILD_TYPE}:latest --build-arg MODE=${BUILD_TYPE} .
         ;;
     [cC][Qq]|qemu)
         pushd $QEMU_ROOT
@@ -33,23 +87,23 @@ case $SIM in
                         --enable-slirp                      \
                         --enable-libqflex                   \
                         --enable-snapvm-external            \
-                        --enable-debug                      \
-                        --extra-cflags="-fno-omit-frame-pointer"
-
+                        --enable-debug
         else
             ./configure --target-list=aarch64-softmmu       \
                         --disable-docs                      \
                         --enable-capstone                   \
                         --enable-slirp                      \
-                        --enable-snapvm-external            \
-                        --enable-libqflex
-
+                        --enable-libqflex                   \
+                        --enable-snapvm-external
         fi
         popd
         make -C qemu -j
         ;;
     [Qq])
         make -C qemu -j
+        ;;
+    docker)
+        docker buildx build -t parsa/qflex-${BUILD_TYPE}:latest --build-arg MODE=${BUILD_TYPE} .
         ;;
     *)
         echo "Never heard of '${SIM}'"
