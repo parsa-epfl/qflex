@@ -36,6 +36,9 @@
 
         pkgs.cmake
         pkgs.boost
+
+        pkgs.libtinfo
+        pkgs.ncurses6
       ];
 
       # This property is not required by mkDerivation, but appears as a environmental variable.
