@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -axe
 
 FLEXUS_ROOT=$(realpath flexus)
 QEMU_ROOT=$(realpath qemu)
@@ -70,7 +70,7 @@ case $SIM in
             exit 0
         fi
 
-        if [ $CUSTOM_GCC ]; then
+        if [[ $CUSTOM_GCC -gt 0 ]]; then
             profile="${profile} -pr ${FLEXUS_ROOT}/target/_profile/custom-gcc"
         fi
 
