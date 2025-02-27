@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -axe
+set -e
 
 FLEXUS_ROOT=$(realpath flexus)
 QEMU_ROOT=$(realpath qemu)
