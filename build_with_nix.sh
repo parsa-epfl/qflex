@@ -39,7 +39,7 @@ case $SIM in
                         --disable-docs                      \
                         --enable-capstone                   \
                         --enable-slirp                      \
-                        --enable-snapvm-external            \
+                        --disable-gtk                       \
                         --enable-libqflex                   \
                         --enable-debug                      \
                         --extra-cflags="-fsanitize=address" \
@@ -50,8 +50,8 @@ case $SIM in
                         --disable-docs                      \
                         --enable-capstone                   \
                         --enable-slirp                      \
-                        --enable-snapvm-external            \
-                        --enable-libqflex
+                        --disable-gtk                       \
+                        --enable-libqflex                   
 
         fi
         popd
