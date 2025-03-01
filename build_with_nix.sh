@@ -14,12 +14,14 @@ case $SIM in
 
         # if build directory exists, remove it
 
-        if [ -d "build" ]; then
-            rm -rf build
+        BUILD_DIRECTORY=build-${SIM}
+
+        if [ -d $BUILD_DIRECTORY ]; then
+            rm -rf $BUILD_DIRECTORY
         fi
         
-        mkdir build
-        cd build
+        mkdir $BUILD_DIRECTORY
+        cd $BUILD_DIRECTORY
 
         if [ $BUILD_TYPE = "debug" ];
         then
