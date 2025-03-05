@@ -11,7 +11,7 @@
 #       /opt/qflex/bin/gcc. This should be used only in
 #       the case your system has no easy way to download
 #       the latest GCC which is kind of needed to build
-#       both KeenKraken et KnottyKraken.
+#       KnottyKraken.
 set -e
 
 output_dir="/opt/qflex"

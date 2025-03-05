@@ -1,0 +1,9 @@
+include .gitignore
+include flexus/.gitignore
+include qemu/.gitignore
+
+out/
+qemu-*
+Dockerfile
+images/
+.github/

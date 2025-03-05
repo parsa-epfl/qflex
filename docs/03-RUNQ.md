@@ -1,14 +1,14 @@
 RUNQ
 ====
 
-This document shows all about how to run any of the uArch simulators (KeenKraken & KnottyKraken).
+This document shows all about how to run any of the uArch simulators (SemiKraken & KnottyKraken).
 
 ## Config File
 QFlex uses two differents type configuration files.
 
 The first is a custom file version of a QEMU invokation arguments. The file type can have any name and any extension.
 
-The second, `trace.cfg` and `timing.cfg` are used to configure KeenKraken or KnottyKraken. They are written in a specific structure only parsable by Flexus. The file type can have any name and any extension.
+The second, `trace.cfg` and `timing.cfg` are used to configure SemiKraken or KnottyKraken. They are written in a specific structure only parsable by Flexus. The file type can have any name and any extension.
 
 ### QEMU Config
 
@@ -26,7 +26,8 @@ nographic
 machine
     virt
     gic-version     max
-    virtualization  on
+    virtualization  off
+    secure          off
 
 cpu
     max
@@ -60,8 +61,8 @@ drive
 
 libqflex
     mode            trace
-    lib-path        ${ROOT}/../out/keenkraken/Debug/libkeenkraken.so
-    cfg-path        ${ROOT}/../trace.cfg
+    lib-path        ${ROOT}/../out/Semikraken/Debug/libsemikraken.so
+    cfg-path        ${ROOT}/../timing.cfg
     debug           vverb
     ${EXTRA}
 ```
@@ -102,8 +103,32 @@ The extra flags `-e`, or `--extra` can be used to add arguments to an existing c
 ```txt
 libqflex
     mode            trace
-    lib-path        ${ROOT}/../out/keenkraken/Debug/libkeenkraken.so
+    lib-path        ${ROOT}/../out/Semikraken/Debug/libkeenkraken.so
     cfg-path        ${ROOT}/../trace.cfg
     debug           vverb
     ${EXTRA}
 ```
+
+## Docker
+In order to get parsa/qflex, build the docker image locally, for more information please refer to the [BUILD-FLEXUS](./01-BUILD-FLEXUS.md) document.
+You can directly enter the docker container to work and run your simulation
+
+```bash
+docker run -ti --entrypoint bash --rm --volume <images>:/qflex/<images> parsa/qflex-[release|debug]
+```
+
+You can also run everything directly from docker by running the following:
+
+```bash
+docker run -ti --rm --volume <images>:/qflex/<images> parsa/qflex-[release|debug] [runq command|ex: ./runq images/bb]
+```
+
+
+
+
+
+
+
+
+
+

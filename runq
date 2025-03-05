@@ -55,7 +55,6 @@ def find(fn):
             # remove trailing dir if the search path is not the CWD
             fd = os.path.basename(f)
             if fd.startswith(file_search) or fd.__eq__(file_search):
-                print(f'f={f}, fd={fd}, fn={fn}')
                 return os.path.join(root, f)
 
     return None
@@ -184,7 +183,11 @@ def main(*opts):
     if args.dry:
         print(' '.join(ARGS))
     else:
-        os.execvp(ARGS[0], ARGS)
+        try:
+            os.execvp(ARGS[0], ARGS)
+        except Exception as e:
+            print(f"ERROR: {e}")
+            print(f"couldn't execute ARGS: {ARGS}")
 
 if __name__ == '__main__':
     main()

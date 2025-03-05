@@ -10,7 +10,6 @@
 
 ## [🎯 Features](#features)
 
-* ⚡ **Functional-First**. 1 MIPS functional first simulation.
 * 🕰 **Timing-First**. 70 KIPS cycle-accurate simulation.
 * 🗂️ **Components-based**. Create custom components.
 * ✨ **Free**. QFlex is completely free and open source.
@@ -44,7 +43,7 @@ git clone --recursive https://github.com/parsa-epfl/qflex
 ### 4. Build Flexus
 ```sh
  conan profile detect #One time only
-./build keenkraken
+./build semikraken
 ./build knottykraken
 ```
 
@@ -76,7 +75,7 @@ images/
 
 ### 7. Run
 ```sh
-./runq images/bb-trace # run keenkraken release version
+./runq images/bb # run a bare QEMU emulation
 ./runq images/bb-timing # run knottykraken release version
 ```
 The filesystem now contains basic tools provided by `/bin/busybox` like `ls`, `cd`, etc.
@@ -110,7 +109,7 @@ licenses governing all the software components.
 **QFlex License**
 
 QFlex
-Copyright (c) 2024, Parallel Systems Architecture Lab, EPFL
+Copyright (c) 2025, Parallel Systems Architecture Lab, EPFL
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
