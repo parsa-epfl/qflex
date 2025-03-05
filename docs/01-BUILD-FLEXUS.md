@@ -4,6 +4,7 @@ BUILD FLEXUS
 Installing QFlex require building both QEMU and Flexus (the uArch simulators).
 This part focus on building __Flexus__
 
+
 ## Docker
 It is the easiest way of building __Flexus__
 You can both build docker and use it to run qflex through docker.
@@ -38,7 +39,7 @@ This is aimed toward people who mainly need to use QFlex.
 
 Then call the build script using the one of the following options.
 ```bash
-./build [keenkraken/knottykraken]
+./build [knottykraken/semikraken]
 ```
 
 This will produce a directory called `out` in your current working directory.
@@ -46,12 +47,13 @@ This will produce a directory called `out` in your current working directory.
 #### Building `release` or `debug` version
 Both QEMU and Flexus can be build both for production or developement.
 The developement version enable the maximum debug compilation for GCC, and
-add the address sanitizer (ASAN) with the flag `-fsanitize=address`, while also intoducing the frame pointer with `-fno-omit-frame-pointer`.
+intoducing the frame pointer with `-fno-omit-frame-pointer`.
 
-To do so, use the debug flag (release|debug) when appropriate.
+To do so, use the debug flag (release|debug|relwithdebinfo) when appropriate.
 
 ```bash
-./build [receipt] [(release|debug)]
+./build -b (release|debug|relwithdebinfo) [receipt]
+
 ```
 
 ### Build Flexus - Developer mode
@@ -70,14 +72,14 @@ The command install the dependencies for a given simulator and a given profile
 The name is required otherwise nothing will be built. The profile are recommended otherwise
 the output might not be conform nor buildable.
 ```bash
-conan install [dir with conanfile.py] -pr [profile] --name=[keenkraken/knottykraken] -of [output dir] -b missing
+conan install [dir with conanfile.py] -pr [profile] --name=[semikraken/knottykraken] -of [output dir] -b missing
 ```
 
 #### Building Flexus
 Building will also install the depdencies if they are not installed anyway.
 After installing the dependencies if any, this command will trigger CMake which will actually compile Flexus source code.
 ```bash
-conan build [dir with conanfile.py] -pr [profile] --name=[keenkraken/knottykraken] -of [output dir] -b missing
+conan build [dir with conanfile.py] -pr [profile] --name=[semikraken/knottykraken] -of [output dir] -b missing
 ```
 
 #### Exporting FLexus
@@ -85,7 +87,7 @@ Used as a commodity, the following commands copy the output of the previous buil
 As for now it is the top most location in the output directory.
 This will be hardly used by anyone developping because this require calling this command after every build.
 ```bash
-conan export-pkg [dir with conanfile.py] -pr [profile] --name=[keenkraken/knottykraken] -of [output dir]
+conan export-pkg [dir with conanfile.py] -pr [profile] --name=[semikraken/knottykraken] -of [output dir]
 ```
 
 ### Flexus Build - Expert mode
