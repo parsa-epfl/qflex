@@ -62,11 +62,29 @@ fi
 
 profile="-pr ${FLEXUS_ROOT}/target/_profile/${BUILD_TYPE}"
 
+
+if [ -n "$IN_NIX_SHELL" ]; then
+    echo "Detected NIX."
+    NIX=1
+fi
+
 case $SIM in
     *kraken)
         if [[ $NIX -gt 0 ]]; then
-            # Shanqing needed that. I wont support it.
+            BUILD_DIRECTORY=build-${SIM}
+
+            if [ -d $FLEXUS_ROOT/$BUILD_DIRECTORY]; then
+                rm -rf $FLEXUS_ROOT/$BUILD_DIRECTORY
+            fi
+
+            mkdir -p $FLEXUS_ROOT/$BUILD_DIRECTORY            
+    
+            pushd $FLEXUS_ROOT/$BUILD_DIRECTORY
+
             cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSIMULATOR=$SIM -G Ninja $FLEXUS_ROOT
+            ninja
+
+            popd
             exit 0
         fi
 
@@ -87,6 +105,7 @@ case $SIM in
                         --enable-slirp                      \
                         --enable-libqflex                   \
                         --enable-snapvm-external            \
+                        --disable-gtk                       \
                         --enable-debug
         else
             ./configure --target-list=aarch64-softmmu       \
@@ -94,6 +113,7 @@ case $SIM in
                         --enable-capstone                   \
                         --enable-slirp                      \
                         --enable-libqflex                   \
+                        --disable-gtk                       \
                         --enable-snapvm-external
         fi
         popd
