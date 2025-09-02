@@ -62,4 +62,7 @@ COPY  ./commands /qflex/commands
 COPY ./qflex.py /qflex
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
+# TODO this is hardcoded as typer doesn't have a way to generate completions from within docker build, as long as tool is called qflex this is ok
+RUN cat /qflex/completion_docker.txt >> /root/.bashrc
+
 CMD ["bash"]
