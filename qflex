@@ -1,0 +1,108 @@
+#!/usr/bin/env python
+
+import typer
+from commands.createimage import CreateImage
+from commands.boot import Boot
+from commands.load import Load
+from commands.docker import DockerStarter, DockerBuild
+
+app = typer.Typer(
+    name="qflex cli",
+    help="A CLI tool to manage QFlex operations.",
+)
+
+
+@app.command()
+def build_docker(debug: bool = typer.Option(False, help="Build the Docker image in debug mode.")):
+    """
+    Build the Docker image for QFlex. Use --debug to build a debug version.
+    Useful for development and testing without installing dependencies locally.
+    """
+    docker_build_executor = DockerBuild(debug=debug)
+    docker_build_executor.execute(to_stdio=True, run_in_background=False)
+
+
+@app.command()
+def start_docker(
+    debug: bool = typer.Option(False, help="Start the Docker container in debug mode.")
+):
+    """
+    Start a Docker container with the QFlex environment. 
+    Useful for development and testing without installing dependencies locally.
+    """
+    docker_executor = DockerStarter(debug=debug)
+    docker_executor.execute(to_stdio=True, run_in_background=False)
+
+# TODO bring in the build scripts here as well
+
+
+@app.command()
+def create_base_image(
+    image_name: str = typer.Option(
+        "base.qcow2", help="Name of the base image file to create."
+    ),
+    image_size_gb: int = typer.Option(8, help="Size of the base image in GB.")
+):
+    """
+    Create a base image for QEMU. 
+    This is the first step to create the images for an experiment.
+    """ 
+    create_image_executor = CreateImage(image_name=image_name, size_gb=image_size_gb)
+    create_image_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+def boot(
+    image_name: str = typer.Option(
+        "base.qcow2", help="Name of the image file to boot."
+    ),
+    memory_mb: int = typer.Option(2048, help="Memory size for the VM in MB."),
+    cores: int = typer.Option(1, help="Number of CPU cores for the VM."),
+    double_cores: bool = typer.Option(False, help="Double the number of CPU cores.")
+):
+    """
+    Boot a QEMU virtual machine with specified parameters.
+    Once booted, you can log in with username 'root' and no password.
+    After installing your desired packages and making changes,
+    you can save the state with Ctrl+A, then C to create a snapshot named 'base' by savevm base, 
+    then exit with Ctrl+C, then quit.
+    This is the second step to create the images for an experiment, with all the necessary packages installed.
+    """
+    boot_executor = Boot(
+        image_name=image_name,
+        memory_mb=memory_mb,
+        cores=cores,
+        double_cores=double_cores
+    )
+    boot_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+def load(
+    image_name: str = typer.Option(
+        "base.qcow2", help="Name of the image file to load."
+    ),
+    memory_mb: int = typer.Option(2048, help="Memory size for the VM in MB."),
+    cores: int = typer.Option(1, help="Number of CPU cores for the VM."),
+    double_cores: bool = typer.Option(False, help="Double the number of CPU cores."),
+    is_parallel: bool = typer.Option(False, help="Enable parallel execution mode."),
+    quantum_size_ns: int = typer.Option(2000, help="Quantum size in nanoseconds.")
+):
+    """
+    Load a QEMU virtual machine from a snapshot with specified parameters.
+    This is done to warm up long-term microarchitectural state before functional warming starts.
+    This is the third step, to prepare for functional warming.
+    """
+    load_executor = Load(
+        image_name=image_name,
+        memory_mb=memory_mb,
+        cores=cores,
+        double_cores=double_cores,
+        is_parallel=is_parallel,
+        quantum_size_ns=quantum_size_ns
+    )
+    load_executor.execute(to_stdio=True, run_in_background=False)
+
+
+
+
+if __name__ == "__main__":
+    app()
