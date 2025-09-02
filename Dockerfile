@@ -39,7 +39,10 @@ WORKDIR /qflex
 # Build QFlex
 RUN conan profile detect --force
 
-RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing
+# TODO this needs to be removed, but we first need to remove the unused libs
+ENV CFLAGS="$CFLAGS -Wno-error"
+
+RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing 
 RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out -b missing
 RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out
 RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out
@@ -52,5 +55,11 @@ RUN ./build cq ${MODE}
 
 # Post-build file link
 RUN ln -s /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
+RUN ln -s /qflex/qemu/build/qemu-img /qflex/qemu-img
+
+RUN pip install --break-system-package -r requirements.txt
+COPY  ./commands /qflex/commands 
+COPY ./qflex.py /qflex
+RUN ln -s /usr/bin/python3 /usr/bin/python
 
 CMD ["bash"]
