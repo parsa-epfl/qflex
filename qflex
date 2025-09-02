@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import typer
+from typing import Annotated
 from commands.createimage import CreateImage
 from commands.boot import Boot
 from commands.load import Load
@@ -8,12 +9,14 @@ from commands.docker import DockerStarter, DockerBuild
 
 app = typer.Typer(
     name="qflex cli",
-    help="A CLI tool to manage QFlex operations.",
+    help="A CLI tool to manage QFlex operations. (suggest running ./qflex --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
 )
 
 
 @app.command()
-def build_docker(debug: bool = typer.Option(False, help="Build the Docker image in debug mode.")):
+def build_docker(
+    debug: Annotated[bool, typer.Option(help="Build the Docker image in debug mode.")] = False,
+):
     """
     Build the Docker image for QFlex. Use --debug to build a debug version.
     Useful for development and testing without installing dependencies locally.
@@ -24,7 +27,7 @@ def build_docker(debug: bool = typer.Option(False, help="Build the Docker image 
 
 @app.command()
 def start_docker(
-    debug: bool = typer.Option(False, help="Start the Docker container in debug mode.")
+    debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False, 
 ):
     """
     Start a Docker container with the QFlex environment. 
@@ -38,10 +41,10 @@ def start_docker(
 
 @app.command()
 def create_base_image(
-    image_name: str = typer.Option(
-        "base.qcow2", help="Name of the base image file to create."
-    ),
-    image_size_gb: int = typer.Option(8, help="Size of the base image in GB.")
+    image_name: Annotated[str,typer.Option(
+        help="Name of the base image file to create."
+    )] = "base.qcow2",
+    image_size_gb: Annotated[int, typer.Option(help="Size of the base image in GB.")] = 8 
 ):
     """
     Create a base image for QEMU. 
@@ -52,12 +55,12 @@ def create_base_image(
 
 @app.command()
 def boot(
-    image_name: str = typer.Option(
-        "base.qcow2", help="Name of the image file to boot."
-    ),
-    memory_mb: int = typer.Option(2048, help="Memory size for the VM in MB."),
-    cores: int = typer.Option(1, help="Number of CPU cores for the VM."),
-    double_cores: bool = typer.Option(False, help="Double the number of CPU cores.")
+    image_name: Annotated[str, typer.Option(
+        help="Name of the image file to boot."
+    )] = "base.qcow2",
+    memory_mb: Annotated[int, typer.Option(help="Memory size for the VM in MB.")] = 2048,
+    cores: Annotated[int, typer.Option(help="Number of CPU cores for the VM.")] = 1,
+    double_cores: Annotated[bool, typer.Option(help="Double the number of CPU cores.")] = False
 ):
     """
     Boot a QEMU virtual machine with specified parameters.
@@ -77,14 +80,14 @@ def boot(
 
 @app.command()
 def load(
-    image_name: str = typer.Option(
-        "base.qcow2", help="Name of the image file to load."
-    ),
-    memory_mb: int = typer.Option(2048, help="Memory size for the VM in MB."),
-    cores: int = typer.Option(1, help="Number of CPU cores for the VM."),
-    double_cores: bool = typer.Option(False, help="Double the number of CPU cores."),
-    is_parallel: bool = typer.Option(False, help="Enable parallel execution mode."),
-    quantum_size_ns: int = typer.Option(2000, help="Quantum size in nanoseconds.")
+    image_name: Annotated[str, typer.Option(
+        help="Name of the image file to load."
+    )] = "base.qcow2",
+    memory_mb: Annotated[int, typer.Option(help="Memory size for the VM in MB.")] = 2048,
+    cores: Annotated[int, typer.Option(help="Number of CPU cores for the VM.")] = 1,
+    double_cores: Annotated[bool, typer.Option(help="Double the number of CPU cores.")] = False,
+    is_parallel: Annotated[bool, typer.Option(help="Enable parallel execution mode.")] = False,
+    quantum_size_ns: Annotated[int, typer.Option(help="Quantum size in nanoseconds.")] = 2000
 ):
     """
     Load a QEMU virtual machine from a snapshot with specified parameters.
