@@ -14,12 +14,27 @@ class DockerStarter(Executor):
 
     def cmd(self) -> str:
         cwd = os.getcwd()
+        
+        # if images folder doesn't exist load it
+        if not os.path.isdir(self.images_folder):
+            os.makedirs(self.images_folder)
+            # download alpine image
+        
+
+        commands_mount = " -v {cwd}/commands:/qflex/commands"
+        if not os.path.isdir('./commands'):
+            commands_mount = ''
+
+        binary_mount = " -v {cwd}/qflex:/qflex/qflex "
+        if not os.path.isdir('./qflex'):
+            binary_mount = ''
+
+
         # TODO remove unecessary mounts
         return f"""
         docker run -it --entrypoint bash \
         -v {cwd}/images:/qflex/images \
-        -v {cwd}/commands:/qflex/commands \
-        -v {cwd}/qflex:/qflex/qflex {self.docker_image_name}
+        {commands_mount} {binary_mount} {self.docker_image_name}
         """
 
 class DockerBuild(Executor):

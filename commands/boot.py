@@ -1,3 +1,4 @@
+import os
 from commands import Executor
 
 class Boot(Executor):
@@ -16,6 +17,12 @@ class Boot(Executor):
             self.core_coeff = 2
     
     def cmd(self) -> str:
+
+        alpine_image_name = 'alpine-standard-3.22.1-aarch64.iso'
+        if not os.path.isfile(f'images/{alpine_image_name}'):
+            alpine_url = f'https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/{alpine_image_name}'
+            os.system(f'wget {alpine_url} -O images/{alpine_image_name}')
+
         return f"""
         ./qemu-aarch64 \
         -M virt,gic-version=max,virtualization=off,secure=off \
@@ -23,7 +30,7 @@ class Boot(Executor):
         -cpu max,pauth=off -m {self.memory_size_mb} \
         -bios ./qemu/build/pc-bios/edk2-aarch64-code.fd \
         -drive if=virtio,file=./images/{self.image_name},format=qcow2 \
-        -cdrom ./images/alpine-standard-3.22.1-aarch64.iso \
+        -cdrom ./images/{alpine_image_name} \
         -boot d \
         -nic user,model=virtio-net-pci \
         -rtc clock=vm \
