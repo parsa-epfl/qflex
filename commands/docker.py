@@ -21,12 +21,12 @@ class DockerStarter(Executor):
             # download alpine image
         
 
-        commands_mount = " -v {cwd}/commands:/qflex/commands"
+        commands_mount = f" -v {cwd}/commands:/qflex/commands"
         if not os.path.isdir('./commands'):
             commands_mount = ''
 
-        binary_mount = " -v {cwd}/qflex:/qflex/qflex "
-        if not os.path.isdir('./qflex'):
+        binary_mount = f" -v {cwd}/qflex:/qflex/qflex "
+        if not os.path.exists('./qflex'):
             binary_mount = ''
 
 
