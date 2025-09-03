@@ -12,34 +12,39 @@ class Executor(abc.ABC):
     def execute(self, to_stdio: bool = True, run_in_background: bool = False):
         args = self.cmd()
         cwd = os.getcwd()
+        if isinstance(args, str):
+            args = [args]
 
-        # TODO look into if shell needs to be turned False
-        if run_in_background:
-            # Background: optionally inherit stdio or capture, but you manage the pipes.
-            return subprocess.Popen(
-                args,
-                shell=True,
-                stdout=None if to_stdio else subprocess.PIPE,
-                stderr=None if to_stdio else subprocess.PIPE,
-                text=True,
-                cwd=cwd,
-            )
+        results = []
+        for arg in args:
+            # TODO look into if shell needs to be turned False
+            if run_in_background:
+                # Background: optionally inherit stdio or capture, but you manage the pipes.
+                subprocess.Popen(
+                    arg,
+                    shell=True,
+                    stdout=None if to_stdio else subprocess.PIPE,
+                    stderr=None if to_stdio else subprocess.PIPE,
+                    text=True,
+                    cwd=cwd,
+                )
 
-        # Foreground: safer to use subprocess.run (no deadlock). 
-        if to_stdio:
-            r = subprocess.run(
-                args, 
-                shell=True, 
-                text=True,
-                cwd=cwd,
-            )
-            return r
-        else:
-            r = subprocess.run(
-                args,
-                shell=True,
-                text=True,
-                capture_output=True,
-                cwd=cwd,
-            )
-            return r
+            # Foreground: safer to use subprocess.run (no deadlock). 
+            if to_stdio:
+                r = subprocess.run(
+                    arg, 
+                    shell=True, 
+                    text=True,
+                    cwd=cwd,
+                )
+                results.append(r)
+            else:
+                r = subprocess.run(
+                    arg,
+                    shell=True,
+                    text=True,
+                    capture_output=True,
+                    cwd=cwd,
+                )
+                results.append(r)
+        return results

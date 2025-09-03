@@ -1,4 +1,5 @@
 from commands import Executor
+from .utils import get_docker_image_name
 
 
 class Load(Executor):
@@ -19,6 +20,7 @@ class Load(Executor):
         self.core_coeff = 1
         if self.double_cores:
             self.core_coeff = 2
+        self.docker_image_name = get_docker_image_name(debug=self.debug, worm=self.worm)
 
     
     def cmd(self) -> str:
