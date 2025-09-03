@@ -47,6 +47,7 @@ class DockerBuild(Executor):
         worm_image_cmd = f"""
         docker buildx build -t {self.docker_image_name_with_worm}:latest --build-arg BASE_IMAGE={self.docker_base_image_name} -f WormCache/Dockerfile .
         """
+        # TODO add a seperate debug image that has the files that can be used for compilation and developement without remaking the docker image
 
         if self.worm:
             return [
