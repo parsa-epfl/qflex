@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1.17-labs
 
 # First Stage - Build environement
 FROM ubuntu:24.04 as build
@@ -33,7 +33,8 @@ RUN apt update && apt install -y --no-install-recommends wget \
 RUN pip install --break-system-package conan && pip cache purge
 
 # Copy local dir to container
-COPY --link . /qflex
+COPY --link --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCache . /qflex
+COPY --link ./qemu ./qflex/qemu
 WORKDIR /qflex
 
 # Build QFlex
