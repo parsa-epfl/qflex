@@ -1,37 +1,47 @@
 # syntax=docker/dockerfile:1.17-labs
 
+# TODO changed docker version due to mirrors being down, change back to latest when possible
 # First Stage - Build environement
-FROM ubuntu:24.04 as build
+FROM ubuntu:22.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV CC=/usr/bin/gcc-14
-ENV CXX=/usr/bin/g++-14
+# TODO once mirrors are back change back to gcc-14
+ENV CC=/usr/bin/gcc-13
+ENV CXX=/usr/bin/g++-13
 
-ARG MODE=release
 
 # Update the package list and install prerequisites
-RUN apt update && apt upgrade -y && apt install -y software-properties-common build-essential
+RUN apt update -y 
+RUN apt upgrade -y 
+RUN apt-get update --fix-missing -y 
+RUN apt install -y --no-install-recommends software-properties-common
+RUN apt install -y --no-install-recommends build-essential
+RUN apt install -y --no-install-recommends gnupg
+RUN apt install -y --no-install-recommends ca-certificates
 RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y
 
-RUN apt update && apt install -y --no-install-recommends wget \
-                    curl                \
-                    git                 \
-                    gdb                 \
-                    libcapstone-dev     \
-                    libzstd-dev         \
-                    libslirp-dev        \
-                    libglib2.0-dev      \
-                    ninja-build         \
-                    cmake               \
-                    meson               \
-                    gcc-14 g++-14       \
-                    libpixman-1-dev     \
-                    python3 python3-venv python3-pip python3-setuptools python3-wheel   \
-                    && rm -rf /var/lib/apt/lists/*                              \
-                    && rm -rf /usr/lib/python3/dist-packages/distro*
+# Need to update after installing the previous dependencies
+RUN apt-get update -y
+RUN apt install -y --no-install-recommends wget 
+RUN apt install -y --no-install-recommends curl
+RUN apt install -y --no-install-recommends git                 
+RUN apt install -y --no-install-recommends gdb                 
+RUN apt install -y --no-install-recommends libcapstone-dev
+RUN apt install -y --no-install-recommends libzstd-dev
+RUN apt install -y --no-install-recommends libslirp-dev
+RUN apt install -y --no-install-recommends libglib2.0-dev
+RUN apt install -y --no-install-recommends ninja-build
+RUN apt install -y --no-install-recommends cmake
+RUN apt install -y --no-install-recommends meson
+# TODO once mirrors are back change back to gcc-14
+RUN apt install -y --no-install-recommends gcc-13 g++-13
+RUN apt install -y --no-install-recommends libpixman-1-dev
+RUN apt install -y --no-install-recommends python3 python3-venv python3-pip python3-setuptools python3-wheel   
 
-RUN pip install --break-system-package conan && pip cache purge
+# --break-system-package for ubuntu 24.04
+RUN pip install conan && pip cache purge
 
+# TODO everything before this, should be in another base image 
 # Copy local dir to container
 COPY --link --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCache . /qflex
 COPY --link ./qemu ./qflex/qemu
@@ -43,6 +53,7 @@ RUN conan profile detect --force
 # TODO this needs to be removed, but we first need to remove the unused libs
 ENV CFLAGS="$CFLAGS -Wno-error"
 
+ARG MODE=release
 RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing 
 RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out -b missing
 RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out
@@ -58,7 +69,7 @@ RUN ./build cq ${MODE}
 RUN ln -s /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
 RUN ln -s /qflex/qemu/build/qemu-img /qflex/qemu-img
 
-RUN pip install --break-system-package -r requirements.txt
+RUN pip install -r requirements.txt
 COPY  ./commands /qflex/commands 
 COPY ./qflex.py /qflex
 RUN ln -s /usr/bin/python3 /usr/bin/python
