@@ -48,22 +48,20 @@ COPY --link ./qemu ./qflex/qemu
 WORKDIR /qflex
 
 # Build QFlex
-RUN conan profile detect --force
 
 # TODO this needs to be removed, but we first need to remove the unused libs
 ENV CFLAGS="$CFLAGS -Wno-error"
 
+# TODO add debug mode back in, as right now the mode is not used
 ARG MODE=release
-RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing 
-RUN conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out -b missing
-RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out
-RUN conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out
 
-RUN conan cache clean -v \
-    && conan remove -c "*"
+WORKDIR /qflex/qemu
+RUN ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone
+RUN ninja -C build
 
-RUN ./build cq ${MODE}
 
+
+WORKDIR /qflex
 
 # Post-build file link
 RUN ln -s /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
