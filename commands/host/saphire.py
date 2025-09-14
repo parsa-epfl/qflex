@@ -1,0 +1,28 @@
+from .host import Host, SMTHost
+
+SAPHIRE_NAME = 'saphire'
+SAPHIRE_CORE_COUNT = 64
+SAPHIRE_CORE_SEQUENCE ="0-15,32-47,16-31,48-63"
+SAPHIRE_CORE_PER_NUMA = 32
+
+# TODO this seems wrong, check with Shanqing
+SAPHIRE_SMT_NAME = 'saphire_smt'
+SAPHIRE_SMT_CORE_COUNT = 64
+SAPHIRE_SMT_CORE_SEQUENCE ="0-127"
+SAPHIRE_SMT_CORE_PER_NUMA = 64
+SMT_SEQUENCE = ''
+
+SAPHIRE_HOST = Host(
+    name=SAPHIRE_NAME,
+    core_count=SAPHIRE_CORE_COUNT,
+    core_per_numa=SAPHIRE_CORE_PER_NUMA,
+    core_sequence=SAPHIRE_CORE_SEQUENCE
+)
+SAPHIRE_SMT_HOST = SMTHost(
+    name=SAPHIRE_SMT_NAME,
+    core_count=SAPHIRE_SMT_CORE_COUNT,
+    core_per_numa=SAPHIRE_SMT_CORE_PER_NUMA,
+    core_sequence=SAPHIRE_SMT_CORE_SEQUENCE,
+    smt_sequence=SMT_SEQUENCE
+)
+

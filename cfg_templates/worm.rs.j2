@@ -1,0 +1,383 @@
+// BSD 3-Clause License
+//
+// Copyright (c) 2024, Parallel Systems Architecture Laboratory (PARSA), EPFL.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the PARSA, EPFL
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this software without specific prior written
+//    permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+/// This file contains the parameters for the whole plugin.
+/// All of them are compilation constants that the the compiler can propagate them during compilation.
+use plugin_helper::PluginHelper;
+use rustc_hash::FxHashMap;
+
+/**
+ * CORE_COUNT
+ *
+ * Number of vCPUs of QEMU.
+ */
+pub const CORE_COUNT: usize = {{ (CORE_COUNT * 2) if DOUBLED_VCPU else CORE_COUNT }};
+
+/**
+ * CACHE_HIERARCHY_FOR_HALF_OF_CORES
+ *
+ * Whether to use the cache hierarchy and the vtime calculation for half of the cores [0, CORE_COUNT/2)
+ *
+ * This option is specially for profiling online services images.
+ *
+ * TODO: This is not the best way to implement this feature. We should use a more flexible way to specify the cores.
+ *
+ * This option impact both the cache hierarchy component and the branch predictor component.
+ */
+pub const MEASURE_HALF_OF_CORES: bool = {{ "true" if DOUBLED_VCPU else "false" }};
+
+// An assertion checker to make sure the CORE_COUNT is even if we use the CACHE_HIERARCHY_FOR_HALF_OF_CORES.
+static_assertions::const_assert!(!MEASURE_HALF_OF_CORES || CORE_COUNT % 2 == 0);
+
+/**
+ * USE_SERIAL_CACHE_MODEL
+ *
+ * Whether to use the serial cache model.
+ *
+ * Please only make this model to true when you enables the round-robin TCG mode in QEMU. Otherwise, there will be contention.
+ */
+pub const USE_SERIAL_CACHE_MODEL: bool = false;
+
+/**
+ * CACHE_LINE_SIZE
+ *
+ * The size of a cache line, in number of bytes.
+ */
+
+pub const CACHE_LINE_SIZE: usize = 64;
+static_assertions::const_assert!(CACHE_LINE_SIZE.is_power_of_two());
+
+
+// Use FullyAssociativeTLB
+pub const USE_HIGHLY_ASSOCIATIVE_L1TLB: bool = false;
+
+// ITLB
+
+pub const ITLB_ASSO: usize = 64;
+
+pub const ITLB_SET: usize = 1;
+static_assertions::const_assert!(!(ITLB_SET != 1 && USE_HIGHLY_ASSOCIATIVE_L1TLB));
+static_assertions::const_assert!(ITLB_SET.is_power_of_two());
+
+// DTLB
+
+pub const DTLB_ASSO: usize = 64;
+
+pub const DTLB_SET: usize = 1;
+static_assertions::const_assert!(!(DTLB_SET != 1 && USE_HIGHLY_ASSOCIATIVE_L1TLB));
+static_assertions::const_assert!(DTLB_SET.is_power_of_two());
+
+// A debugging flag to see whether we should warm the L1 TLB.
+pub const L1TLB_ENABLED: bool = false;
+
+pub const STLB_ENABLED: bool = true;
+static_assertions::const_assert!(!(STLB_ENABLED != true && USE_HIGHLY_ASSOCIATIVE_L1TLB));
+
+/**
+ * STLB_ASSO
+ *
+ * The associativity of the private & last-level TLB.
+ */
+pub const STLB_ASSO: usize = 4;
+
+/**
+ * STLB_SET
+ *
+ * The number of sets of the private & last-level TLB.
+ */
+
+pub const STLB_SET: usize = 1024;
+static_assertions::const_assert!(STLB_SET.is_power_of_two());
+
+// No huge pages?
+pub const NO_HUGE_PAGE: bool = true;
+
+pub const COMPARE_TRANSLATION_RESULT_WITH_WALKER: bool = false;
+
+/**
+ * USE_UNIFIED_CACHE
+ *
+ * Whether to use the unified private cache.
+ * If true, the private instruction cache and the private data cache are unified.
+ * If false, the private instruction cache and the private data cache are separated, i.e., the Harvard architecture.
+ */
+pub const USE_UNIFIED_CACHE: bool = false;
+
+/**
+ * PRI_CACHE_ASSO
+ *
+ * The associativity of the private cache.
+ * This parameter is only used when the unified private cache is enabled.
+ */
+pub const UNIFIED_PRI_CACHE_ASSO: usize = 4;
+/**
+ * PRI_CACHE_SET
+ *
+ * The number of sets of the private cache.
+ * This parameter is only used when the unified private cache is enabled.
+ */
+pub const UNIFIED_PRI_CACHE_SET: usize = 64 * 1024 / UNIFIED_PRI_CACHE_ASSO / CACHE_LINE_SIZE;
+static_assertions::const_assert!(UNIFIED_PRI_CACHE_SET.is_power_of_two());
+
+/**
+ * HARVARD_PRI_I_CACHE_ASSO
+ *
+ * The associativity of the private instruction cache.
+ * This parameter is only used when the unified private cache is disabled.
+ */
+pub const HARVARD_PRI_I_CACHE_ASSO: usize = 8;
+
+/**
+ * HARVARD_PRI_I_CACHE_SET
+ *
+ * The number of sets of the private instruction cache.
+ * This parameter is only used when the unified private cache is disabled.
+ */
+pub const HARVARD_PRI_I_CACHE_SET: usize = 128;
+static_assertions::const_assert!(HARVARD_PRI_I_CACHE_SET.is_power_of_two());
+
+/**
+ * HARVARD_PRI_D_CACHE_ASSO
+ *
+ * The associativity of the private data cache.
+ * This parameter is only used when the unified private cache is disabled.
+ */
+pub const HARVARD_PRI_D_CACHE_ASSO: usize = 8;
+
+/**
+ * HARVARD_PRI_D_CACHE_SET
+ *
+ * The number of sets of the private data cache.
+ * This parameter is only used when the unified private cache is disabled.
+ */
+pub const HARVARD_PRI_D_CACHE_SET: usize = 128;
+static_assertions::const_assert!(HARVARD_PRI_D_CACHE_SET.is_power_of_two());
+
+/**
+ * SHARED_CACHE_ASSO
+ *
+ * The associativity of the shared cache for traffic recording.
+ */
+pub const SHARED_CACHE_ASSO: usize = {{ L2_WAY }}; // with 16 and 64, each cache set is 1KB.
+
+/**
+ * SHARED_CACHE_SET
+ *
+ * The number of sets of the shared cache for traffic recording.
+ */
+pub const SHARED_CACHE_SET: usize = {{ L2_SET }};
+static_assertions::const_assert!(SHARED_CACHE_SET.is_power_of_two());
+
+/**
+ * SHARED_CACHE_EXCLUSIVE
+ *
+ * Whether the shared cache is exclusive.
+ * True if it is exclusive, false if it is non-inclusive.
+ * Currently, we don't support inclusive shared cache.
+ */
+pub const SHARED_CACHE_EXCLUSIVE: bool = false;
+
+/**
+ * SHARED_CACHE_FILL_WITH_PRIVATE_CACHE
+ *
+ * Whether the shared cache is filled on a read-permission filling to the private cache.
+ *
+ * For private cache with exclusive state (MESI), this parameter does bring data-read caches to the shared cache
+ *
+ * This parameter cannot be true together with SHARED_CACHE_EXCLUSIVE.
+ */
+pub const SHARED_CACHE_FILL_WITH_PRIVATE_CACHE: bool = true;
+static_assertions::const_assert!(!(SHARED_CACHE_EXCLUSIVE && SHARED_CACHE_FILL_WITH_PRIVATE_CACHE));
+
+/**
+ * SHARED_CACHE_FILL_ON_CLEAN_EVICTION
+ *
+ * Whether the shared cache is filled on a clean eviction from the private cache.
+ *
+ * This parameter cannot be true together with SHARED_CACHE_EXCLUSIVE.
+ */
+pub const SHARED_CACHE_FILL_ON_CLEAN_EVICTION: bool = true;
+static_assertions::const_assert!(!(SHARED_CACHE_EXCLUSIVE && SHARED_CACHE_FILL_ON_CLEAN_EVICTION));
+
+/**
+ * SHARED_CACHE_FILL_ON_DIRTY_EVICTION
+ *
+ * Whether the shared cache is filled on a dirty eviction from the private cache.
+ *
+ * This parameter cannot be true together with SHARED_CACHE_EXCLUSIVE.
+ */
+pub const SHARED_CACHE_FILL_ON_DIRTY_EVICTION: bool = true;
+static_assertions::const_assert!(!(SHARED_CACHE_EXCLUSIVE && SHARED_CACHE_FILL_ON_CLEAN_EVICTION));
+
+/**
+ * SHARED_CACHE_FILL_ON_REPLICA_CREATION
+ *
+ * Whether the shared cache is filled on a replica creation in private cache.
+ *
+ * This parameter cannot be true together with SHARED_CACHE_EXCLUSIVE.
+ */
+pub const SHARED_CACHE_FILL_ON_REPLICA_CREATION: bool = true;
+static_assertions::const_assert!(
+    !(SHARED_CACHE_EXCLUSIVE && SHARED_CACHE_FILL_ON_REPLICA_CREATION)
+);
+
+/**
+ * DIRECTORY_SHARD_COUNT
+ *
+ * The number of sets of the directory. It should be much larger than the number of sets of all private caches to prevent directory contention.
+ *
+ * It should be a power of 2.
+ *
+*/
+pub const DIRECTORY_SHARD_COUNT: usize = 32768;
+static_assertions::const_assert!(DIRECTORY_SHARD_COUNT.is_power_of_two());
+
+/**
+* ADJACENT_LINE_PREFETCHING
+*
+* Whether to enable the adjacent (in PA) line prefetching for functional warming.
+*/
+pub const ADJACENT_LINE_PREFETCHING: bool = false;
+
+/**
+ * BP_GSHARE_SET
+ *
+ * The number of sets of the gshare branch predictor.
+ */
+pub const BP_GSHARE_SET: usize = 2048;
+static_assertions::const_assert!(BP_GSHARE_SET.is_power_of_two());
+
+/**
+ * BTB_SET
+ *
+ * The number of sets of the BTB.
+ */
+pub const BTB_SET: usize = 4096;
+static_assertions::const_assert!(BTB_SET.is_power_of_two());
+
+/**
+ * BTB_ASSO
+ *
+ * The associativity of the BTB.
+ */
+pub const BTB_ASSO: usize = 4;
+
+/**
+ * BP_RAS_COUNT
+ */
+pub const BP_RAS_COUNT: usize = 32;
+
+/**
+ * INIT_HOST_TIME_SCALE
+ *
+ * The initial denominator of taking host time to advance target CPU clock.
+ *
+ * By default, the VirtualTime plugin calculate the denominator by periodically picking the fast core, and uses its speed
+ * to calculate this denominator. This parameter is used to set the initial value of this denominator.
+ *
+ */
+pub const INIT_HOST_TIME_SCALE: usize = 1000;
+
+/**
+ * HOST_TIME_SCALING_PROFILING_PERIOD
+ *
+ * The period of profiling the host time scaling, in milliseconds.
+ *
+ * The VirtualTime plugin will profile the icount and determine host time scaling every this number of instructions.
+ */
+pub const HOST_TIME_SCALING_PROFILING_PERIOD: usize = 100;
+
+/**
+ * The list of plugins.
+ */
+use crate::components::Plugin;
+
+#[derive(PluginHelper)]
+pub struct PluginList {
+    // Please comment out the plugins that you don't want to use.
+    _pb: crate::BranchPredictorPlugin,
+    _vt: crate::VirtualTimePlugin,
+    // _mk: crate::MarkerPlugin,
+    _lm: crate::ParallelCacheHierarchyPlugin,
+    // _lm: crate::SingleCacheHierarchyPlugin,
+    // _t: crate::TracePlugin,
+}
+
+/**
+ * Whether to enable the statistics collection.
+ */
+pub const ENABLE_STATISTICS: bool = true;
+
+/**
+ * Whether to enable the shared cache statistics.
+ *
+ * Turning on this option can influence the memory consumption. It adds 128 bytes to each cache set.
+ */
+pub const ENABLE_SHARED_CACHE_STATISTICS: bool = false;
+
+/**
+ * Whether to enable the exclusive cache state and its coherence protocol.
+ */
+pub const ENABLE_EXCLUSIVE_CACHE_STATE: bool = true;
+
+//////////////////////////////////////////////////////////////
+/// The following parameters are for debugging and testing.
+/// They are not supposed to be played for production use.
+//////////////////////////////////////////////////////////////
+
+/**
+ * Whether to enable the cache line history.
+ *
+ * This is used to record the cache line coherence history so that you can debug the cache coherence protocol.
+ */
+pub const ENABLE_CACHE_LINE_HISTORY: bool = false;
+
+/**
+ * Whether to disable precise coherence message reconstruction.
+ *
+ * This option is for testing the accuracy of the functional warming model.
+ *
+ * This option is only effective when the parallel cache model is used.
+ */
+pub const DISABLE_PRECISE_COHERENCE_STATE_RECONSTRUCTION: bool = false;
+
+/**
+ * Whether to use the target time (calculated with the instruction count the IPC) for cache state construction.
+ *
+ * When this option is enabled,
+ * the previous options, DISABLE_PRECISE_COHERENCE_STATE_RECONSTRUCTION and DISABLE_PRECISE_SHARED_CACHE_LRU_RECONSTRUCTION,
+ * must be set to true.
+ */
+pub const USE_TARGET_TIME_FOR_CACHE_STATE_CONSTRUCTION: bool = false;
+static_assertions::const_assert!(
+    !(DISABLE_PRECISE_COHERENCE_STATE_RECONSTRUCTION
+        && USE_TARGET_TIME_FOR_CACHE_STATE_CONSTRUCTION)
+);

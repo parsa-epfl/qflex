@@ -1,47 +1,55 @@
 from commands import Executor
-from .utils import get_docker_image_name
-
-
+from .config import ExperimentContext
+from .parameterloader import ParameterLoader
 class Load(Executor):
 
     def __init__(self,
-                 image_name: str = 'base.qcow2',
-                 memory_mb: int = 2048,
-                 cores: int = 1,
-                 double_cores: bool = False,
-                 is_parallel: bool = False,
-                 quantum_size_ns: int = 2000,):
-        self.image_name = image_name
-        self.memory_size_mb = memory_mb
-        self.cores = cores
-        self.double_cores = double_cores
-        self.is_parallel = is_parallel
-        self.quantum_size_ns = quantum_size_ns
-        self.core_coeff = 1
-        if self.double_cores:
-            self.core_coeff = 2
-        self.docker_image_name = get_docker_image_name(debug=self.debug, worm=self.worm)
-
+                 experiment_context: ExperimentContext,):
+        self.experiment_context = experiment_context
+        self.simulation_context = experiment_context.simulation_context
+        self.core_coeff = 2 if self.simulation_context.doubled_vcpu else 1
+        self.image_address = self.experiment_context.get_image_address()
+        self.worm_parameter_loader = ParameterLoader(
+            experiment_context=self.experiment_context,
+            parameter_template='worm.rs.j2',
+            output_name='worm_parameter.rs'
+        )
     
     def cmd(self) -> str:
         clock_command = ''
-        if self.is_parallel:
-            clock_command = f'-quantum size={self.quantum_size_ns},check_period={self.quantum_size_ns * 53} '
+        if self.simulation_context.is_parallel:
+            clock_command = f'   -quantum size={self.simulation_context.quantum_size},check_period={self.simulation_context.quantum_size * 53} '
         else:
-            clock_command = f'-icount shift=0,align=off,sleep=off,q={self.quantum_size_ns},check_period={self.quantum_size_ns * 53} '
+            clock_command = f'   -icount shift=0,align=off,sleep=off,q={self.simulation_context.quantum_size},check_period={self.simulation_context.quantum_size * 53} '
         # TODO this plugin exists outside, needs to be moved in the qemu folder later
-        return f"""
-        /qemu/build/qemu-system-aarch64 \
-        -smp {self.core_coeff * self.cores} \
+        run_qemu_with_worm = f"""
+        ./qemu-aarch64 \
+        -smp {self.core_coeff * self.simulation_context.core_count} \
         -M virt,gic-version=max,virtualization=off,secure=off \
-        -cpu max,pauth=off -m {self.memory_size_mb} \
+        -cpu max,pauth=off -m {self.simulation_context.memory * 1024} \
         -boot menu=on \
         -bios ./qemu/build/pc-bios/edk2-aarch64-code.fd \
-        -drive if=virtio,file=./images/{self.image_name},format=qcow2 \
-        -nic {{ QEMU_NIC }} \
+        -drive if=virtio,file={self.image_address},format=qcow2 \
+        -nic {self.simulation_context.qemu_nic} \
         -rtc clock=vm \
+        -plugin ./WormCache/target/release/libworm_cache.so,mode=pure_fill,prefix=init \
         {clock_command} \
-        -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init \
         -loadvm base \
         -nographic -no-reboot
         """
+
+        worm_params = self.worm_parameter_loader.load_parameters()
+
+        print("="*50)
+        print("qemu command:")
+        print(run_qemu_with_worm)
+        print("="*50)
+        
+        # WormCache/src/parameter.rss
+        return [
+            f"cp {worm_params} ./WormCache/src/parameter.rs",
+            "cd ./WormCache",
+            "cargo build --release",
+            "cd ../",
+            run_qemu_with_worm
+        ]

@@ -15,7 +15,7 @@ class Executor(abc.ABC):
         if isinstance(args, str):
             args = [args]
 
-        arg = " && ".join(args)
+        arg = " && ".join([a.strip() for a in args])
         # TODO see if we need to support other type of concatting args
 
         # TODO look into if shell needs to be turned False

@@ -1,1 +1,4 @@
 typer
+pydantic
+jinja2
+pandas

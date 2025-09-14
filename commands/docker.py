@@ -5,12 +5,15 @@ from .utils import get_docker_image_name
 class DockerStarter(Executor):
     
     def __init__(self, 
+                #  TODO change to experiment context
+                 experiment_name: str = 'default_experiment',
                  debug: bool = False,
                  worm: bool = False):
         self.debug = debug
         self.worm = worm
         self.docker_image_name = get_docker_image_name(debug=self.debug, worm=self.worm)
         self.images_folder = './images'
+        self.experiment_name = experiment_name
 
     def cmd(self) -> str:
         cwd = os.getcwd()
@@ -30,10 +33,18 @@ class DockerStarter(Executor):
             binary_mount = ''
 
 
+        # make sure cfg folder exists
+        if not os.path.isdir('./cfg'):
+            os.makedirs('./cfg')
+        
+        if not os.path.isdir(f'./cfg/{self.experiment_name}'):
+            os.makedirs(f'./cfg/{self.experiment_name}')
+
         # TODO remove unecessary mounts
         return f"""
         docker run -it --entrypoint bash \
         -v {cwd}/images:/qflex/images \
+        -v {cwd}/cfg/{self.experiment_name}:/qflex/cfg/{self.experiment_name} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
 
@@ -52,7 +63,7 @@ class DockerBuild(Executor):
         self.build_type = 'release'
         if self.debug:
             self.build_type = 'debug'
-        
+
     def cmd(self) -> str:
         
         base_image_cmd = f"""
