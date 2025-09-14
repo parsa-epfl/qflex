@@ -1,3 +1,5 @@
+cfg/
+*.pyc
 checkpoint
 *.log
 build/
