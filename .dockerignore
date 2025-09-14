@@ -7,3 +7,5 @@ qemu-*
 Dockerfile
 images/
 .github/
+__pycache__/
+cfg/
