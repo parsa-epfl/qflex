@@ -43,8 +43,7 @@ RUN pip install conan && pip cache purge
 
 # TODO everything before this, should be in another base image 
 # Copy local dir to container
-COPY --link --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCache . /qflex
-COPY --link ./qemu ./qflex/qemu
+COPY --link --exclude=p-qemu --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCache . /qflex
 WORKDIR /qflex
 
 # Build QFlex
@@ -55,17 +54,31 @@ ENV CFLAGS="$CFLAGS -Wno-error"
 # TODO add debug mode back in, as right now the mode is not used
 ARG MODE=release
 
-WORKDIR /qflex/qemu
-RUN ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone
-RUN ninja -C build
+WORKDIR /qflex
+
+# TODO address the two qemu versions
+RUN --mount=type=bind,source=./qemu,target=/qflex/qemu,rw conan profile detect --force && \
+    conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing && \
+    conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out -b missing && \
+    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out && \
+    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out && \
+    conan cache clean -v && \
+    conan remove -c "*" && \
+    ./build cq ${MODE} && \
+    mv /qflex/qemu/build /qflex/qemu_build
+    
+RUN --mount=type=bind,source=./p-qemu,target=/qflex/p-qemu,rw cd p-qemu && \
+    ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
+    ninja -C build && \
+    mv /qflex/p-qemu/build /qflex/p-qemu_build
+
 
 
 
 WORKDIR /qflex
-
 # Post-build file link
-RUN ln -s /qflex/qemu/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
-RUN ln -s /qflex/qemu/build/qemu-img /qflex/qemu-img
+RUN ln -s /qflex/p-qemu_build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
+RUN ln -s /qflex/p-qemu_build/qemu-img /qflex/qemu-img
 
 RUN pip install -r requirements.txt
 COPY  ./commands /qflex/commands 
