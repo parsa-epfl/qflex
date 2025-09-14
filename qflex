@@ -4,7 +4,6 @@ import typer
 from typing import Annotated
 from commands.createimage import CreateImage
 from commands.boot import Boot
-from commands.load import Load
 from commands.docker import DockerStarter, DockerBuild
 
 app = typer.Typer(
@@ -79,32 +78,6 @@ def boot(
         double_cores=double_cores
     )
     boot_executor.execute(to_stdio=True, run_in_background=False)
-
-@app.command()
-def load(
-    image_name: Annotated[str, typer.Option(
-        help="Name of the image file to load."
-    )] = "base.qcow2",
-    memory_mb: Annotated[int, typer.Option(help="Memory size for the VM in MB.")] = 2048,
-    cores: Annotated[int, typer.Option(help="Number of CPU cores for the VM.")] = 1,
-    double_cores: Annotated[bool, typer.Option(help="Double the number of CPU cores.")] = False,
-    is_parallel: Annotated[bool, typer.Option(help="Enable parallel execution mode.")] = False,
-    quantum_size_ns: Annotated[int, typer.Option(help="Quantum size in nanoseconds.")] = 2000
-):
-    """
-    Load a QEMU virtual machine from a snapshot with specified parameters.
-    This is done to warm up long-term microarchitectural state before functional warming starts.
-    This is the third step, to prepare for functional warming.
-    """
-    load_executor = Load(
-        image_name=image_name,
-        memory_mb=memory_mb,
-        cores=cores,
-        double_cores=double_cores,
-        is_parallel=is_parallel,
-        quantum_size_ns=quantum_size_ns
-    )
-    load_executor.execute(to_stdio=True, run_in_background=False)
 
 
 
