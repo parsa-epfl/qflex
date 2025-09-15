@@ -10,3 +10,4 @@ images/
 .github/
 __pycache__/
 cfg/
+experiments/

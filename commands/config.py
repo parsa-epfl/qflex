@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from host import Host, SMTHost, HOSTS, HostType
 from workload import Workload, create_workload
+import os
 import pandas
 
 # TODO double check all the parameters and their descriptions
@@ -77,19 +78,54 @@ class ExperimentContext(BaseModel):
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
     host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
+    working_directory: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
+
+
+    def get_experiment_folder_address(self) -> str:
+        """
+        Returns the full path to the experiment folder. Will have subfolders like bin, cfg, flags, lib, run, scripts for the specific experiment.
+        """
+        return f'{self.working_directory}/experiments/{self.experiment_name}'
+
+    def set_up_folders(self):
+        for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts"]:
+            os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=False)
 
     def get_image_address(self) -> str:
-        return f'./images/{self.experiment_name}/{self.image_name}'
+        return self.get_experiment_folder_address() + f'/{self.image_name}'
     
-    def get_ipns_per_core(self):
+    def get_ipns_per_core(self) -> list[IPNSInfo]:
+
         # TODO This part looks messy to me, we need to revisit it later 
         is_consolidated = self.workload.IPC_info.is_consolidated
         has_client = self.simulation_context.doubled_vcpu
         core_list = self.host.get_core_sequence_as_list()
         results: list[IPNSInfo] = []
-        # TODO first next step to finish IPNS function
-        # if not is_consolidated:
-        #     for core_idx
+        
+        core_count = self.simulation_context.core_count
+        if not is_consolidated:
+            for core_idx in range(core_count):
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.primary_ipc))
+        else:
+            primary_core_start = self.workload.core_range.primary_core_start
+            secondary_core_start = self.workload.core_range.secondary_core_start
+            # TODO check this with shanqing, changed this so you can give core numbers that are actually used unlike the og script
+            for core_idx in range(primary_core_start, secondary_core_start):
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.primary_ipc))
+            for core_idx in range(secondary_core_start, core_count):
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.secondary_ipc))
+            
+        if has_client:
+            for core_idx in range (core_count, core_count * 2):
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.phantom_cpu_ipc))
+
+        return results
+    
+    def get_ipns_csv(self, target) -> str:
+        # TODO check on this as well as we talked about removing the dependancy between host and target
+        df = pandas.DataFrame([[ipns_info.ipns, ipns_info] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
+        df.to_csv(target, index=False)
+
 
         
 
@@ -144,13 +180,18 @@ def create_experiment_context(
     )
 
 
-    return ExperimentContext(
+    e = ExperimentContext(
         experiment_name=experiment_name,
         image_name=image_name,
         simulation_context=simulation_context,
         host=host,
         workload=workload,
+        working_directory=os.getcwd(),
     )
+
+    e.set_up_folders()
+
+    return e
     
 
 
