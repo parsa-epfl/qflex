@@ -82,7 +82,7 @@ RUN ln -s /qflex/p-qemu_build/qemu-img /qflex/qemu-img
 
 RUN pip install -r requirements.txt
 COPY  ./commands /qflex/commands 
-COPY ./qflex.py /qflex
+COPY ./qflex /qflex
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
 # TODO this is hardcoded as typer doesn't have a way to generate completions from within docker build, as long as tool is called qflex this is ok

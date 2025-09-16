@@ -1,8 +1,9 @@
 from pydantic import BaseModel, Field
-from host import Host, SMTHost, HOSTS, HostType
-from workload import Workload, create_workload
 import os
 import pandas
+
+from .host import Host, SMTHost, HOSTS, HostType
+from .workload import Workload, create_workload
 
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
