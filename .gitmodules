@@ -1,8 +1,16 @@
 [submodule "flexus"]
 	path = flexus
 	url = git@github.com:parsa-epfl/flexus.git
-	branch = maintainer/cyan-qflex-exp
+	branch = gitflow-cleanup-cyan-qflex-exp
 [submodule "qemu"]
 	path = qemu
 	url = git@github.com:parsa-epfl/qemu.git
-	branch = maintainer/cyan-qflex-exp
+	branch = gitflow-cleanup-cyan-qflex-exp
+[submodule "p-qemu"]
+	path = p-qemu
+	url = git@github.com:parsa-epfl/p-qemu.git
+	branch = maintainer/cyan-pf-exp
+[submodule "WormCache"]
+	path = WormCache
+	url = git@github.com:parsa-epfl/WormCache.git
+	branch = gitflow_clean_up_unstable
