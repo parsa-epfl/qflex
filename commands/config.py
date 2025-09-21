@@ -4,6 +4,7 @@ import pandas
 
 from .host import Host, SMTHost, HOSTS, HostType
 from .workload import Workload, create_workload
+import datetime
 
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
@@ -44,6 +45,7 @@ def create_simulation_context(
     elif core_count == 16:
         memory_controller_count = 2
         memory_controller_positions = "8,15"
+    # TODO add support for 8 core count
     elif core_count <= 4:
         memory_controller_count = 1
         memory_controller_positions = "0"
@@ -75,11 +77,13 @@ class ExperimentContext(BaseModel):
     """
     experiment_name: str = Field(description="Name of the experiment")
     # TODO move image name to the workload section
-    image_name: str = Field(description="Name of the image file to use")
+    image_folder: str = Field(description="Address of the image to use")
+    image_name: str = Field(description="Name of the image to use")
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
     host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
     working_directory: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
+    keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
 
 
     def get_experiment_folder_address(self) -> str:
@@ -88,13 +92,34 @@ class ExperimentContext(BaseModel):
         """
         return f'{self.working_directory}/experiments/{self.experiment_name}'
 
-    def set_up_folders(self):
-        for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts"]:
-            os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=False)
-
-    def get_image_address(self) -> str:
+    def get_local_image_address(self) -> str:
         return self.get_experiment_folder_address() + f'/{self.image_name}'
     
+    def set_up_folders(self):
+        # Check if base image exists in root folder
+        experiment_folder_exists = os.path.exists(self.get_experiment_folder_address())
+        experimage_image_exists = os.path.exists(self.get_local_image_address())
+
+        if not experiment_folder_exists:
+            os.makedirs(self.get_experiment_folder_address(), exist_ok=not self.keep_experiment_unique)
+
+        if experimage_image_exists:
+            print(f"Experiment image {self.get_local_image_address()} already exists, not overwriting.")
+            
+        else:
+            # The following is done as images can get big and this way they can be mounted on storage with more space if needed
+            # copy the base image based on the experiment name then link it on experiment folder
+            print("Creating experiment folder and copying base image...")
+            # create folder in image folder
+            os.makedirs(f"{self.image_folder}/experiments/{self.experiment_name}", exist_ok=not self.keep_experiment_unique)
+            # Copy file to the new folder
+            os.system(f"cp {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
+            # Create a symlink to the new image in the experiment folder
+            os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
+
+        for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts"]:
+            os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
+
     def get_ipns_per_core(self) -> list[IPNSInfo]:
 
         # TODO This part looks messy to me, we need to revisit it later 
@@ -132,8 +157,6 @@ class ExperimentContext(BaseModel):
 
 
 def create_experiment_context(
-    experiment_name: str,
-    image_name: str,
     core_count: int,
     quantum_size: int,
     doubled_vcpu: bool,
@@ -153,8 +176,25 @@ def create_experiment_context(
     population: int,
     sample_size: int,
     phantom_cpu_ipc: float,
-
+    # experiment sections
+    image_folder: str,
+    # Default parameters that can be induced from others
+    experiment_name=None,
+    image_name: str=None,
+    keep_experiment_unique: bool = True
 ) -> ExperimentContext:
+    # assert False
+    # TODO add how to create experiment name
+    if image_name is None:
+        image_name = f"root.qcow2"
+
+    if experiment_name is None:
+        experiment_name: str = 'default-experiment'
+    
+    if keep_experiment_unique:
+        # Add date time to prevent overwriting
+        experiment_name = experiment_name + '-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
     simulation_context = create_simulation_context(
         core_count=core_count,
         quantum_size=quantum_size,
@@ -165,6 +205,8 @@ def create_experiment_context(
         memory_gb=memory_gb,
     )
 
+    if host_name.upper() not in HostType.__members__.keys():
+        raise ValueError(f"Host type {host_name} not recognized. Available types: {list(HostType.__members__.keys())}")
     host_type = HostType[host_name.upper()]
     host = HOSTS[host_type]
 
@@ -183,7 +225,9 @@ def create_experiment_context(
 
     e = ExperimentContext(
         experiment_name=experiment_name,
+        image_folder=image_folder,
         image_name=image_name,
+        keep_experiment_unique=keep_experiment_unique,
         simulation_context=simulation_context,
         host=host,
         workload=workload,

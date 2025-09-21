@@ -11,3 +11,4 @@ images/
 __pycache__/
 cfg/
 experiments/
+*.qcow2

@@ -8,21 +8,22 @@ class Load(Executor):
         self.experiment_context = experiment_context
         self.simulation_context = experiment_context.simulation_context
         self.core_coeff = 2 if self.simulation_context.doubled_vcpu else 1
-        self.image_address = self.experiment_context.get_image_address()
+        self.image_address = self.experiment_context.get_local_image_address()
         self.worm_parameter_loader = ParameterLoader(
             experiment_context=self.experiment_context,
             parameter_template='worm.rs.j2',
             output_name='worm_parameter.rs'
         )
-    
-    def cmd(self) -> str:
+
+
+    def qemu_cmd(self) -> str:
         clock_command = ''
         if self.simulation_context.is_parallel:
             clock_command = f'   -quantum size={self.simulation_context.quantum_size},check_period={self.simulation_context.quantum_size * 53} '
         else:
             clock_command = f'   -icount shift=0,align=off,sleep=off,q={self.simulation_context.quantum_size},check_period={self.simulation_context.quantum_size * 53} '
         # TODO this plugin exists outside, needs to be moved in the qemu folder later
-        run_qemu_with_worm = f"""
+        return f"""
         /qflex/p-qemu_build/qemu-system-aarch64 \
         -smp {self.core_coeff * self.simulation_context.core_count} \
         -M virt,gic-version=max,virtualization=off,secure=off \
@@ -38,7 +39,13 @@ class Load(Executor):
         -nographic -no-reboot
         """
 
+
+    def cmd(self) -> str:
+        
+
         worm_params = self.worm_parameter_loader.load_parameters()
+
+        run_qemu_with_worm = self.qemu_cmd()
 
         self.experiment_context.get_ipns_csv(target='./cfg/core_info.csv')
         

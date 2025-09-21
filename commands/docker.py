@@ -6,6 +6,7 @@ class DockerStarter(Executor):
     
     def __init__(self, 
                 #  TODO change to experiment context
+                 image_folder: str,
                  experiment_name: str = 'default_experiment',
                  debug: bool = False,
                  worm: bool = False):
@@ -14,6 +15,7 @@ class DockerStarter(Executor):
         self.docker_image_name = get_docker_image_name(debug=self.debug, worm=self.worm)
         self.images_folder = './images'
         self.experiment_name = experiment_name
+        self.image_folder = image_folder
 
     def cmd(self) -> str:
         cwd = os.getcwd()
@@ -45,6 +47,10 @@ class DockerStarter(Executor):
         docker run -it --entrypoint bash \
         -v {cwd}/images:/qflex/images \
         -v {cwd}/cfg/{self.experiment_name}:/qflex/cfg/{self.experiment_name} \
+        -v {cwd}/experiments:/qflex/experiments \
+        -v {cwd}/typer_inputs:/qflex/typer_inputs \
+        -v {cwd}/commands:/qflex/commands \
+        -v {self.image_folder}:{self.image_folder} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
 

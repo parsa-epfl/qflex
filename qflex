@@ -5,6 +5,10 @@ from typing import Annotated
 from commands.createimage import CreateImage
 from commands.boot import Boot
 from commands.docker import DockerStarter, DockerBuild
+from commands.config import create_experiment_context, ExperimentContext
+from commands.load import Load
+from typer_inputs.config import ExperimentContextTyper
+from typer_inputs.config_wrapper import data_class_wrap
 
 app = typer.Typer(
     name="qflex cli",
@@ -27,6 +31,8 @@ def build_docker(
 
 @app.command()
 def start_docker(
+    image_folder: Annotated[str, typer.Option(help="Folder where images are stored.")],
+    experiment_name: Annotated[str, typer.Option(help="Name of the experiment. Used for organizing output files.")] = 'default_experiment',
     debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False, 
     worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
 ):
@@ -34,7 +40,7 @@ def start_docker(
     Start a Docker container with the QFlex environment. 
     Useful for development and testing without installing dependencies locally.
     """
-    docker_executor = DockerStarter(debug=debug, worm=worm)
+    docker_executor = DockerStarter(image_folder=image_folder, debug=debug, worm=worm, experiment_name=experiment_name)
     docker_executor.execute(to_stdio=True, run_in_background=False)
 
 # TODO bring in the build scripts here as well
@@ -55,13 +61,9 @@ def create_base_image(
     create_image_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
 def boot(
-    image_name: Annotated[str, typer.Option(
-        help="Name of the image file to boot."
-    )] = "base.qcow2",
-    memory_mb: Annotated[int, typer.Option(help="Memory size for the VM in MB.")] = 2048,
-    cores: Annotated[int, typer.Option(help="Number of CPU cores for the VM.")] = 1,
-    double_cores: Annotated[bool, typer.Option(help="Double the number of CPU cores.")] = False
+    experiment_context: ExperimentContext,
 ):
     """
     Boot a QEMU virtual machine with specified parameters.
@@ -72,14 +74,28 @@ def boot(
     This is the second step to create the images for an experiment, with all the necessary packages installed.
     """
     boot_executor = Boot(
-        image_name=image_name,
-        memory_mb=memory_mb,
-        cores=cores,
-        double_cores=double_cores
+        experimnt_context=experiment_context
     )
-    boot_executor.execute(to_stdio=True, run_in_background=False)
+    return
+    # boot_executor.execute(to_stdio=True, run_in_background=False)
 
-
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def load(
+    experiment_context: ExperimentContext,
+):
+    """
+    Load a QEMU virtual machine from a snapshot with specified parameters.
+    This is done to warm up long-term microarchitectural state before functional warming starts.
+    This is the third step, to prepare for functional warming.
+    """
+    print("Experiment Context:")
+    print(experiment_context)
+    return
+    # load_executor = Load(
+    #     experiment_context=experiment_context
+    # )
+    # load_executor.execute(to_stdio=True, run_in_background=False)
 
 
 if __name__ == "__main__":

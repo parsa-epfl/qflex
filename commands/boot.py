@@ -1,24 +1,21 @@
 import os
 from commands import Executor
 from .config import ExperimentContext
+from .utils import get_pflex_qemu_build_folder
 
 class Boot(Executor):
 
     def __init__(self, 
-                 image_name: str = 'base.qcow2',
-                 memory_mb: int = 2048,
-                 cores: int = 1,
-                 double_cores: bool = False,
-                 experimnt_context: ExperimentContext = None):
-        self.image_name = image_name
-        self.memory_size_mb = memory_mb
-        self.cores = cores
-        self.double_cores = double_cores
+                 experimnt_context: ExperimentContext):
+        self.experiment_context = experimnt_context
+        self.image_name = self.experiment_context.get_local_image_address()
+        self.memory_size_mb = self.experiment_context.simulation_context.memory * 1024
+        self.cores = self.experiment_context.simulation_context.core_count
+        self.double_cores = self.experiment_context.simulation_context.doubled_vcpu
         self.core_coeff = 1
         if self.double_cores:
             self.core_coeff = 2
         # TODO have to change the CLI to send this in, and also make it a mandetry field
-        self.experiment_context = experimnt_context
     
     def cmd(self) -> str:
 
@@ -28,11 +25,11 @@ class Boot(Executor):
             os.system(f'wget {alpine_url} -O {self.experiment_context.working_directory}/images/{alpine_image_name}')
 
         return f"""
-        ./qemu-aarch64 \
+        {get_pflex_qemu_build_folder()}/qemu-aarch64 \
         -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores}\
         -cpu max,pauth=off -m {self.memory_size_mb} \
-        -bios ./qemu/build/pc-bios/edk2-aarch64-code.fd \
+        -bios {get_pflex_qemu_build_folder()}/pc-bios/edk2-aarch64-code.fd \
         -drive if=virtio,file=./images/{self.image_name},format=qcow2 \
         -cdrom {self.experiment_context.working_directory}/images/{alpine_image_name} \
         -boot d \

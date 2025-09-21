@@ -81,7 +81,8 @@ RUN ln -s /qflex/p-qemu_build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aa
 RUN ln -s /qflex/p-qemu_build/qemu-img /qflex/qemu-img
 
 RUN pip install -r requirements.txt
-COPY  ./commands /qflex/commands 
+COPY  ./commands /qflex/commands
+COPY ./typer_inputs /qflex/typer_inputs
 COPY ./qflex /qflex
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
