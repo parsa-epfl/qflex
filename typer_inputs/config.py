@@ -61,6 +61,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         unique: Annotated[bool, typer.Option(
             help="Whether to keep the experiment folder unique by adding a timestamp."
         )] = True,
+        use_image_directly: Annotated[bool, typer.Option(
+            help="Whether to use the image directly from the image folder or copy it to the experiment folder."
+        )] = False,
     ):
         experiment_context: ExperimentContext = create_experiment_context(
             experiment_name=experiment_name,
@@ -86,5 +89,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
             phantom_cpu_ipc=phantom_cpu_ipc,
             image_folder=image_folder,
             keep_experiment_unique=unique,
+            use_image_directly=use_image_directly
         )
         return experiment_context

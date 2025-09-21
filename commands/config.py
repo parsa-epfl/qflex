@@ -84,6 +84,8 @@ class ExperimentContext(BaseModel):
     workload: Workload = Field(description="Workload configuration")
     working_directory: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
     keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
+    use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
+    image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
 
 
     def get_experiment_folder_address(self) -> str:
@@ -93,32 +95,77 @@ class ExperimentContext(BaseModel):
         return f'{self.working_directory}/experiments/{self.experiment_name}'
 
     def get_local_image_address(self) -> str:
-        return self.get_experiment_folder_address() + f'/{self.image_name}'
+        return self.image_address
+    def get_vanila_qemu_build_folder(self) -> str:
+        return f'{self.get_experiment_folder_address()}/qemu-saved'
+    def get_pflex_qemu_build_folder(self) -> str:
+        return f'{self.get_experiment_folder_address()}/p-qemu-saved'
     
-    def set_up_folders(self):
-        # Check if base image exists in root folder
-        experiment_folder_exists = os.path.exists(self.get_experiment_folder_address())
-        experimage_image_exists = os.path.exists(self.get_local_image_address())
+    def set_up_image(self):
 
-        if not experiment_folder_exists:
-            os.makedirs(self.get_experiment_folder_address(), exist_ok=not self.keep_experiment_unique)
-
-        if experimage_image_exists:
-            print(f"Experiment image {self.get_local_image_address()} already exists, not overwriting.")
-            
+        if self.use_image_directly:
+            self.image_address = f"{self.image_folder}/{self.image_name}"
         else:
-            # The following is done as images can get big and this way they can be mounted on storage with more space if needed
-            # copy the base image based on the experiment name then link it on experiment folder
-            print("Creating experiment folder and copying base image...")
-            # create folder in image folder
-            os.makedirs(f"{self.image_folder}/experiments/{self.experiment_name}", exist_ok=not self.keep_experiment_unique)
-            # Copy file to the new folder
-            os.system(f"cp {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
-            # Create a symlink to the new image in the experiment folder
-            os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
+            # Check if base image exists in root folder
+            self.image_address = f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}"
+            experiment_folder_exists = os.path.exists(self.get_experiment_folder_address())
+            experimage_image_exists = os.path.exists(self.get_local_image_address())
+
+            if not experiment_folder_exists:
+                os.makedirs(self.get_experiment_folder_address(), exist_ok=not self.keep_experiment_unique)
+
+            if experimage_image_exists:
+                print(f"Experiment image {self.get_local_image_address()} already exists.")
+                
+            else:
+                # The following is done as images can get big and this way they can be mounted on storage with more space if needed
+                # copy the base image based on the experiment name then link it on experiment folder
+                print("Creating experiment folder and copying base image...")
+                # create folder in image folder
+                if not os.path.exists(f"{self.image_folder}/experiments"):
+                    os.makedirs(f"{self.image_folder}/experiments", exist_ok=False)
+                os.makedirs(f"{self.image_folder}/experiments/{self.experiment_name}", exist_ok=not self.keep_experiment_unique)
+                print("created folder in images folder for this experiment, copying image...")
+                # Copy file to the new folder
+                print(f"cp {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
+                os.system(f"cp -u {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
+                print("copied image, creating symlink...")
+                # Create a symlink to the new image in the experiment folder
+                os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
+                print(f"Linked image to")
+
+            
+
+    def set_up_folders(self):
+
+        self.set_up_image()
 
         for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts"]:
             os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
+
+        # check that both build/qemu-system-aarch64 exists in run folder plus edk2-aarch64-code.fd.bz2 and efi-virtio.rom
+        # link all of them
+        # TODO check if rom and bios files can be linked from p-qemu-saved when using qemu
+        run_files = [
+            "./p-qemu-saved/build/qemu-system-aarch64", 
+            "./p-qemu-saved/pc-bios/edk2-aarch64-code.fd.bz2", 
+            "./p-qemu-saved/pc-bios/efi-virtio.rom",
+            "./qemu-saved/build/qemu-system-aarch64",
+        ]
+        for f in run_files:
+
+            if "p-qemu" in f:
+                # Link as the name of the file to run folder
+                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
+            else:
+                # Link as the name of the file to run folder with
+                link_address = f"{self.get_experiment_folder_address()}/run/vanilla-{f.split('/')[-1]}"
+
+            if not os.path.exists(link_address):
+                os.system(f"cp -u {f} {link_address}")
+        
+
+
 
     def get_ipns_per_core(self) -> list[IPNSInfo]:
 
@@ -181,7 +228,8 @@ def create_experiment_context(
     # Default parameters that can be induced from others
     experiment_name=None,
     image_name: str=None,
-    keep_experiment_unique: bool = True
+    keep_experiment_unique: bool = True,
+    use_image_directly: bool = False,
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -232,6 +280,8 @@ def create_experiment_context(
         host=host,
         workload=workload,
         working_directory=os.getcwd(),
+        use_image_directly=use_image_directly,
+        image_address="", # will be set up during initialization based on other parameters
     )
 
     e.set_up_folders()

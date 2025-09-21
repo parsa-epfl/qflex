@@ -65,20 +65,24 @@ RUN --mount=type=bind,source=./qemu,target=/qflex/qemu,rw conan profile detect -
     conan cache clean -v && \
     conan remove -c "*" && \
     ./build cq ${MODE} && \
-    mv /qflex/qemu/build /qflex/qemu_build
-    
+    mkdir qemu-saved && \
+    cp -r /qflex/qemu/pc-bios /qflex/qemu-saved/pc-bios && \
+    cp -r /qflex/qemu/build /qflex/qemu-saved/build
+
 RUN --mount=type=bind,source=./p-qemu,target=/qflex/p-qemu,rw cd p-qemu && \
     ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
     ninja -C build && \
-    mv /qflex/p-qemu/build /qflex/p-qemu_build
+    mkdir /qflex/p-qemu-saved && \
+    cp -r /qflex/p-qemu/pc-bios /qflex/p-qemu-saved/pc-bios && \
+    cp -r /qflex/p-qemu/build /qflex/p-qemu-saved/build
 
 
 
 
 WORKDIR /qflex
 # Post-build file link
-RUN ln -s /qflex/p-qemu_build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
-RUN ln -s /qflex/p-qemu_build/qemu-img /qflex/qemu-img
+RUN ln -s /qflex/p-qemu-saved/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
+RUN ln -s /qflex/p-qemu-saved/build/qemu-img /qflex/qemu-img
 
 RUN pip install -r requirements.txt
 COPY  ./commands /qflex/commands

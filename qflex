@@ -76,8 +76,7 @@ def boot(
     boot_executor = Boot(
         experimnt_context=experiment_context
     )
-    return
-    # boot_executor.execute(to_stdio=True, run_in_background=False)
+    boot_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
