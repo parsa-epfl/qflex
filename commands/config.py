@@ -45,8 +45,8 @@ def create_simulation_context(
     elif core_count == 16:
         memory_controller_count = 2
         memory_controller_positions = "8,15"
-    # TODO add support for 8 core count
-    elif core_count <= 4:
+    # TODO check the memory for 8 and the other values
+    elif core_count <= 8:
         memory_controller_count = 1
         memory_controller_positions = "0"
     else:
