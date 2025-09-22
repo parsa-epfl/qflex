@@ -85,6 +85,7 @@ class ExperimentContext(BaseModel):
     working_directory: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
     keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
+    loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
 
 
@@ -146,9 +147,18 @@ class ExperimentContext(BaseModel):
         # check that both build/qemu-system-aarch64 exists in run folder plus edk2-aarch64-code.fd.bz2 and efi-virtio.rom
         # link all of them
         # TODO check if rom and bios files can be linked from p-qemu-saved when using qemu
+        # TODO check why files are being turned into bz2
+
+        if not os.path.exists(f"./p-qemu-saved/pc-bios/edk2-aarch64-code.fd"):
+            if os.path.exists(f"./p-qemu-saved/pc-bios/edk2-aarch64-code.fd.bz2"):
+                os.system(f"bzip2 -d ./p-qemu-saved/pc-bios/edk2-aarch64-code.fd.bz2")
+            else:
+                raise FileNotFoundError("edk2-aarch64-code.fd not found in p-qemu-saved/pc-bios/")
+
+        
         run_files = [
             "./p-qemu-saved/build/qemu-system-aarch64", 
-            "./p-qemu-saved/pc-bios/edk2-aarch64-code.fd.bz2", 
+            "./p-qemu-saved/pc-bios/edk2-aarch64-code.fd", 
             "./p-qemu-saved/pc-bios/efi-virtio.rom",
             "./qemu-saved/build/qemu-system-aarch64",
         ]
@@ -230,6 +240,7 @@ def create_experiment_context(
     image_name: str=None,
     keep_experiment_unique: bool = True,
     use_image_directly: bool = False,
+    loadvm_name: str = "",
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -282,6 +293,7 @@ def create_experiment_context(
         working_directory=os.getcwd(),
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
+        loadvm_name=loadvm_name
     )
 
     e.set_up_folders()

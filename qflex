@@ -46,7 +46,7 @@ def start_docker(
 # TODO bring in the build scripts here as well
 
 
-@app.command()
+@app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
 def create_base_image(
     image_name: Annotated[str,typer.Option(
         help="Name of the base image file to create."

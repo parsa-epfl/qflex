@@ -23,12 +23,13 @@ class Boot(Executor):
             alpine_url = f'https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/{alpine_image_name}'
             os.system(f'wget {alpine_url} -O {self.experiment_context.working_directory}/images/{alpine_image_name}')
 
+        # TODO make nic based on experiment context
         boot_cmd = f"""
         ./qemu-system-aarch64 \
         -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores}\
         -cpu max,pauth=off -m {self.memory_size_mb} \
-        -bios ./edk2-aarch64-code.fd.bz2 \
+        -bios ./edk2-aarch64-code.fd \
         -drive if=virtio,file={self.image_address},format=qcow2 \
         -cdrom {self.experiment_context.working_directory}/images/{alpine_image_name} \
         -boot d \

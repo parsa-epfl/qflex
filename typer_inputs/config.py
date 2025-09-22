@@ -64,6 +64,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         use_image_directly: Annotated[bool, typer.Option(
             help="Whether to use the image directly from the image folder or copy it to the experiment folder."
         )] = False,
+        loadvm_name: Annotated[str, typer.Option(
+            help="Name of the loadvm to use in QEMU, optional"
+        )] = "",
     ):
         experiment_context: ExperimentContext = create_experiment_context(
             experiment_name=experiment_name,
@@ -89,6 +92,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
             phantom_cpu_ipc=phantom_cpu_ipc,
             image_folder=image_folder,
             keep_experiment_unique=unique,
-            use_image_directly=use_image_directly
+            use_image_directly=use_image_directly,
+            loadvm_name=loadvm_name,
         )
         return experiment_context
