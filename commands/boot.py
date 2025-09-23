@@ -28,10 +28,14 @@ class Boot(Executor):
         else:
             nic_command = f'-nic {nic_command},model=virtio-net-pci'
 
+        loadvm = ''
+        if self.experiment_context.loadvm_name is not None and len(self.experiment_context.loadvm_name) > 0:
+            loadvm = f'-loadvm {self.experiment_context.loadvm_name}'
+
 
         # TODO make nic based on experiment context
         boot_cmd = f"""
-        ./vanilla-qemu-system-aarch64 \
+        ./qemu-system-aarch64 \
         -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores}\
         -cpu max,pauth=off -m {self.memory_size_mb} \
@@ -41,6 +45,7 @@ class Boot(Executor):
         -boot d \
         {nic_command} \
         -rtc clock=vm \
+        {loadvm} \
         -display none \
         -serial mon:stdio 
         """
