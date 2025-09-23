@@ -17,4 +17,4 @@
 [submodule "replica"]
 	path = replica
 	url = git@github.com:parsa-epfl/replica.git
-	branch = release/micro-tutorial
+	branch = release/micro-tutorial-with-speed-measurement
