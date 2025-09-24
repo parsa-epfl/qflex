@@ -70,7 +70,8 @@ RUN --mount=type=bind,source=./qemu,target=/qflex/qemu,rw conan profile detect -
     ./build cq ${MODE} && \
     python3 build-multiple-kraken_vanilla.py \
     mkdir /qflex/kraken_out && \
-    cp -r out/ /qflex/kraken_out && \
+    cp -r out/lib/Release /qflex/kraken_out && \
+    rm -rf out && \
     mkdir qemu-saved && \
     cp -r /qflex/qemu/pc-bios /qflex/qemu-saved/pc-bios && \
     cp -r /qflex/qemu/build /qflex/qemu-saved/build
