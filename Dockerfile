@@ -37,6 +37,7 @@ RUN apt install -y --no-install-recommends meson
 RUN apt install -y --no-install-recommends gcc-13 g++-13
 RUN apt install -y --no-install-recommends libpixman-1-dev
 RUN apt install -y --no-install-recommends python3 python3-venv python3-pip python3-setuptools python3-wheel   
+RUN apt install -y --no-install-recommends zstd
 
 # --break-system-package for ubuntu 24.04
 RUN pip install conan && pip cache purge
