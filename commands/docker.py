@@ -50,6 +50,7 @@ class DockerStarter(Executor):
         -v {cwd}/experiments:/qflex/experiments \
         -v {cwd}/typer_inputs:/qflex/typer_inputs \
         -v {cwd}/commands:/qflex/commands \
+        -v {cwd}/build-multiple-kraken_vanilla.py:/qflex/build-multiple-kraken_vanilla.py \
         -v {self.image_folder}:{self.image_folder} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
@@ -77,7 +78,7 @@ class DockerBuild(Executor):
         """
 
         worm_image_cmd = f"""
-        docker buildx build -t {self.docker_image_name_with_worm}:latest --build-arg BASE_IMAGE={self.docker_base_image_name} -f WormCache/Dockerfile .
+        docker buildx build -t {self.docker_image_name_with_worm}:latest --build-arg BASE_IMAGE={self.docker_base_image_name} -f Dockerfile.WormCache .
         """
         # TODO add a seperate debug image that has the files that can be used for compilation and developement without remaking the docker image
 
