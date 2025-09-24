@@ -2,3 +2,6 @@ typer
 pydantic
 jinja2
 pandas
+numpy
+plotext
+rich
