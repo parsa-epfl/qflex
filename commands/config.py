@@ -139,6 +139,11 @@ class ExperimentContext(BaseModel):
 
     def set_up_folders(self):
 
+        if not os.path.exists(f"{self.working_directory}/experiments"):
+            os.makedirs(f"{self.working_directory}/experiments", exist_ok=False)
+        if not os.path.exists(f"{self.working_directory}/images"):
+            os.makedirs(f"{self.working_directory}/images", exist_ok=False)
+
         self.set_up_image()
 
         for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts"]:
