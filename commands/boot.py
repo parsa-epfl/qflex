@@ -1,58 +1,34 @@
 import os
 from commands import Executor
 from .config import ExperimentContext
+from commands.qemu import QemuCommonArgParser
 
 class Boot(Executor):
 
     def __init__(self, 
-                 experimnt_context: ExperimentContext):
-        self.experiment_context = experimnt_context
-        self.image_address = self.experiment_context.get_local_image_address()
-        self.memory_size_mb = self.experiment_context.simulation_context.memory * 1024
-        self.cores = self.experiment_context.simulation_context.core_count
-        self.double_cores = self.experiment_context.simulation_context.doubled_vcpu
-        self.core_coeff = 1
-        if self.double_cores:
-            self.core_coeff = 2
-        # TODO have to change the CLI to send this in, and also make it a mandetry field
-    
+                 experiment_context: ExperimentContext,
+                 use_cd_rom: bool):
+        self.experiment_context = experiment_context
+        self.use_cd_rom = use_cd_rom
+        self.qemu_common_parser = QemuCommonArgParser(experiment_context)
+
     def cmd(self) -> str:
+        
+        self.cd_rom = ''
+        if self.use_cd_rom:
+            alpine_image_name = 'alpine-standard-3.22.1-aarch64.iso'
+            if not os.path.isfile(f'{self.experiment_context.working_directory}/images/{alpine_image_name}'):
+                alpine_url = f'https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/{alpine_image_name}'
+                os.system(f'wget {alpine_url} -O {self.experiment_context.working_directory}/images/{alpine_image_name}')
+            self.cd_rom = f'-cdrom {self.experiment_context.working_directory}/images/{alpine_image_name}'
 
-        alpine_image_name = 'alpine-standard-3.22.1-aarch64.iso'
-        if not os.path.isfile(f'{self.experiment_context.working_directory}/images/{alpine_image_name}'):
-            alpine_url = f'https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/{alpine_image_name}'
-            os.system(f'wget {alpine_url} -O {self.experiment_context.working_directory}/images/{alpine_image_name}')
-        nic_command = self.experiment_context.simulation_context.qemu_nic.strip().lower()
-        if nic_command == 'none':
-            nic_command = ''
-        else:
-            nic_command = f'-nic {nic_command},model=virtio-net-pci'
-
-        loadvm = ''
-        if self.experiment_context.loadvm_name is not None and len(self.experiment_context.loadvm_name) > 0:
-            loadvm = f'-loadvm {self.experiment_context.loadvm_name}'
-
-
-        # TODO make nic based on experiment context
         boot_cmd = f"""
         ./qemu-system-aarch64 \
-        -M virt,gic-version=max,virtualization=off,secure=off \
-        -smp {self.core_coeff * self.cores}\
-        -cpu max,pauth=off -m {self.memory_size_mb} \
-        -bios ./edk2-aarch64-code.fd \
-        -drive if=virtio,file={self.image_address},format=qcow2 \
-        -cdrom {self.experiment_context.working_directory}/images/{alpine_image_name} \
-        -boot d \
-        {nic_command} \
-        -rtc clock=vm \
-        {loadvm} \
-        -display none \
-        -serial mon:stdio 
+        {self.qemu_common_parser.get_qemu_base_args()}\        
+        {self.cd_rom} 
         """
 
-        print("running boot in run folder with:")
-        print(boot_cmd)
         return [
-            f"cd {self.experiment_context.get_experiment_folder_address()}/run", 
+            f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             boot_cmd
         ]
