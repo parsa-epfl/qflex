@@ -40,6 +40,7 @@ RUN apt install -y --no-install-recommends python3 python3-venv python3-pip pyth
 RUN apt install -y --no-install-recommends zstd
 RUN apt install -y --no-install-recommends vim
 RUN apt install -y --no-install-recommends tmux
+RUN apt install -y --no-install-recommends htop
 
 # --break-system-package for ubuntu 24.04
 RUN pip install conan && pip cache purge
