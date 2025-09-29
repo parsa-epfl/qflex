@@ -91,8 +91,9 @@ class ExperimentContext(BaseModel):
 
     def get_experiment_folder_address(self) -> str:
         """
-        Returns the full path to the experiment folder. Will have subfolders like bin, cfg, flags, lib, run, scripts for the specific experiment.
+        Returns the full path to the experiment folder. Will have subfolders like run, bin, cfg, flags, lib, run, scripts for the specific experiment.
         """
+        # TODO add some more document on how the folder structure works and why this is good that these folders get repeated for each experiment as it keeps them isolated and easy to copy and move
         return f'{self.working_directory}/experiments/{self.experiment_name}'
 
     def get_local_image_address(self) -> str:
@@ -149,32 +150,37 @@ class ExperimentContext(BaseModel):
         for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts"]:
             os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
 
-        # check that both build/qemu-system-aarch64 exists in run folder plus edk2-aarch64-code.fd.bz2 and efi-virtio.rom
+        root_sls = [
+           "partition.py",
+           "result.py" 
+        ]
+        for file in root_sls:
+            if file not in os.listdir(self.get_experiment_folder_address()):
+                # Symlink partition script to experiment folder
+                os.symlink(f"{self.working_directory}/{file}", f"{self.get_experiment_folder_address()}/{file}")
+
+        # check that both build/qemu-system-aarch64 exists in run folder plus efi-virtio.rom
         # link all of them
         # TODO check if rom and bios files can be linked from p-qemu-saved when using qemu
         # TODO check why files are being turned into bz2
-
-        if not os.path.exists(f"./p-qemu-saved/pc-bios/edk2-aarch64-code.fd"):
-            if os.path.exists(f"./p-qemu-saved/pc-bios/edk2-aarch64-code.fd.bz2"):
-                os.system(f"bzip2 -d ./p-qemu-saved/pc-bios/edk2-aarch64-code.fd.bz2")
-            else:
-                raise FileNotFoundError("edk2-aarch64-code.fd not found in p-qemu-saved/pc-bios/")
-
         
         run_files = [
             "./p-qemu-saved/build/qemu-system-aarch64", 
-            "./p-qemu-saved/pc-bios/edk2-aarch64-code.fd", 
+            # TODO if we ever decide to change EFI and bios, this needs to change
+            "./QEMU_EFI.fd", 
             "./p-qemu-saved/pc-bios/efi-virtio.rom",
             "./qemu-saved/build/qemu-system-aarch64",
         ]
         for f in run_files:
 
-            if "p-qemu" in f:
+            if "p-qemu-saved/" in f:
                 # Link as the name of the file to run folder
                 link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-            else:
+            elif "qemu-saved/" in f:
                 # Link as the name of the file to run folder with
                 link_address = f"{self.get_experiment_folder_address()}/run/vanilla-{f.split('/')[-1]}"
+            else:
+                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
 
             if not os.path.exists(link_address):
                 os.system(f"cp -u {f} {link_address}")
@@ -210,6 +216,9 @@ class ExperimentContext(BaseModel):
         return results
     
     def get_ipns_csv(self, target) -> str:
+        """
+        Saves the IPNS information per core to a CSV file at the specified target location.
+        """
         # TODO check on this as well as we talked about removing the dependancy between host and target
         df = pandas.DataFrame([[ipns_info.ipns, ipns_info] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
         df.to_csv(target, index=False)
@@ -235,7 +244,7 @@ def create_experiment_context(
     is_consolidated: bool,
     primary_ipc: float,
     secondary_ipc: float,
-    population: int,
+    population_seconds: int,
     sample_size: int,
     phantom_cpu_ipc: float,
     # experiment sections
@@ -282,7 +291,7 @@ def create_experiment_context(
         primary_ipc=primary_ipc,
         secondary_ipc=secondary_ipc,
         phantom_cpu_ipc=phantom_cpu_ipc,
-        population=population,
+        population_seconds=population_seconds,
         sample_size=sample_size,
     )
 
