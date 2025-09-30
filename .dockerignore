@@ -12,3 +12,4 @@ __pycache__/
 cfg/
 experiments/
 *.qcow2
+tmp_results/
