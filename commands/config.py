@@ -325,6 +325,7 @@ def create_experiment_context(
 
     e.set_up_folders()
 
+    # TODO add a print config so every one sees the final config
     return e
     
 
