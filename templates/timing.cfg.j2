@@ -40,7 +40,7 @@ flexus.set "-L2:dir_config"          "total_sets={{ DIRECTORY_SET }}:assoc={{ DI
 flexus.set "-L2:dir_issue_lat"          "1" # "Minimum delay between issues to the directory" (DirIssueLatency)
 #flexus.set "-L2:dir_lat"          "1" # "Total latency of directory lookup" (DirLatency)
 flexus.set "-L2:dir_type"          "std" # "Type of directory (infinite, std, region, etc.)" (DirectoryType)
-#flexus.set "-L2:group_interleaving"          "4096" # "interleaving between directory bank groups (1024 bytes)" (GroupInterleaving)
+flexus.set "-L2:group_interleaving"          "4096" # "interleaving between directory bank groups (1024 bytes)" (GroupInterleaving)
 #flexus.set "-L2:groups"          "1" # "number of directory bank groups" (Groups)
 flexus.set "-L2:level"          "2" # "CacheLevel" (eL2)
 #flexus.set "-L2:maf_size"          "256" # "Number of MAF entries" (MAFSize)

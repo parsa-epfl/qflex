@@ -58,15 +58,6 @@ pub const MEASURE_HALF_OF_CORES: bool = {{ "true" if DOUBLED_VCPU else "false" }
 static_assertions::const_assert!(!MEASURE_HALF_OF_CORES || CORE_COUNT % 2 == 0);
 
 /**
- * USE_SERIAL_CACHE_MODEL
- *
- * Whether to use the serial cache model.
- *
- * Please only make this model to true when you enables the round-robin TCG mode in QEMU. Otherwise, there will be contention.
- */
-pub const USE_SERIAL_CACHE_MODEL: bool = false;
-
-/**
  * CACHE_LINE_SIZE
  *
  * The size of a cache line, in number of bytes.
@@ -249,16 +240,15 @@ static_assertions::const_assert!(
     !(SHARED_CACHE_EXCLUSIVE && SHARED_CACHE_FILL_ON_REPLICA_CREATION)
 );
 
-/**
- * DIRECTORY_SHARD_COUNT
- *
- * The number of sets of the directory. It should be much larger than the number of sets of all private caches to prevent directory contention.
- *
- * It should be a power of 2.
- *
-*/
-pub const DIRECTORY_SHARD_COUNT: usize = 32768;
-static_assertions::const_assert!(DIRECTORY_SHARD_COUNT.is_power_of_two());
+pub const USE_INFINITE_DIRECTORY: bool = false;
+
+pub const INFINITE_DIRECTORY_SHARED_COUNT: usize = 32768;
+static_assertions::const_assert!(INFINITE_DIRECTORY_SHARED_COUNT.is_power_of_two());
+
+pub const FINITE_DIRECTORY_SET: usize = {{ DIRECTORY_SET }};
+static_assertions::const_assert!(FINITE_DIRECTORY_SET.is_power_of_two());
+
+pub const FINITE_DIRECTORY_ASSO: usize = {{ DIRECTORY_WAY }};
 
 /**
 * ADJACENT_LINE_PREFETCHING
@@ -296,26 +286,6 @@ pub const BTB_ASSO: usize = 4;
 pub const BP_RAS_COUNT: usize = 32;
 
 /**
- * INIT_HOST_TIME_SCALE
- *
- * The initial denominator of taking host time to advance target CPU clock.
- *
- * By default, the VirtualTime plugin calculate the denominator by periodically picking the fast core, and uses its speed
- * to calculate this denominator. This parameter is used to set the initial value of this denominator.
- *
- */
-pub const INIT_HOST_TIME_SCALE: usize = 1000;
-
-/**
- * HOST_TIME_SCALING_PROFILING_PERIOD
- *
- * The period of profiling the host time scaling, in milliseconds.
- *
- * The VirtualTime plugin will profile the icount and determine host time scaling every this number of instructions.
- */
-pub const HOST_TIME_SCALING_PROFILING_PERIOD: usize = 100;
-
-/**
  * The list of plugins.
  */
 use crate::components::Plugin;
@@ -324,8 +294,6 @@ use crate::components::Plugin;
 pub struct PluginList {
     // Please comment out the plugins that you don't want to use.
     _pb: crate::BranchPredictorPlugin,
-    _vt: crate::VirtualTimePlugin,
-    // _mk: crate::MarkerPlugin,
     _lm: crate::ParallelCacheHierarchyPlugin,
     // _lm: crate::SingleCacheHierarchyPlugin,
     // _t: crate::TracePlugin,
@@ -360,24 +328,3 @@ pub const ENABLE_EXCLUSIVE_CACHE_STATE: bool = true;
  */
 pub const ENABLE_CACHE_LINE_HISTORY: bool = false;
 
-/**
- * Whether to disable precise coherence message reconstruction.
- *
- * This option is for testing the accuracy of the functional warming model.
- *
- * This option is only effective when the parallel cache model is used.
- */
-pub const DISABLE_PRECISE_COHERENCE_STATE_RECONSTRUCTION: bool = false;
-
-/**
- * Whether to use the target time (calculated with the instruction count the IPC) for cache state construction.
- *
- * When this option is enabled,
- * the previous options, DISABLE_PRECISE_COHERENCE_STATE_RECONSTRUCTION and DISABLE_PRECISE_SHARED_CACHE_LRU_RECONSTRUCTION,
- * must be set to true.
- */
-pub const USE_TARGET_TIME_FOR_CACHE_STATE_CONSTRUCTION: bool = false;
-static_assertions::const_assert!(
-    !(DISABLE_PRECISE_COHERENCE_STATE_RECONSTRUCTION
-        && USE_TARGET_TIME_FOR_CACHE_STATE_CONSTRUCTION)
-);

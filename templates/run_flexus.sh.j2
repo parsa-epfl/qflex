@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# Quit when any command fails
+set -e
+
+DW=$(($1 * 100000))
+SU=$(($2 * 100000))
+TOTAL=$(($DW + $SU + 1))
+
+# Get the number of snapshots in the current folder.
+
+for f in snapshot_*.loc
+do
+    idx=${f#snapshot_}
+    idx=${idx%.loc}
+
+    echo "Simulate snapshot $idx"
+    
+    # 1. Convert the checkpoint format to the flexus
+    # if we have the directory, we remove it.
+    if [ -d "snapshot_$idx-flexus" ]; then
+        rm -rf "snapshot_$idx-flexus"
+    fi
+    
+    mkdir snapshot_$idx-flexus
+    ./checkpoint_conversion ./snapshot_$idx.uarch ../../cfg/flexus_configuration.json ./snapshot_$idx-flexus true
+
+    # One additional step is to create folder for the branch predictor state being dumped.
+    if [ -d output_state ]; then
+        rm -rf output_state
+    fi
+
+    mkdir output_state
+
+    # 2. Start flexus
+    #pwndbg -ex "set follow-fork-mode parent" --args \
+    ./vanilla-qemu-system-aarch64 \
+        -smp {{ (CORE_COUNT * 2) if DOUBLED_VCPU else CORE_COUNT }} \
+        -M virt,gic-version=max,virtualization=off,secure=off \
+        -cpu max,pauth=off \
+        -m {{ MEMORY }} \
+        -boot menu=on \
+        -bios ./QEMU_EFI.fd \
+        -drive if=virtio,file=root.qcow2,format=qcow2,snapshot=on,tmp-snapshot-name=snapshot_$idx \
+        -nic {{ QEMU_NIC }} \
+        -rtc clock=vm \
+        -loadvm snapshot_$idx,on-demand \
+        -icount shift=0,align=off,sleep=off \
+        -nographic -no-reboot \
+        -singlestep -d nochain \
+        -D "qemu-timing.log" \
+        -libqflex \
+        mode=timing,lib-path=../../lib/{{ "libsemikraken" if DOUBLED_VCPU else "libknottykraken" }}.so,cfg-path=../../cfg/timing.cfg,cycles=$TOTAL:100000,debug=crit,ckpt-path=./snapshot_$idx-flexus,freq=2
+    
+    # 3. Backup results to the result directory
+    # if we have the directory, we remove it.
+    if [ -d "result_$idx" ]; then
+        rm -rf "result_$idx"
+    fi
+    mkdir "result_$idx"
+
+    # 4. Copy these log files
+    mv *.log "result_$idx/"
+
+    # 7. Remove the output state.
+    rm -rf output_state
+done
