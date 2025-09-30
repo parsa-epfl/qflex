@@ -7,9 +7,6 @@ class IPCInfo(BaseModel):
     # TODO check the document on the description of secondary_ipc and primary_ipc
     secondary_ipc: float = Field(description="Secondary IPC value for client")
     phantom_cpu_ipc: float = Field(description="Phantom CPU IPC value")
-    # TODO add some checks for the * 1000000000 conversion
-    population: int = Field(description="Population size for this workload")
-    sample_size: int = Field(description="Sample size for the workload")
 
 class CoreRange(BaseModel):
     primary_core_start: int = Field(description="Start of the primary core range")
@@ -19,6 +16,9 @@ class Workload(BaseModel):
     name: str = Field(description="Name of the workload")
     IPC_info: IPCInfo = Field(description="IPC information for the workload")
     core_range: CoreRange = Field(description="Core range information for the workload")
+    # TODO add some checks for the * 1000000000 conversion
+    population: int = Field(description="Population size for this workload")
+    sample_size: int = Field(description="Sample size for the workload")
 
 def create_workload(
     workload_name: str,
@@ -30,7 +30,7 @@ def create_workload(
     primary_ipc: float,
     secondary_ipc: float,
     phantom_cpu_ipc: float,
-    population: int,
+    population_seconds: int,
     sample_size: int,
 ):
     ipc_info = IPCInfo(
@@ -38,8 +38,6 @@ def create_workload(
         primary_ipc=primary_ipc,
         secondary_ipc=secondary_ipc,
         phantom_cpu_ipc=phantom_cpu_ipc,  # Default value, can be modified later
-        population=population,
-        sample_size=sample_size,
     )
 
     core_range = CoreRange(
@@ -51,6 +49,8 @@ def create_workload(
         name=workload_name,
         IPC_info=ipc_info,
         core_range=core_range,
+        population=population_seconds * 1000000000,
+        sample_size=sample_size,
     )
 
 
