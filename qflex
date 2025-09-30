@@ -4,9 +4,11 @@ import typer
 from typing import Annotated
 from commands.createimage import CreateImage
 from commands.boot import Boot
-from commands.docker import DockerStarter, DockerBuild
-from commands.config import create_experiment_context, ExperimentContext
+from commands.config import ExperimentContext
 from commands.load import Load
+from commands.init_warm import InitWarm
+from commands.functional_warming import FunctionalWarming
+from commands.partition import PartitionCommand
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -14,36 +16,6 @@ app = typer.Typer(
     name="qflex cli",
     help="A CLI tool to manage QFlex operations. (suggest running ./qflex --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
 )
-
-# TODO remove worm option once fully released and integrated
-@app.command()
-def build_docker(
-    debug: Annotated[bool, typer.Option(help="Build the Docker image in debug mode.")] = False,
-    worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
-):
-    """
-    Build the Docker image for QFlex. Use --debug to build a debug version.
-    Useful for development and testing without installing dependencies locally.
-    """
-    docker_build_executor = DockerBuild(debug=debug, worm=worm)
-    docker_build_executor.execute(to_stdio=True, run_in_background=False)
-
-
-@app.command()
-def start_docker(
-    image_folder: Annotated[str, typer.Option(help="Folder where images are stored.")],
-    experiment_name: Annotated[str, typer.Option(help="Name of the experiment. Used for organizing output files.")] = 'default_experiment',
-    debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False, 
-    worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
-):
-    """
-    Start a Docker container with the QFlex environment. 
-    Useful for development and testing without installing dependencies locally.
-    """
-    docker_executor = DockerStarter(image_folder=image_folder, debug=debug, worm=worm, experiment_name=experiment_name)
-    docker_executor.execute(to_stdio=True, run_in_background=False)
-
-# TODO bring in the build scripts here as well
 
 
 @app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
@@ -64,6 +36,7 @@ def create_base_image(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def boot(
     experiment_context: ExperimentContext,
+    use_cd_rom: Annotated[bool, typer.Option(help="Whether to use a CD-ROM for initial setup.")]=False,
 ):
     """
     Boot a QEMU virtual machine with specified parameters.
@@ -74,7 +47,8 @@ def boot(
     This is the second step to create the images for an experiment, with all the necessary packages installed.
     """
     boot_executor = Boot(
-        experimnt_context=experiment_context
+        experiment_context=experiment_context,
+        use_cd_rom=use_cd_rom
     )
     boot_executor.execute(to_stdio=True, run_in_background=False)
 
@@ -88,14 +62,56 @@ def load(
     This is done to warm up long-term microarchitectural state before functional warming starts.
     This is the third step, to prepare for functional warming.
     """
-    print("Experiment Context:")
-    print(experiment_context)
-    return
-    # load_executor = Load(
-    #     experiment_context=experiment_context
-    # )
-    # load_executor.execute(to_stdio=True, run_in_background=False)
+    load_executor = Load(
+        experiment_context=experiment_context
+    )
+    load_executor.execute(to_stdio=True, run_in_background=False)
 
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def initialize(
+    experiment_context: ExperimentContext,
+):
+    """
+    This command initializes the long-term microarchitectural state of the simulator such as caches and TLBs.
+    This is done before functional warming starts.
+    """
+    init_warm_executor = InitWarm(
+        experiment_context=experiment_context
+    )
+    init_warm_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def fw(
+    experiment_context: ExperimentContext,
+):
+    """
+    This command performs functional warming of the simulator.
+    Functional warming creates the checkpoints that will be used during the detailed simulation phase.
+    """
+    functional_warm_executor = FunctionalWarming(
+        experiment_context=experiment_context
+    )
+    functional_warm_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+def partition(
+    partition_count: Annotated[int, typer.Option(help="Number of partitions to create.")],
+    warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
+    measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
+):
+    """
+    This command partitions the functional warmup checkpoints into smaller segments for detailed (timing) simulation.
+    It also generates the necessary scripts to run the detailed simulations.
+    """
+    partition_executor = PartitionCommand(
+        partition_count=partition_count,
+        warming_ratio=warming_ratio,
+        measurement_ratio=measurement_ratio
+    )
+    partition_executor.execute(to_stdio=True, run_in_background=False)
 
 if __name__ == "__main__":
     app()
