@@ -98,6 +98,8 @@ COPY ./typer_inputs /qflex/typer_inputs
 COPY ./qflex /qflex
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
+COPY ./QEMU_EFI.fd /qflex/QEMU_EFI.fd
+
 # TODO this is hardcoded as typer doesn't have a way to generate completions from within docker build, as long as tool is called qflex this is ok
 RUN cat /qflex/completion_docker.txt >> /root/.bashrc
 
