@@ -1,8 +1,8 @@
 from commands import Executor
 from .config import ExperimentContext
-from commands.qemu import QemuCommonArgParser   
-from .parameterloader import ParameterLoader
+from commands.qemu import QemuCommonArgParser
 from typing import List
+from .jinja_loaders import wormloader, FlexusCheckpointConfigLoader, TimingLoader
 
 
 class InitWarm(Executor):
@@ -12,20 +12,14 @@ class InitWarm(Executor):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
-        self.worm_parameter_loader = ParameterLoader(
-            experiment_context=self.experiment_context,
-            parameter_template='worm.rs.j2',
-            output_name='worm_parameter.rs'
+        self.worm_parameter_loader = wormloader.WormConfigLoader(
+            experiment_context=experiment_context
         )
-        self.flexus_configuration_loader = ParameterLoader(
-            experiment_context=experiment_context,
-            parameter_template='flexus_configuration.json.j2',
-            output_name='flexus_configuration.json'
+        self.flexus_configuration_loader = FlexusCheckpointConfigLoader(
+            experiment_context=experiment_context
         )
-        self.timing_loader = ParameterLoader(
-            experiment_context=experiment_context,
-            parameter_template='timing.cfg.j2',
-            output_name='timing.cfg'
+        self.timing_loader = TimingLoader(
+            experiment_context=experiment_context
         )
 
         self.worm_params = self.worm_parameter_loader.load_parameters()
@@ -46,9 +40,6 @@ class InitWarm(Executor):
     
     def cmd(self) -> str:
 
-        self.experiment_context.get_ipns_csv(
-            target=f'{self.experiment_context.get_experiment_folder_address()}/cfg/core_info.csv'
-        )
 
 
         # TODO check if we need variables for the plugin
@@ -58,11 +49,12 @@ class InitWarm(Executor):
         {self.qemu_common_parser.quantum_args()} \
         -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init
         """
+        print(init_cmd)
 
 
-        return [
+        return self.build_worm_cache() + [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
-        ]+ self.build_worm_cache() + [
+            "ls",
             init_cmd
         ]
 
