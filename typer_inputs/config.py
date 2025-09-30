@@ -24,8 +24,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         # Workload section
         # TODO check where workload name is used
         workload_name:Annotated[str, typer.Option(help="Workload name")],
-        population: Annotated[int, typer.Option(
-            help="Population size for the workload."
+        # TODO possibly move this to be only in fw?
+        population_seconds: Annotated[int, typer.Option(
+            help="Population size for the workload in seconds."
         )],
         sample_size: Annotated[int, typer.Option(
             help="Sample size for the workload."
@@ -83,7 +84,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
             # Workload section:
             workload_name=workload_name,
             is_consolidated=consolidated,
-            population=population,
+            population_seconds=population_seconds,
             sample_size=sample_size,
             primary_core_start=primary_core_start,
             primary_ipc=primary_ipc,
