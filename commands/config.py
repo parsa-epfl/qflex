@@ -57,8 +57,8 @@ def create_simulation_context(
         doubled_vcpu=doubled_vcpu,
         l2_set=core_count * llc_size_per_tile_mb * 1024 * 1024 // (64*l2_way),
         l2_way=l2_way,
-        directory_set=16,
-        directory_way=512 * core_count,
+        directory_set=512 * core_count,
+        directory_way=16,
         mem_controller_count=memory_controller_count,
         mem_controller_positions=memory_controller_positions,
         memory=memory_gb,
@@ -149,6 +149,7 @@ class ExperimentContext(BaseModel):
 
         for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts"]:
             os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
+        self.get_ipns_csv()
 
         root_sls = [
            "partition.py",
@@ -215,13 +216,25 @@ class ExperimentContext(BaseModel):
 
         return results
     
-    def get_ipns_csv(self, target) -> str:
+    def get_ipns_csv(self) -> str:
         """
-        Saves the IPNS information per core to a CSV file at the specified target location.
+        Generates a CSV file containing IPNS information for each core to both cfg and run folders.
         """
         # TODO check on this as well as we talked about removing the dependancy between host and target
-        df = pandas.DataFrame([[ipns_info.ipns, ipns_info] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
-        df.to_csv(target, index=False)
+        # Check if file exists, if it does not exist create a default one
+        target = f'{self.get_experiment_folder_address()}/cfg/core_info.csv'
+        if not os.path.exists(target):
+            # df = pandas.DataFrame([[ipns_info.ipns, ipns_info.core_index] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
+            # df.to_csv(target, index=False)
+            # TODO revert back to actually computing values
+            # Copy root core_info.csv to cfg folder
+            os.system(f"cp -u {self.working_directory}/core_info.csv {target}")
+        # Create a sym link to the core info in cfg folder
+        sym_target = f'{self.get_experiment_folder_address()}/run/core_info.csv'
+        if os.path.exists(sym_target):
+            # Remove existing symlink
+            os.remove(sym_target)
+        os.symlink(target, sym_target)
 
 
         
