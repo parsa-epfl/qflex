@@ -42,7 +42,7 @@ class DockerStarter(Executor):
         if not os.path.isdir(f'./cfg/{self.experiment_name}'):
             os.makedirs(f'./cfg/{self.experiment_name}')
 
-        # TODO remove unecessary mounts
+        # TODO remove unecessary mounts including .sh ones
         return f"""
         docker run -it --entrypoint bash \
         -v {cwd}/images:/qflex/images \
@@ -52,6 +52,12 @@ class DockerStarter(Executor):
         -v {cwd}/commands:/qflex/commands \
         -v {cwd}/build-multiple-kraken_vanilla.py:/qflex/build-multiple-kraken_vanilla.py \
         -v {self.image_folder}:{self.image_folder} \
+        -v {cwd}/sample_scripts:/qflex/sample_scripts \
+        -v {cwd}/QEMU_EFI.fd:/qflex/QEMU_EFI.fd \
+        -v {cwd}/templates:/qflex/templates \
+        -v {cwd}/core_info.csv:/qflex/core_info.csv \
+        -v {cwd}/WormCache:/qflex/WormCache \
+        -v {cwd}/tmp_results:/qflex/tmp_results \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
 
