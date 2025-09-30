@@ -35,10 +35,8 @@ class QemuCommonArgParser:
 
         
     def get_qemu_base_args(self) -> str:
-        return f"""
-        ./qemu-system-aarch64 \
-        -smp {self.core_coeff * self.cores}\
-        -M virt,gic-version=max,virtualization=off,secure=off \
+        return f""" -M virt,gic-version=max,virtualization=off,secure=off \
+        -smp {self.core_coeff * self.cores} \
         -cpu max,pauth=off -m {self.memory_size_mb} \
         -boot menu=on \
         -bios ./QEMU_EFI.fd \
@@ -46,8 +44,7 @@ class QemuCommonArgParser:
         {self.nic_command} \
         -rtc clock=vm \
         {self.loadvm} \
-        -nographic -no-reboot
-        """
+        -nographic -no-reboot"""
 
     def quantum_args(self) -> str:
         return self.quantum_command
