@@ -72,7 +72,8 @@ def data_class_wrap(*args):
         # TODO make it more robust for the *args and **kwargs
         func_params = [param for name, param in inspect.signature(func).parameters.items() if name not in root_names]
 
-        params_final = func_params+list(params)
+        # TODO this order of appending always thinks the values coming from composites are none defaults
+        params_final = list(params)+func_params
         wrapper.__signature__ = inspect.Signature(parameters=params_final)
 
 
