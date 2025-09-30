@@ -1,0 +1,43 @@
+#!/usr/bin/env python
+
+import typer
+from typing import Annotated
+from commands.docker import DockerStarter, DockerBuild
+
+app = typer.Typer(
+    name="qflex dep cli",
+    help="A CLI tool to manage QFlex dependancies and images. (suggest running ./dep --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
+)
+
+# TODO remove worm option once fully released and integrated
+@app.command()
+def build_docker(
+    debug: Annotated[bool, typer.Option(help="Build the Docker image in debug mode.")] = False,
+    worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
+):
+    """
+    Build the Docker image for QFlex. Use --debug to build a debug version.
+    Useful for development and testing without installing dependencies locally.
+    """
+    docker_build_executor = DockerBuild(debug=debug, worm=worm)
+    docker_build_executor.execute(to_stdio=True, run_in_background=False)
+
+
+@app.command()
+def start_docker(
+    image_folder: Annotated[str, typer.Option(help="Folder where images are stored.")],
+    experiment_name: Annotated[str, typer.Option(help="Name of the experiment. Used for organizing output files.")] = 'default_experiment',
+    debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False, 
+    worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
+):
+    """
+    Start a Docker container with the QFlex environment. 
+    Useful for development and testing without installing dependencies locally.
+    """
+    docker_executor = DockerStarter(image_folder=image_folder, debug=debug, worm=worm, experiment_name=experiment_name)
+    docker_executor.execute(to_stdio=True, run_in_background=False)
+# TODO bring in the build scripts here as well
+
+
+if __name__ == "__main__":
+    app()
