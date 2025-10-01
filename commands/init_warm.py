@@ -2,7 +2,7 @@ from commands import Executor
 from .config import ExperimentContext
 from commands.qemu import QemuCommonArgParser
 from typing import List
-from .jinja_loaders import wormloader, FlexusCheckpointConfigLoader, TimingLoader
+from .jinja_loaders import wormloader, FlexusCheckpointConfigLoader, TimingLoader, FlexusScriptLoader
 
 
 class InitWarm(Executor):
@@ -22,20 +22,28 @@ class InitWarm(Executor):
             experiment_context=experiment_context
         )
 
+        # TODO potential problem that the potential script is created at the init_warm stage change later and move to partition file
+        self.flexus_script_loader = FlexusScriptLoader(
+            experiment_context=experiment_context,
+        )
+        self.flexus_script = self.flexus_script_loader.load_parameters()
+
+
+
         self.worm_params = self.worm_parameter_loader.load_parameters()
         self.flexus_config = self.flexus_configuration_loader.load_parameters()
         self.timing_config = self.timing_loader.load_parameters()
 
 
     def build_worm_cache(self) -> List[str]:
-        cwd = self.experiment_context.working_directory
+        experiment_folder = self.experiment_context.get_experiment_folder_address()
         return [
-            f"cp {self.worm_params} {cwd}/WormCache/src/parameter.rs",
-            f"cd {cwd}/WormCache",
+            f"cp {self.worm_params} {experiment_folder}/lib/WormCache/src/parameter.rs",
+            f"cd {experiment_folder}/lib/WormCache",
             # TODO check if this needs to be debug
             "cargo build --release",
-            f"cd {cwd}",
-            f"cp {cwd}/WormCache/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/", 
+            f"cd {experiment_folder}/run",
+            f"cp {experiment_folder}/lib/WormCache/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/", 
         ]
     
     def cmd(self) -> str:

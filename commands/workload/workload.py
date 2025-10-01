@@ -30,7 +30,7 @@ def create_workload(
     primary_ipc: float,
     secondary_ipc: float,
     phantom_cpu_ipc: float,
-    population_seconds: int,
+    population_seconds: float,
     sample_size: int,
 ):
     ipc_info = IPCInfo(

@@ -10,6 +10,11 @@ import datetime
 # TODO check all the variables to match with the variables in templates
 # For anyone checking this with old scripts, all worklaod, and core information is combined into the cli, as it's part of the CLI paramers now
 
+def get_experiment_folder_address(
+    working_directory: str,
+    experiment_name: str
+) -> str:
+    return f'{working_directory}/experiments/{experiment_name}'
 
 # TODO move simulation context to a separate folder
 class SimulationContext(BaseModel):
@@ -88,13 +93,16 @@ class ExperimentContext(BaseModel):
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
 
+    def get_working_directory(self) -> str:
+        return self.working_directory
 
     def get_experiment_folder_address(self) -> str:
         """
         Returns the full path to the experiment folder. Will have subfolders like run, bin, cfg, flags, lib, run, scripts for the specific experiment.
         """
         # TODO add some more document on how the folder structure works and why this is good that these folders get repeated for each experiment as it keeps them isolated and easy to copy and move
-        return f'{self.working_directory}/experiments/{self.experiment_name}'
+        # TODO clean this up later, but done this for when need to make a directory but don't have the full context
+        return get_experiment_folder_address(self.get_working_directory(), self.experiment_name)
 
     def get_local_image_address(self) -> str:
         return self.image_address
@@ -108,12 +116,13 @@ class ExperimentContext(BaseModel):
         if self.use_image_directly:
             self.image_address = f"{self.image_folder}/{self.image_name}"
         else:
+            # TODO add some checks for this
             # Check if base image exists in root folder
             self.image_address = f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}"
-            experiment_folder_exists = os.path.exists(self.get_experiment_folder_address())
+            experiment_folder_for_images_exists = os.path.exists(self.get_experiment_folder_address())
             experimage_image_exists = os.path.exists(self.get_local_image_address())
 
-            if not experiment_folder_exists:
+            if not experiment_folder_for_images_exists:
                 os.makedirs(self.get_experiment_folder_address(), exist_ok=not self.keep_experiment_unique)
 
             if experimage_image_exists:
@@ -140,10 +149,10 @@ class ExperimentContext(BaseModel):
 
     def set_up_folders(self):
 
-        if not os.path.exists(f"{self.working_directory}/experiments"):
-            os.makedirs(f"{self.working_directory}/experiments", exist_ok=False)
-        if not os.path.exists(f"{self.working_directory}/images"):
-            os.makedirs(f"{self.working_directory}/images", exist_ok=False)
+        if not os.path.exists(f"{self.get_working_directory()}/experiments"):
+            os.makedirs(f"{self.get_working_directory()}/experiments", exist_ok=False)
+        if not os.path.exists(f"{self.get_working_directory()}/images"):
+            os.makedirs(f"{self.get_working_directory()}/images", exist_ok=False)
 
         self.set_up_image()
 
@@ -158,7 +167,7 @@ class ExperimentContext(BaseModel):
         for file in root_sls:
             if file not in os.listdir(self.get_experiment_folder_address()):
                 # Symlink partition script to experiment folder
-                os.symlink(f"{self.working_directory}/{file}", f"{self.get_experiment_folder_address()}/{file}")
+                os.symlink(f"./{file}", f"{self.get_experiment_folder_address()}/{file}")
 
         # check that both build/qemu-system-aarch64 exists in run folder plus efi-virtio.rom
         # link all of them
@@ -169,8 +178,9 @@ class ExperimentContext(BaseModel):
             "./p-qemu-saved/build/qemu-system-aarch64", 
             # TODO if we ever decide to change EFI and bios, this needs to change
             "./QEMU_EFI.fd", 
-            "./p-qemu-saved/pc-bios/efi-virtio.rom",
             "./qemu-saved/build/qemu-system-aarch64",
+            "./p-qemu-saved/pc-bios/efi-virtio.rom",
+            "./qemu-img"
         ]
         for f in run_files:
 
@@ -185,6 +195,13 @@ class ExperimentContext(BaseModel):
 
             if not os.path.exists(link_address):
                 os.system(f"cp -u {f} {link_address}")
+        
+        # Copy WormCache to lib folder, if it doesn't exist we should throw an error
+        if not os.path.exists(f"./WormCache"):
+            raise FileNotFoundError("WormCache folder not found in the working directory.")
+        if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/WormCache"):
+            os.system(f"cp -r ./WormCache {self.get_experiment_folder_address()}/lib/WormCache")
+
         
 
 
@@ -228,7 +245,7 @@ class ExperimentContext(BaseModel):
             # df.to_csv(target, index=False)
             # TODO revert back to actually computing values
             # Copy root core_info.csv to cfg folder
-            os.system(f"cp -u {self.working_directory}/core_info.csv {target}")
+            os.system(f"cp -u ./core_info.csv {target}")
         # Create a sym link to the core info in cfg folder
         sym_target = f'{self.get_experiment_folder_address()}/run/core_info.csv'
         if os.path.exists(sym_target):
@@ -268,6 +285,7 @@ def create_experiment_context(
     keep_experiment_unique: bool = True,
     use_image_directly: bool = False,
     loadvm_name: str = "",
+    working_directory: str = ".",
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -308,7 +326,8 @@ def create_experiment_context(
         sample_size=sample_size,
     )
 
-
+    
+    working_directory = os.path.abspath(working_directory)
     e = ExperimentContext(
         experiment_name=experiment_name,
         image_folder=image_folder,
@@ -317,7 +336,7 @@ def create_experiment_context(
         simulation_context=simulation_context,
         host=host,
         workload=workload,
-        working_directory=os.getcwd(),
+        working_directory=working_directory,
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name

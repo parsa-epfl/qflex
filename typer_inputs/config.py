@@ -25,7 +25,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
         # TODO check where workload name is used
         workload_name:Annotated[str, typer.Option(help="Workload name")],
         # TODO possibly move this to be only in fw?
-        population_seconds: Annotated[int, typer.Option(
+        population_seconds: Annotated[float, typer.Option(
             help="Population size for the workload in seconds."
         )],
         sample_size: Annotated[int, typer.Option(
@@ -68,6 +68,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         loadvm_name: Annotated[str, typer.Option(
             help="Name of the loadvm to use in QEMU, optional"
         )] = "",
+        working_directory: Annotated[str, typer.Option(
+            help="Working directory where the experiment folders will be created."
+        )] = ".",
     ):
         experiment_context: ExperimentContext = create_experiment_context(
             experiment_name=experiment_name,
@@ -95,5 +98,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
             keep_experiment_unique=unique,
             use_image_directly=use_image_directly,
             loadvm_name=loadvm_name,
+            working_directory=working_directory,
         )
         return experiment_context

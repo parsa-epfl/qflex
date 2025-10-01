@@ -20,6 +20,12 @@ app = typer.Typer(
 
 @app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
 def create_base_image(
+    experiment_name: Annotated[str, typer.Option(
+        help="Name of the experiment to create the image for."
+    )] = "default_experiment",
+    working_directory: Annotated[str, typer.Option(
+        help="Working directory where the images and experiments folders are located."
+    )] = ".",
     image_name: Annotated[str,typer.Option(
         help="Name of the base image file to create."
     )] = "base.qcow2",
@@ -98,7 +104,13 @@ def fw(
 
 @app.command()
 def partition(
-    partition_count: Annotated[int, typer.Option(help="Number of partitions to create.")],
+    experiment_name: str = typer.Option(
+        "default_experiment", help="Name of the experiment to partition the checkpoints for."
+    ),
+    working_directory: Annotated[str, typer.Option(
+        help="Working directory where the experiment folders are located."
+    )] = ".",
+    partition_count: Annotated[int, typer.Option(help="Number of partitions to create.")] = 16,
     warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
     measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
 ):
@@ -107,6 +119,8 @@ def partition(
     It also generates the necessary scripts to run the detailed simulations.
     """
     partition_executor = PartitionCommand(
+        experiment_name=experiment_name,
+        working_directory=working_directory,
         partition_count=partition_count,
         warming_ratio=warming_ratio,
         measurement_ratio=measurement_ratio
