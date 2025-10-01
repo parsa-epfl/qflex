@@ -57,7 +57,6 @@ class InitWarm(Executor):
         {self.qemu_common_parser.quantum_args()} \
         -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init
         """
-        print(init_cmd)
 
 
         return self.build_worm_cache() + [
