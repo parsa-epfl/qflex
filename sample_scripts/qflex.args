@@ -1,0 +1,20 @@
+--core-count 8 
+--double-cores 
+--quantum-size-ns 2000  
+--llc-size-per-tile-mb 2  
+--parallel  
+--network none 
+--memory-gb 32  
+--host-name SAPHIRE 
+--workload-name web-search 
+--population-seconds 0.0000005 
+--sample-size 100 
+--no-consolidated  
+--primary-ipc  4.2 
+--primary-core-start 0 
+--phantom-cpu-ipc 8 
+--experiment-name experiment006
+--image-name root.qcow2 
+--image-folder /mnt/sdc/pooria/mounting-test 
+--working-directory /mnt/sdc/pooria/mounting-test 
+--no-unique --use-image-directly

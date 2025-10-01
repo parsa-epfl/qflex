@@ -1,21 +1,2 @@
-./qflex initialize \
-  --core-count 8 \
-  --double-cores \
-  --quantum-size-ns 2000  \
-  --llc-size-per-tile-mb 2  \
-  --parallel  \
-  --network none \
-  --memory-gb 32  \
-  --host-name SAPHIRE \
-  --workload-name web-search \
-  --population-seconds 5 \
-  --sample-size 100 \
-  --no-consolidated  \
-  --primary-ipc  4.2 \
-  --primary-core-start 0 \
-  --phantom-cpu-ipc 8 \
-  --experiment-name experiment005 \
-  --image-name root.qcow2 \
-  --image-folder /home/poorsarv/data/web-search \
-  --loadvm-name base \
-  --no-unique --use-image-directly
+xargs -a ./sample_scripts/qflex.args -- ./qflex initialize \
+  --loadvm-name load
