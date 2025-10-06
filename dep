@@ -15,12 +15,13 @@ def build_docker(
     debug: Annotated[bool, typer.Option(help="Build the Docker image in debug mode.")] = False,
     worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
     worm_only: Annotated[bool, typer.Option(help="Re-build only the WORMCache component.")] = False,
+    push: Annotated[bool, typer.Option(help="Push the built image to github container registery. Requires authentication.")] = False,
 ):
     """
     Build the Docker image for QFlex. Use --debug to build a debug version.
     Useful for development and testing without installing dependencies locally.
     """
-    docker_build_executor = DockerBuild(debug=debug, worm=worm, worm_only=worm_only)
+    docker_build_executor = DockerBuild(debug=debug, worm=worm, worm_only=worm_only, push=push)
     docker_build_executor.execute(to_stdio=True, run_in_background=False)
 
 
