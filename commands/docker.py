@@ -42,7 +42,6 @@ class DockerStarter(Executor):
         if not os.path.isdir(f'./cfg/{self.experiment_name}'):
             os.makedirs(f'./cfg/{self.experiment_name}')
 
-        bash_command = """-c "groupadd -g $(id -g) mygroup 2>/dev/null || true && useradd -u $(id -u) -g $(id -g) -m dev 2>/dev/null || true && su dev -s /bin/bash" """
         # TODO remove unecessary mounts including .sh ones
         return f"""
         docker run -it --entrypoint /bin/bash \
@@ -59,7 +58,7 @@ class DockerStarter(Executor):
         -v {cwd}/core_info.csv:/home/dev/qflex/core_info.csv \
         -v {cwd}/WormCache:/home/dev/qflex/WormCache \
         -v {cwd}/tmp_results:/home/dev/qflex/tmp_results \
-        {commands_mount} {binary_mount} {self.docker_image_name} {bash_command}
+        {commands_mount} {binary_mount} {self.docker_image_name}
         """
         
 
