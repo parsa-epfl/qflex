@@ -67,7 +67,8 @@ class DockerBuild(Executor):
     
     def __init__(self, 
                  debug: bool = False,
-                 worm: bool = False):
+                 worm: bool = False,
+                 worm_only: bool = False):
         self.debug = debug
         self.worm = worm
         if self.worm:
@@ -78,12 +79,16 @@ class DockerBuild(Executor):
         self.build_type = 'release'
         if self.debug:
             self.build_type = 'debug'
+        self.worm_only = worm_only
 
     def cmd(self) -> str:
         
-        base_image_cmd = f"""
-        docker buildx build -t {self.docker_base_image_name}:latest --build-arg MODE={self.build_type} .
-        """
+        if not self.worm_only:
+            base_image_cmd = f"""
+            docker buildx build -t {self.docker_base_image_name}:latest --build-arg MODE={self.build_type} .
+            """
+        else:
+            base_image_cmd = f"echo 'Skipping base image build as --worm-only is set.'"
 
         worm_image_cmd = f"""
         docker buildx build -t {self.docker_image_name_with_worm}:latest --build-arg BASE_IMAGE={self.docker_base_image_name} -f Dockerfile.WormCache .
