@@ -26,11 +26,11 @@ class DockerStarter(Executor):
             # download alpine image
         
 
-        commands_mount = f" -v {cwd}/commands:/qflex/commands"
+        commands_mount = f" -v {cwd}/commands:/home/dev/qflex/commands"
         if not os.path.isdir('./commands'):
             commands_mount = ''
 
-        binary_mount = f" -v {cwd}/qflex:/qflex/qflex "
+        binary_mount = f" -v {cwd}/qflex:/home/dev/qflex/qflex "
         if not os.path.exists('./qflex'):
             binary_mount = ''
 
@@ -42,24 +42,26 @@ class DockerStarter(Executor):
         if not os.path.isdir(f'./cfg/{self.experiment_name}'):
             os.makedirs(f'./cfg/{self.experiment_name}')
 
+        bash_command = """-c "groupadd -g $(id -g) mygroup 2>/dev/null || true && useradd -u $(id -u) -g $(id -g) -m dev 2>/dev/null || true && su dev -s /bin/bash" """
         # TODO remove unecessary mounts including .sh ones
         return f"""
-        docker run -it --entrypoint bash \
-        -v {cwd}/images:/qflex/images \
-        -v {cwd}/cfg/{self.experiment_name}:/qflex/cfg/{self.experiment_name} \
-        -v {cwd}/experiments:/qflex/experiments \
-        -v {cwd}/typer_inputs:/qflex/typer_inputs \
-        -v {cwd}/commands:/qflex/commands \
-        -v {cwd}/build-multiple-kraken_vanilla.py:/qflex/build-multiple-kraken_vanilla.py \
+        docker run -it --entrypoint /bin/bash \
+        -v {cwd}/images:/home/dev/qflex/images \
+        -v {cwd}/cfg/{self.experiment_name}:/home/dev/qflex/cfg/{self.experiment_name} \
+        -v {cwd}/experiments:/home/dev/qflex/experiments \
+        -v {cwd}/typer_inputs:/home/dev/qflex/typer_inputs \
+        -v {cwd}/commands:/home/dev/qflex/commands \
+        -v {cwd}/build-multiple-kraken_vanilla.py:/home/dev/qflex/build-multiple-kraken_vanilla.py \
         -v {self.image_folder}:{self.image_folder} \
-        -v {cwd}/sample_scripts:/qflex/sample_scripts \
-        -v {cwd}/QEMU_EFI.fd:/qflex/QEMU_EFI.fd \
-        -v {cwd}/templates:/qflex/templates \
-        -v {cwd}/core_info.csv:/qflex/core_info.csv \
-        -v {cwd}/WormCache:/qflex/WormCache \
-        -v {cwd}/tmp_results:/qflex/tmp_results \
-        {commands_mount} {binary_mount} {self.docker_image_name}
+        -v {cwd}/sample_scripts:/home/dev/qflex/sample_scripts \
+        -v {cwd}/QEMU_EFI.fd:/home/dev/qflex/QEMU_EFI.fd \
+        -v {cwd}/templates:/home/dev/qflex/templates \
+        -v {cwd}/core_info.csv:/home/dev/qflex/core_info.csv \
+        -v {cwd}/WormCache:/home/dev/qflex/WormCache \
+        -v {cwd}/tmp_results:/home/dev/qflex/tmp_results \
+        {commands_mount} {binary_mount} {self.docker_image_name} {bash_command}
         """
+        
 
 class DockerBuild(Executor):
     
@@ -87,7 +89,7 @@ class DockerBuild(Executor):
         docker buildx build -t {self.docker_image_name_with_worm}:latest --build-arg BASE_IMAGE={self.docker_base_image_name} -f Dockerfile.WormCache .
         """
         # TODO add a seperate debug image that has the files that can be used for compilation and developement without remaking the docker image
-
+        
         if self.worm:
             return [
                 base_image_cmd,

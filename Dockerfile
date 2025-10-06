@@ -47,8 +47,8 @@ RUN pip install conan && pip cache purge
 
 # TODO everything before this, should be in another base image 
 # Copy local dir to container
-COPY --link --exclude=p-qemu --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCache . /qflex
-WORKDIR /qflex
+WORKDIR /home/dev/qflex
+COPY --link --exclude=p-qemu --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCache . /home/dev/qflex
 
 # Build QFlex
 
@@ -58,49 +58,49 @@ ENV CFLAGS="$CFLAGS -Wno-error"
 # TODO add debug mode back in, as right now the mode is not used
 ARG MODE=release
 
-WORKDIR /qflex
+WORKDIR /home/dev/qflex
 
 # TODO address the two qemu versions
-RUN --mount=type=bind,source=./qemu,target=/qflex/qemu,rw conan profile detect --force && \
-    conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out -b missing && \
-    conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out -b missing && \
-    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /qflex/out && \
-    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /qflex/out && \
+RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw conan profile detect --force && \
+    conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out -b missing && \
+    conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /home/dev/qflex/out -b missing && \
+    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out && \
+    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /home/dev/qflex/out && \
     conan cache clean -v && \
     conan remove -c "*" && \
     ./build cq ${MODE} && \
     python3 build-multiple-kraken_vanilla.py \
-    mkdir /qflex/kraken_out && \
-    cp -r out/lib/Release /qflex/kraken_out && \
+    mkdir /home/dev/qflex/kraken_out && \
+    cp -r out/lib/Release /home/dev/qflex/kraken_out && \
     rm -rf out && \
     mkdir qemu-saved && \
-    cp -r /qflex/qemu/pc-bios /qflex/qemu-saved/pc-bios && \
-    cp -r /qflex/qemu/build /qflex/qemu-saved/build
+    cp -r /home/dev/qflex/qemu/pc-bios /home/dev/qflex/qemu-saved/pc-bios && \
+    cp -r /home/dev/qflex/qemu/build /home/dev/qflex/qemu-saved/build
 
-RUN --mount=type=bind,source=./p-qemu,target=/qflex/p-qemu,rw cd p-qemu && \
+RUN --mount=type=bind,source=./p-qemu,target=/home/dev/qflex/p-qemu,rw cd p-qemu && \
     ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
     ninja -C build && \
-    mkdir /qflex/p-qemu-saved && \
-    cp -r /qflex/p-qemu/pc-bios /qflex/p-qemu-saved/pc-bios && \
-    cp -r /qflex/p-qemu/build /qflex/p-qemu-saved/build
+    mkdir /home/dev/qflex/p-qemu-saved && \
+    cp -r /home/dev/qflex/p-qemu/pc-bios /home/dev/qflex/p-qemu-saved/pc-bios && \
+    cp -r /home/dev/qflex/p-qemu/build /home/dev/qflex/p-qemu-saved/build
 
 
 
 
-WORKDIR /qflex
+WORKDIR /home/dev/qflex
 # Post-build file link
-RUN ln -s /qflex/p-qemu-saved/build/aarch64-softmmu/qemu-system-aarch64 /qflex/qemu-aarch64
-RUN ln -s /qflex/p-qemu-saved/build/qemu-img /qflex/qemu-img
+RUN ln -s /home/dev/qflex/p-qemu-saved/build/aarch64-softmmu/qemu-system-aarch64 /home/dev/qflex/qemu-aarch64
+RUN ln -s /home/dev/qflex/p-qemu-saved/build/qemu-img /home/dev/qflex/qemu-img
 
 RUN pip install -r requirements.txt
-COPY  ./commands /qflex/commands
-COPY ./typer_inputs /qflex/typer_inputs
-COPY ./qflex /qflex
+COPY  ./commands /home/dev/qflex/commands
+COPY ./typer_inputs /home/dev/qflex/typer_inputs
+COPY ./qflex /home/dev/qflex
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-COPY ./QEMU_EFI.fd /qflex/QEMU_EFI.fd
+COPY ./QEMU_EFI.fd /home/dev/qflex/QEMU_EFI.fd
 
 # TODO this is hardcoded as typer doesn't have a way to generate completions from within docker build, as long as tool is called qflex this is ok
-RUN cat /qflex/completion_docker.txt >> /root/.bashrc
+RUN cat /home/dev/qflex/completion_docker.txt >> /root/.bashrc
 
 CMD ["bash"]
