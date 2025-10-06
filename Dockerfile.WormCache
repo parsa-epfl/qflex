@@ -8,10 +8,19 @@ WORKDIR /deps
 RUN mkdir /home/dev/.cargo
 RUN touch /home/dev/.cargo/env
 
+# Install Rust system-wide
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:${PATH}
+
+
 RUN apt-get update && apt-get install -y curl build-essential
+
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-RUN . "/home/dev/.cargo/env" 
-RUN echo 'source /home/dev/.cargo/env' >> /etc/bash.bashrc
+
+RUN echo 'export RUSTUP_HOME=/usr/local/rustup' >> /etc/bash.bashrc && \
+    echo 'export CARGO_HOME=/usr/local/cargo' >> /etc/bash.bashrc && \
+    echo 'export PATH=/usr/local/cargo/bin:$PATH' >> /etc/bash.bashrc
 
 
 WORKDIR /home/dev/qflex
