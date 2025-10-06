@@ -71,6 +71,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         working_directory: Annotated[str, typer.Option(
             help="Working directory where the experiment folders will be created."
         )] = ".",
+        check_period_quantum_coeff: Annotated[int, typer.Option(
+            help="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period."
+        )] = 53,
     ):
         experiment_context: ExperimentContext = create_experiment_context(
             experiment_name=experiment_name,
@@ -99,5 +102,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
             use_image_directly=use_image_directly,
             loadvm_name=loadvm_name,
             working_directory=working_directory,
+            check_period_quantum_coeff=check_period_quantum_coeff,
         )
         return experiment_context

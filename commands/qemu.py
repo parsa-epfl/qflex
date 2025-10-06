@@ -25,13 +25,14 @@ class QemuCommonArgParser:
         if self.experiment_context.loadvm_name is not None and len(self.experiment_context.loadvm_name) > 0:
             self.loadvm = f'-loadvm {self.experiment_context.loadvm_name}'
     
+        check_period_quantum_coeff = self.simulation_context.check_period_quantum_coeff
         self.quantum_command = ''
-        # TODO check why 53
+        # TODO check why 53 : checked this is a check done to see whether or not we need to do checkpointing, with the assumption being it will usually be way less than the sampling interval
         if self.simulation_context.is_parallel:
-            self.quantum_command = f'   -quantum size={self.simulation_context.quantum_size},check_period={self.simulation_context.quantum_size * 53} '
+            self.quantum_command = f'   -quantum size={self.simulation_context.quantum_size},check_period={self.simulation_context.quantum_size * check_period_quantum_coeff} '
         else:
-            self.quantum_command = f'   -icount shift=0,align=off,sleep=off,q={self.simulation_context.quantum_size},check_period={self.simulation_context.quantum_size * 53} '
- 
+            self.quantum_command = f'   -icount shift=0,align=off,sleep=off,q={self.simulation_context.quantum_size},check_period={self.simulation_context.quantum_size * check_period_quantum_coeff} '
+
 
         
     def get_qemu_base_args(self) -> str:

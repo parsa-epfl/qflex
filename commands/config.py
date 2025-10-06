@@ -33,6 +33,7 @@ class SimulationContext(BaseModel):
     qemu_nic: str = Field(description="type of NIC to use in QEMU")
     quantum_size: int = Field(description="quantum size for the simulator in nanoseconds")
     is_parallel: bool = Field(default=True, description="whether the simulation is parallel or not")
+    check_period_quantum_coeff: int = Field(default=53, description="Coefficient to determine the check period based on quantum size")
 
 def create_simulation_context(
     core_count: int,
@@ -42,6 +43,7 @@ def create_simulation_context(
     is_parallel: bool,
     network: str,
     memory_gb: int,
+    check_period_quantum_coeff=53,
 ) -> SimulationContext:
     l2_way = 16
     if core_count == 64:
@@ -70,6 +72,7 @@ def create_simulation_context(
         qemu_nic=network,
         quantum_size=quantum_size,
         is_parallel=is_parallel,
+        check_period_quantum_coeff=check_period_quantum_coeff,
     )
 
 class IPNSInfo(BaseModel):
@@ -286,6 +289,8 @@ def create_experiment_context(
     use_image_directly: bool = False,
     loadvm_name: str = "",
     working_directory: str = ".",
+    # Default for simulation context
+    check_period_quantum_coeff=53,
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -307,6 +312,7 @@ def create_experiment_context(
         is_parallel=is_parallel,
         network=network,
         memory_gb=memory_gb,
+        check_period_quantum_coeff=check_period_quantum_coeff,
     )
 
     if host_name.upper() not in HostType.__members__.keys():
