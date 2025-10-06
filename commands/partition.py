@@ -1,7 +1,5 @@
 import os
 from commands import Executor
-from .config import ExperimentContext
-from .jinja_loaders.parameterloader import ParameterLoader
 from .config import get_experiment_folder_address
 
 class PartitionCommand(Executor):
