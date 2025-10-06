@@ -7,14 +7,15 @@
 --memory-gb 32  
 --host-name SAPHIRE 
 --workload-name web-search 
---population-seconds 0.0000005 
---sample-size 100 
+--population-seconds 0.00001 
+--sample-size 10 
 --no-consolidated  
 --primary-ipc  4.2 
 --primary-core-start 0 
 --phantom-cpu-ipc 8 
---experiment-name experiment006
+--experiment-name experiment004
 --image-name root.qcow2 
---image-folder /mnt/sdc/pooria/mounting-test 
---working-directory /mnt/sdc/pooria/mounting-test 
+--image-folder /mnt/sdb/pooria/experiment-test
+--working-directory /mnt/sdb/pooria/experiment-test
+--check-period-quantum-coeff 2
 --no-unique --use-image-directly
