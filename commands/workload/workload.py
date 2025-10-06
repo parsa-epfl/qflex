@@ -17,7 +17,7 @@ class Workload(BaseModel):
     IPC_info: IPCInfo = Field(description="IPC information for the workload")
     core_range: CoreRange = Field(description="Core range information for the workload")
     # TODO add some checks for the * 1000000000 conversion
-    population: int = Field(description="Population size for this workload")
+    population: int = Field(description="Population size for this workload in ns.")
     sample_size: int = Field(description="Sample size for the workload")
 
 def create_workload(

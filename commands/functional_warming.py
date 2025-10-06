@@ -16,7 +16,7 @@ class FunctionalWarming(Executor):
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
         self.sample_size = self.experiment_context.workload.sample_size
         self.sampling_interval = math.ceil(
-            (5000000000 + self.sample_size - 1) / self.sample_size
+            (self.experiment_context.workload.population + self.sample_size - 1) / self.sample_size
         )
 
 
@@ -30,7 +30,8 @@ class FunctionalWarming(Executor):
             {self.qemu_common_parser.quantum_args()} \
             -plugin ../lib/libworm_cache.so,mode=warm,init_threshold={self.sampling_interval},interval={self.sampling_interval},count={self.sample_size} \
         """
-        
+        print("fw command:")
+        print(fw_cmd)
         return [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             fw_cmd,
