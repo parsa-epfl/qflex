@@ -1,4 +1,8 @@
 .git/
+WormCache/.git/
+p-qemu/.git/
+replica/.git/
+
 include .gitignore
 include flexus/.gitignore
 include qemu/.gitignore
