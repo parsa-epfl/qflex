@@ -13,7 +13,7 @@ from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
 app = typer.Typer(
-    name="qflex cli",
+    name="./qflex",
     help="A CLI tool to manage QFlex operations. (suggest running ./qflex --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
 )
 

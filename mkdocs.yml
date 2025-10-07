@@ -7,13 +7,16 @@ theme:
     - navigation.instant
     - content.code.copy
     - toc.follow
+  logo: logo/qflex_logo.svg        # optional
+  favicon: logo/qflex_logo.svg  # optional
 
 plugins:
   - search
+  
 
 markdown_extensions:
   - mkdocs-click
 nav:
   - Home: index.md
-  - Reference:
-      - CLI: reference/cli.md
+  - Docker: reference/docker.md
+  - CLI: reference/qflex.md
