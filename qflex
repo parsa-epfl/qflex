@@ -20,22 +20,23 @@ app = typer.Typer(
 
 @app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
 def create_base_image(
-    experiment_name: Annotated[str, typer.Option(
-        help="Name of the experiment to create the image for."
-    )] = "default_experiment",
-    working_directory: Annotated[str, typer.Option(
-        help="Working directory where the images and experiments folders are located."
+    image_folder: Annotated[str, typer.Option(
+        help="Where to create the image"
     )] = ".",
     image_name: Annotated[str,typer.Option(
         help="Name of the base image file to create."
-    )] = "base.qcow2",
+    )] = "root.qcow2",
     image_size_gb: Annotated[int, typer.Option(help="Size of the base image in GB.")] = 8 
 ):
     """
     Create a base image for QEMU. 
     This is the first step to create the images for an experiment.
     """ 
-    create_image_executor = CreateImage(image_name=image_name, size_gb=image_size_gb)
+    create_image_executor = CreateImage(
+        image_folder=image_folder,
+        image_name=image_name, 
+        size_gb=image_size_gb
+    )
     create_image_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()

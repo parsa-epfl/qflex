@@ -14,7 +14,16 @@ def get_experiment_folder_address(
     working_directory: str,
     experiment_name: str
 ) -> str:
-    return f'{working_directory}/experiments/{experiment_name}'
+    # check if working directory exists
+    if not os.path.isdir(working_directory):
+        raise ValueError(f"Working directory {working_directory} does not exist.")
+    # create experiments if it doesn't exist
+    if not os.path.isdir(f'{working_directory}/experiments'):
+        os.makedirs(f'{working_directory}/experiments', exist_ok=False)
+    path = f'{working_directory}/experiments/{experiment_name}'
+    if not os.path.isdir(path):
+        os.makedirs(path, exist_ok=False)
+    return os.path.abspath(path)
 
 # TODO move simulation context to a separate folder
 class SimulationContext(BaseModel):
@@ -159,7 +168,7 @@ class ExperimentContext(BaseModel):
 
         self.set_up_image()
 
-        for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts"]:
+        for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts", "images"]:
             os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
         self.get_ipns_csv()
 
@@ -244,11 +253,11 @@ class ExperimentContext(BaseModel):
         # Check if file exists, if it does not exist create a default one
         target = f'{self.get_experiment_folder_address()}/cfg/core_info.csv'
         if not os.path.exists(target):
-            # df = pandas.DataFrame([[ipns_info.ipns, ipns_info.core_index] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
-            # df.to_csv(target, index=False)
+            df = pandas.DataFrame([[ipns_info.ipns, ipns_info.core_index] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
+            df.to_csv(target, index=False)
             # TODO revert back to actually computing values
             # Copy root core_info.csv to cfg folder
-            os.system(f"cp -u ./core_info.csv {target}")
+            # os.system(f"cp -u ./core_info.csv {target}")
         # Create a sym link to the core info in cfg folder
         sym_target = f'{self.get_experiment_folder_address()}/run/core_info.csv'
         if os.path.exists(sym_target):

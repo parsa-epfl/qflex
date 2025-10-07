@@ -39,7 +39,7 @@ class QemuCommonArgParser:
         return f""" -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores} \
         -cpu max,pauth=off -m {self.memory_size_mb} \
-        -boot menu=on \
+        -boot order=d,menu=on \
         -bios ./QEMU_EFI.fd \
         -drive if=virtio,file={self.image_address},format=qcow2 \
         {self.nic_command} \

@@ -7,8 +7,7 @@ class DockerStarter(Executor):
     
     def __init__(self, 
                 #  TODO change to experiment context
-                 image_folder: str,
-                 experiment_name: str = 'default_experiment',
+                 mounting_folder: str,
                  debug: bool = False,
                  worm: bool = False,):
         self.debug = debug
@@ -16,8 +15,7 @@ class DockerStarter(Executor):
         self.version = get_version()
         self.docker_image_name = f"ghcr.io/parsa-epfl/qflex:{get_docker_image_name(debug=self.debug, worm=self.worm)}-{self.version}"
         self.images_folder = './images'
-        self.experiment_name = experiment_name
-        self.image_folder = image_folder
+        self.mounting_folder = os.path.abspath(mounting_folder)
         print(f"============== Using QFlex version: {self.version} ==============")
 
     def cmd(self) -> str:
@@ -38,18 +36,11 @@ class DockerStarter(Executor):
             binary_mount = ''
 
 
-        # make sure cfg folder exists
-        if not os.path.isdir('./cfg'):
-            os.makedirs('./cfg')
         
-        if not os.path.isdir(f'./cfg/{self.experiment_name}'):
-            os.makedirs(f'./cfg/{self.experiment_name}')
-
         # TODO remove unecessary mounts including .sh ones
         return f"""
         docker run -it --entrypoint /bin/bash \
-        -v {cwd}/cfg/{self.experiment_name}:/home/dev/qflex/cfg/{self.experiment_name} \
-        -v {self.image_folder}:{self.image_folder} \
+        -v {self.mounting_folder}:{self.mounting_folder} \
         -v {cwd}/sample_scripts:/home/dev/qflex/sample_scripts \
         -v {cwd}/QEMU_EFI.fd:/home/dev/qflex/QEMU_EFI.fd \
         -v {cwd}/templates:/home/dev/qflex/templates \

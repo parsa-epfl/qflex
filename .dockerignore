@@ -2,6 +2,8 @@
 WormCache/.git/
 p-qemu/.git/
 replica/.git/
+replica/
+
 
 include .gitignore
 include flexus/.gitignore
