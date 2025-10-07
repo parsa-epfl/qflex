@@ -1,0 +1,19 @@
+site_name: qflex
+docs_dir: mk_docs
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - mkdocs-click
+nav:
+  - Home: index.md
+  - Reference:
+      - CLI: reference/cli.md
