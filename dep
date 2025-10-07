@@ -5,7 +5,7 @@ from typing import Annotated
 from commands.docker import DockerStarter, DockerBuild
 
 app = typer.Typer(
-    name="qflex dep cli",
+    name="./dep",
     help="A CLI tool to manage QFlex dependancies and images. (suggest running ./dep --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
 )
 

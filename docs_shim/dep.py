@@ -11,4 +11,4 @@ _mod = SourceFileLoader("dep_script", str(SCRIPT_PATH)).load_module()
 _typer_app = getattr(_mod, "app")
 # Expose the Typer app for mkdocs-click
 # If your Typer object is named something else (e.g. "cli"), change "app" below.
-cli = get_command(_typer_app)
+dep = get_command(_typer_app)
