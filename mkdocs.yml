@@ -18,4 +18,5 @@ markdown_extensions:
   - mkdocs-click
 nav:
   - Home: index.md
+  - Docker: reference/dep.md
   - CLI: reference/cli.md
