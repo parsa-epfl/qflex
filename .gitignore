@@ -142,6 +142,7 @@ dkms.conf
 
 # Compiled Object files
 *.slo
+qflex.args
 
 # Precompiled Headers
 

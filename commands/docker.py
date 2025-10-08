@@ -46,6 +46,7 @@ class DockerStarter(Executor):
         -v {cwd}/templates:/home/dev/qflex/templates \
         -v {cwd}/typer_inputs:/home/dev/qflex/typer_inputs \
         -v {cwd}/commands:/home/dev/qflex/commands \
+        -v {cwd}/qflex.args:/home/dev/qflex/qflex.args \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
 

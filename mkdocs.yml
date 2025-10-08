@@ -15,8 +15,17 @@ plugins:
   
 
 markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.tabbed:
+      alternate_style: true
   - mkdocs-click
+
 nav:
   - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
   - Docker: reference/docker.md
   - CLI: reference/qflex.md
