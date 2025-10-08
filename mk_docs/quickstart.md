@@ -78,38 +78,64 @@ Once the VM is in the desired state:
 
 2. Save a snapshot:
    ```text
-   (qemu) savevm <your snapshot name>
+   (qemu) savevm boot
    ```
+!!! tip "Snapshot name"
+    You can change the snapshot name if you want but would not to replace it for the next steps if you do.
 
 !!! info "What you have now"
     You’ve created a reusable image snapshot that can be used by the CLI for the next steps (e.g., statistical sampling).
 
 
+---
+title: Section 4 — Load
+description: Restore the boot snapshot and bring up workload components with ordering and timing.
+tags: [qflex, load, snapshots, orchestration]
+---
+
+# Section 4: Load
+
+**Load** restores the prepared VM state you saved after boot and then brings up the workload components that require ordering or timing (e.g., start a server before a client on different cores).
 
 ---
 
+## Restore the snapshot and start the workload
 
-## 4) Explore the CLI
-
-Get a feel for available commands:
-
-```bash
-./qflex --help
-```
-
-For details on `boot` options:
+Use the snapshot saved in the previous step (created from the QEMU monitor with `savevm boot`) and load it:
 
 ```bash
-./qflex boot --help
+xargs -a ./sample_scripts/qflex.args -- ./qflex load \
+  --loadvm-name boot
 ```
 
----
+Afterwards you can run your commands to install and start your workload within qemu.
 
-## Next steps
-
-- Proceed to the sampling workflows in the CLI once your snapshot is ready.
-- Learn more about **`./qflex`** commands in the [CLI](reference/qflex.md) section.
-- For Docker-specific usage and dependency handling, see [Docker](reference/docker.md) and the `dep` helper:
-  ```bash
-  ./dep --help
+- The value for `--loadvm-name` should match the snapshot you saved in **Section 2 (Boot)**:
+  ```text
+  (qemu) savevm boot
   ```
+- Loading returns the VM to that exact ready-to-run state so you **don’t repeat OS or package installs**.
+
+Once you have started your workload you can save a snapshot by bringing up qemu monitor and saving a snapshot:
+  ```text
+  (qemu) savevm load
+  ```
+---
+
+## Why “Load” is needed
+
+Workloads often have multiple components that must respect **order** and **time**:
+
+- **Ordering:** Start upstream services first (e.g., server), then downstream components (e.g., client).
+- **Timing:** A client may wait for a server socket to be ready or for a specific time boundary.
+
+---
+
+## Tips
+
+!!! tip "Snapshot naming"
+    Use descriptive names (e.g., `boot`, `boot-deps`, `baseline-webapp`) so you can load the right prep stage for your experiment.
+
+!!! tip "Readiness checks"
+    Inside the guest, ensure launch scripts perform **readiness probes** (e.g., wait for port open) so dependent components don’t start prematurely.
+
