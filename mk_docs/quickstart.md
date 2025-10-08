@@ -93,7 +93,7 @@ description: Restore the boot snapshot and bring up workload components with ord
 tags: [qflex, load, snapshots, orchestration]
 ---
 
-# Section 4: Load
+## 4) Load
 
 **Load** restores the prepared VM state you saved after boot and then brings up the workload components that require ordering or timing (e.g., start a server before a client on different cores).
 
@@ -145,7 +145,7 @@ description: Initialize long-term microarchitectural state (cache, predictors, T
 tags: [qflex, init_warm, microarchitecture, snapshots]
 ---
 
-# Section 5: Init Warm
+## 5) Init Warm
 
 **Init Warm** initializes long-term microarchitectural states—such as **caches**, **branch predictors**, and **TLBs**—to a realistic, steady baseline **before functional warming** begins.
 
@@ -171,4 +171,63 @@ This snapshot captures the initialized microarchitectural state so subsequent st
 
 !!! info "What you have now"
     A VM snapshot (**`init_warmed`**) with warmed long-term microarchitectural state, ready for the next step.
+
+---
+title: Section 6 — Functional Warming
+description: Simulate for the population duration to produce checkpoints for later detailed simulation.
+tags: [qflex, functional-warming, checkpoints, sampling]
+---
+
+## 6) Functional Warming
+
+**Functional warming** runs the VM forward for the configured **population length** (in seconds) and emits **checkpoints** that will be used later for detailed simulation. This stage advances time and activity enough to expose representative program phases while remaining much faster than full detailed simulation.
+
+---
+
+## Run functional warming
+
+Start from the **init_warmed** snapshot created in the previous step:
+
+```bash
+xargs -a ./sample_scripts/qflex.args -- ./qflex fw \
+  --loadvm-name init_warmed
+```
+
+- The warm length is controlled by your common args (e.g., `--population-seconds 0.00001` and `--sample-size 10`).
+- Output includes **checkpoint markers** that later stages can load to run short, focused detailed slices.
+
+---
+
+## Parameters used during functional warming
+
+The `fw` step is controlled mostly by values you set in your shared args file. Here’s what matters and how to pick them:
+
+- **`--population-seconds <float>`**  
+  How long to *functionally* run the workload to mine candidate regions. Larger values explore more behavior (more coverage) but take longer.  
+  *Rule of thumb:* start small to iterate (e.g., `1e-5`–`1e-3`) and grow if checkpoints don’t look representative.
+
+- **`--sample-size <int>`**  
+  How many **checkpoints** to produce from the population window. More samples increase representativeness but will cost more time later when you run detailed slices.  
+  *Common patterns:*  
+  - Quick profiling: `5–10`  
+  - Deeper studies: `20–50`
+
+- **`--check-period-quantum-coeff <int>`**  
+  Controls how frequently `fw` evaluates whether to create a checkpoint relative to your execution quantum (see `--quantum-size-ns`). Higher values mean **fewer checks** (coarser cadence), lower values mean **more frequent** opportunities. Use this to avoid over/under-checkpointing.
+
+- **`--quantum-size-ns <int>`**  
+  The scheduler “tick” used during fast-forwarding and warming. Smaller quanta can make progress/decision points finer-grained (potentially more overhead), larger quanta coarser (fewer decision points).
+
+- **`--no-consolidated`**  
+  Keep checkpoints as separate artifacts rather than collapsing/merging. This is helpful when you want explicit per-slice control later.
+
+- **`--experiment-name`, `--workload-name`**  
+  Used to organize/namescope artifacts and logs. Choose stable names so results from different runs don’t collide.
+
+- **`--working-directory`, `--image-folder`**  
+  Locations where run outputs and the QEMU image (and its snapshots) live. Ensure these have enough space and are consistent across steps so later phases can find the checkpoints.
+
+!!! tip "Choosing values"
+    Pick `--population-seconds` for **coverage**, then set `--sample-size` to match how many detailed slices you can afford. If checkpoints cluster too closely (or too sparsely), adjust `--check-period-quantum-coeff` (and, if needed, `--quantum-size-ns`) to tune cadence.
+
 
