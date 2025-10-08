@@ -139,3 +139,36 @@ Workloads often have multiple components that must respect **order** and **time*
 !!! tip "Readiness checks"
     Inside the guest, ensure launch scripts perform **readiness probes** (e.g., wait for port open) so dependent components don’t start prematurely.
 
+---
+title: Section 5 — Init Warm
+description: Initialize long-term microarchitectural state (cache, predictors, TLB) before functional warming.
+tags: [qflex, init_warm, microarchitecture, snapshots]
+---
+
+# Section 5: Init Warm
+
+**Init Warm** initializes long-term microarchitectural states—such as **caches**, **branch predictors**, and **TLBs**—to a realistic, steady baseline **before functional warming** begins.
+
+---
+
+## Run init warm
+
+Load from the prior **Load** snapshot and initialize the microarchitectural state:
+
+```bash
+xargs -a ./sample_scripts/qflex.args -- ./qflex initialize \
+  --loadvm-name load
+```
+
+- `--loadvm-name load` should match the snapshot produced in **Section 4 (Load)**.
+
+---
+
+## Snapshot created automatically
+
+Upon successful completion, a QEMU snapshot named **`init_warmed`** is created on the image.  
+This snapshot captures the initialized microarchitectural state so subsequent stages can start from a consistent baseline.
+
+!!! info "What you have now"
+    A VM snapshot (**`init_warmed`**) with warmed long-term microarchitectural state, ready for the next step.
+
