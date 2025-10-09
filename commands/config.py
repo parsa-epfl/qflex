@@ -42,7 +42,7 @@ class SimulationContext(BaseModel):
     qemu_nic: str = Field(description="type of NIC to use in QEMU")
     quantum_size: int = Field(description="quantum size for the simulator in nanoseconds")
     is_parallel: bool = Field(default=True, description="whether the simulation is parallel or not")
-    check_period_quantum_coeff: int = Field(default=53, description="Coefficient to determine the check period based on quantum size")
+    check_period_quantum_coeff: float = Field(default=53.0, description="Coefficient to determine the check period based on quantum size")
 
 def create_simulation_context(
     core_count: int,
@@ -52,7 +52,7 @@ def create_simulation_context(
     is_parallel: bool,
     network: str,
     memory_gb: int,
-    check_period_quantum_coeff=53,
+    check_period_quantum_coeff: float=53.0,
 ) -> SimulationContext:
     l2_way = 16
     if core_count == 64:
@@ -177,9 +177,9 @@ class ExperimentContext(BaseModel):
            "result.py" 
         ]
         for file in root_sls:
-            if file not in os.listdir(self.get_experiment_folder_address()):
-                # Symlink partition script to experiment folder
-                os.symlink(f"./{file}", f"{self.get_experiment_folder_address()}/{file}")
+            os.system(f"cp -u ./{file} {self.get_experiment_folder_address()}/{file}")
+            print(f"moved {file} to experiment folder")
+
 
         # check that both build/qemu-system-aarch64 exists in run folder plus efi-virtio.rom
         # link all of them
@@ -299,7 +299,7 @@ def create_experiment_context(
     loadvm_name: str = "",
     working_directory: str = ".",
     # Default for simulation context
-    check_period_quantum_coeff=53,
+    check_period_quantum_coeff: float = 53.0,
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
