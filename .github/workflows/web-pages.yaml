@@ -1,4 +1,4 @@
-name: web-pages-build
+name: gh-pages-build
 
 on:
   push:
