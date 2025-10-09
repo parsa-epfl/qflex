@@ -1,4 +1,4 @@
-name: CI
+name: web-pages-build
 
 on:
   push:
