@@ -9,6 +9,36 @@ tags: [getting-started, args, qflex, boot]
 To avoid repeating long flag lists, keep common options in a single file and pass them to `qflex` with `xargs`.
 
 ---
+title: Section 0 — Create Base Image
+description: Create the initial QEMU base image in the same folder used by your shared args file.
+tags: [qflex, images, base-image]
+---
+
+# Section 0: Create the base image
+
+Before booting, create a base image in the **same directory** you use for `--image-folder` and `--working-directory` in your shared args file.
+
+## Command
+
+```bash
+./qflex create-base-image --image-folder <YOUR_FOLDER>
+```
+
+- Set `<YOUR_FOLDER>` to the path you use in `qflex.args`:
+  ```text
+  --image-folder <YOUR_FOLDER>
+  ```
+- By default, the image name aligns with your args (e.g., `--image-name root.qcow2` if you kept the template).
+
+!!! tip "See all options"
+    Explore additional flags for sizing, format, or naming:
+    ```bash
+    ./qflex create-base-image --help
+    ```
+    Keep `--image-folder` consistent with your later steps so snapshots and artifacts stay together.
+
+
+---
 
 ## 1) Create a shared args file (and the run pattern)
 
