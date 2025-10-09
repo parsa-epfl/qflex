@@ -60,7 +60,7 @@ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 Use the `boot` action to start the OS with your common arguments. Once the VM is up, install your workload’s dependencies inside the guest (e.g., package manager installs, copying configs, etc.).
 
 ```bash
-xargs -a ./qflex.args -- ./qflex boot
+xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 ```
 
 - This brings up the VM using the CPU/memory/topology and paths defined in `qflex.args`.
@@ -104,7 +104,7 @@ tags: [qflex, load, snapshots, orchestration]
 Use the snapshot saved in the previous step (created from the QEMU monitor with `savevm boot`) and load it:
 
 ```bash
-xargs -a ./sample_scripts/qflex.args -- ./qflex load \
+xargs -a ./qflex.args -- ./qflex load \
   --loadvm-name boot
 ```
 
@@ -156,7 +156,7 @@ tags: [qflex, init_warm, microarchitecture, snapshots]
 Load from the prior **Load** snapshot and initialize the microarchitectural state:
 
 ```bash
-xargs -a ./sample_scripts/qflex.args -- ./qflex initialize \
+xargs -a ./qflex.args -- ./qflex initialize \
   --loadvm-name load
 ```
 
@@ -189,7 +189,7 @@ tags: [qflex, functional-warming, checkpoints, sampling]
 Start from the **init_warmed** snapshot created in the previous step:
 
 ```bash
-xargs -a ./sample_scripts/qflex.args -- ./qflex fw \
+xargs -a ./qflex.args -- ./qflex fw \
   --loadvm-name init_warmed
 ```
 
