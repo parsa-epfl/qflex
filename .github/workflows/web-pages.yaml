@@ -24,7 +24,7 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements.docs.txt
           
-      - name: Build static site into /docs
+      - name: Build static site into /site
         run: |
           make build-docs
 
