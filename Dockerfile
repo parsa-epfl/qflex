@@ -33,6 +33,7 @@ RUN apt install -y --no-install-recommends libglib2.0-dev
 RUN apt install -y --no-install-recommends ninja-build
 RUN apt install -y --no-install-recommends cmake
 RUN apt install -y --no-install-recommends meson
+RUN apt install -y --no-install-recommends grep
 # TODO once mirrors are back change back to gcc-14
 RUN apt install -y --no-install-recommends gcc-13 g++-13
 RUN apt install -y --no-install-recommends libpixman-1-dev
