@@ -68,12 +68,13 @@ class ExperimentContextTyper(TyperDataClassMeta):
         loadvm_name: Annotated[str, typer.Option(
             help="Name of the loadvm to use in QEMU, optional"
         )] = "",
-        working_directory: Annotated[str, typer.Option(
-            help="Working directory where the experiment folders will be created."
+        mounting_folder: Annotated[str, typer.Option(
+            help="Mounting directory where the experiment folders will be created."
         )] = ".",
         check_period_quantum_coeff: Annotated[float, typer.Option(
             help="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period."
         )] = 53.0,
+        use_cd_rom: Annotated[bool, typer.Option(help="Whether to use a CD-ROM for initial setup.")]=False,
     ):
         print("quantum_size_ns:", quantum_size_ns)
         experiment_context: ExperimentContext = create_experiment_context(
@@ -102,7 +103,8 @@ class ExperimentContextTyper(TyperDataClassMeta):
             keep_experiment_unique=unique,
             use_image_directly=use_image_directly,
             loadvm_name=loadvm_name,
-            working_directory=working_directory,
+            mounting_folder=mounting_folder,
             check_period_quantum_coeff=check_period_quantum_coeff,
+            use_cd_rom=use_cd_rom,
         )
         return experiment_context
