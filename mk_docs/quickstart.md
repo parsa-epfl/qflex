@@ -148,7 +148,7 @@ Afterwards you can run your commands to install and start your workload within q
 
 Once you have started your workload you can save a snapshot by bringing up qemu monitor and saving a snapshot:
   ```text
-  (qemu) savevm load
+  (qemu) savevm loaded
   ```
 ---
 
@@ -187,10 +187,10 @@ Load from the prior **Load** snapshot and initialize the microarchitectural stat
 
 ```bash
 xargs -a ./qflex.args -- ./qflex initialize \
-  --loadvm-name load
+  --loadvm-name loaded
 ```
 
-- `--loadvm-name load` should match the snapshot produced in **Section 4 (Load)**.
+- `--loadvm-name loaded` should match the snapshot produced in **Section 4 (Load)**.
 
 ---
 
