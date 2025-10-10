@@ -29,5 +29,5 @@ class PartitionCommand(Executor):
         return [
             f"cd {self.experiment_folder}",
             f"{self.experiment_folder}/partition.py {self.partition_count}",
-            # f"{self.experiment_folder}/scripts/run_partitions.sh {self.detailed_warming_ratio} {self.measurement_ratio}"
+            f"{self.experiment_folder}/run_partitions.sh {self.detailed_warming_ratio} {self.measurement_ratio}"
         ]
