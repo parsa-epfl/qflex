@@ -43,7 +43,9 @@ class InitWarm(Executor):
             # TODO check if this needs to be debug
             "cargo build --release",
             f"cd {experiment_folder}/run",
-            f"cp {experiment_folder}/lib/WormCache/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/", 
+            f"cp {experiment_folder}/lib/WormCache/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/",
+            f"cp {experiment_folder}/lib/WormCache/target/release/checkpoint_conversion {self.experiment_context.get_experiment_folder_address()}/bin/checkpoint_conversion",
+            #  TODO check if all needed files are copied (check main file of replica plus necessary files declared in partition.py and result.py)
         ]
     
     def cmd(self) -> str:
