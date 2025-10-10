@@ -11,16 +11,16 @@ import datetime
 # For anyone checking this with old scripts, all worklaod, and core information is combined into the cli, as it's part of the CLI paramers now
 
 def get_experiment_folder_address(
-    working_directory: str,
+    mounting_folder: str,
     experiment_name: str
 ) -> str:
     # check if working directory exists
-    if not os.path.isdir(working_directory):
-        raise ValueError(f"Working directory {working_directory} does not exist.")
+    if not os.path.isdir(mounting_folder):
+        raise ValueError(f"Working directory {mounting_folder} does not exist.")
     # create experiments if it doesn't exist
-    if not os.path.isdir(f'{working_directory}/experiments'):
-        os.makedirs(f'{working_directory}/experiments', exist_ok=False)
-    path = f'{working_directory}/experiments/{experiment_name}'
+    if not os.path.isdir(f'{mounting_folder}/experiments'):
+        os.makedirs(f'{mounting_folder}/experiments', exist_ok=False)
+    path = f'{mounting_folder}/experiments/{experiment_name}'
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=False)
     return os.path.abspath(path)
@@ -38,7 +38,7 @@ class SimulationContext(BaseModel):
     directory_way: int = Field(description="number of ways in the directory cache")
     mem_controller_count: int = Field(description="number of memory controllers")
     mem_controller_positions: str = Field(description="positions of memory controllers")
-    memory: int = Field(description="memory size in GB")
+    memory_gb: int = Field(description="memory size in GB")
     qemu_nic: str = Field(description="type of NIC to use in QEMU")
     quantum_size: int = Field(description="quantum size for the simulator in nanoseconds")
     is_parallel: bool = Field(default=True, description="whether the simulation is parallel or not")
@@ -77,7 +77,7 @@ def create_simulation_context(
         directory_way=16,
         mem_controller_count=memory_controller_count,
         mem_controller_positions=memory_controller_positions,
-        memory=memory_gb,
+        memory_gb=memory_gb,
         qemu_nic=network,
         quantum_size=quantum_size,
         is_parallel=is_parallel,
@@ -99,14 +99,14 @@ class ExperimentContext(BaseModel):
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
     host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
-    working_directory: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
+    mounting_folder: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
     keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
 
-    def get_working_directory(self) -> str:
-        return self.working_directory
+    def get_mounting_folder(self) -> str:
+        return self.mounting_folder
 
     def get_experiment_folder_address(self) -> str:
         """
@@ -114,7 +114,7 @@ class ExperimentContext(BaseModel):
         """
         # TODO add some more document on how the folder structure works and why this is good that these folders get repeated for each experiment as it keeps them isolated and easy to copy and move
         # TODO clean this up later, but done this for when need to make a directory but don't have the full context
-        return get_experiment_folder_address(self.get_working_directory(), self.experiment_name)
+        return get_experiment_folder_address(self.get_mounting_folder(), self.experiment_name)
 
     def get_local_image_address(self) -> str:
         return self.image_address
@@ -160,21 +160,32 @@ class ExperimentContext(BaseModel):
             
 
     def set_up_folders(self):
+        # TODO go through all the files being copied with shanqing
 
-        if not os.path.exists(f"{self.get_working_directory()}/experiments"):
-            os.makedirs(f"{self.get_working_directory()}/experiments", exist_ok=False)
-        if not os.path.exists(f"{self.get_working_directory()}/images"):
-            os.makedirs(f"{self.get_working_directory()}/images", exist_ok=False)
+        if not os.path.exists(f"{self.get_mounting_folder()}/experiments"):
+            os.makedirs(f"{self.get_mounting_folder()}/experiments", exist_ok=False)
+        if not os.path.exists(f"{self.get_mounting_folder()}/images"):
+            os.makedirs(f"{self.get_mounting_folder()}/images", exist_ok=False)
+        if not os.path.exists(self.get_experiment_folder_address()):
+            os.makedirs(self.get_experiment_folder_address(), exist_ok=False)
+        if not os.path.exists(f"{self.image_folder}"):
+            os.makedirs(f"{self.image_folder}")
 
         self.set_up_image()
+
 
         for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts", "images"]:
             os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
         self.get_ipns_csv()
 
+        if not os.path.exists(f"{self.get_experiment_folder_address()}/run/{self.image_name}"):
+            if not os.path.exists(self.get_local_image_address()):
+                raise FileNotFoundError(f"Error: Image file {self.get_local_image_address()} not found.")
+            os.symlink(self.get_local_image_address(), f"{self.get_experiment_folder_address()}/run/{self.image_name}")
+
         root_sls = [
            "partition.py",
-           "result.py" 
+           "result.py"
         ]
         for file in root_sls:
             os.system(f"cp -u ./{file} {self.get_experiment_folder_address()}/{file}")
@@ -192,7 +203,8 @@ class ExperimentContext(BaseModel):
             "./QEMU_EFI.fd", 
             "./qemu-saved/build/qemu-system-aarch64",
             "./p-qemu-saved/pc-bios/efi-virtio.rom",
-            "./qemu-img"
+            "./qemu-img",
+            "debug.cfg",
         ]
         for f in run_files:
 
@@ -213,6 +225,17 @@ class ExperimentContext(BaseModel):
             raise FileNotFoundError("WormCache folder not found in the working directory.")
         if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/WormCache"):
             os.system(f"cp -r ./WormCache {self.get_experiment_folder_address()}/lib/WormCache")
+
+        # Move files to lib
+        lib_files = [
+            "libknottykraken.so", 
+            "libsemikraken.so"
+        ]
+        for f in lib_files:
+            if not os.path.exists(f"/home/dev/qflex/kraken_out/{f}"):
+                raise FileNotFoundError(f"Error: {f} not found in ./home/dev/qflex/kraken_out/")
+            if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/{f}"):
+                os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
 
         
 
@@ -297,9 +320,10 @@ def create_experiment_context(
     keep_experiment_unique: bool = True,
     use_image_directly: bool = False,
     loadvm_name: str = "",
-    working_directory: str = ".",
+    mounting_folder: str = ".",
     # Default for simulation context
     check_period_quantum_coeff: float = 53.0,
+    use_cd_rom: bool = False,
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -342,7 +366,7 @@ def create_experiment_context(
     )
 
     
-    working_directory = os.path.abspath(working_directory)
+    mounting_folder = os.path.abspath(mounting_folder)
     e = ExperimentContext(
         experiment_name=experiment_name,
         image_folder=image_folder,
@@ -351,7 +375,7 @@ def create_experiment_context(
         simulation_context=simulation_context,
         host=host,
         workload=workload,
-        working_directory=working_directory,
+        mounting_folder=mounting_folder,
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name
