@@ -47,6 +47,10 @@ class DockerStarter(Executor):
         -v {cwd}/typer_inputs:/home/dev/qflex/typer_inputs \
         -v {cwd}/commands:/home/dev/qflex/commands \
         -v {cwd}/qflex.args:/home/dev/qflex/qflex.args \
+        -v {cwd}/partition.py:/home/dev/qflex/partition.py \
+        -v {cwd}/result.py:/home/dev/qflex/result.py \
+        --security-opt seccomp=unconfined \
+        --cap-add SYS_PTRACE \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
 
