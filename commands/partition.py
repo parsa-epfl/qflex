@@ -26,6 +26,7 @@ class PartitionCommand(Executor):
     def cmd(self) -> str:
         # TODO add run_flexus.sh to scripts folder
         # TODO get rid of partition at some point and move run_flexus.sh in our python commands
+        # TODO seperate creating partitions and running partitions
         return [
             f"cd {self.experiment_folder}",
             f"{self.experiment_folder}/partition.py {self.partition_count}",

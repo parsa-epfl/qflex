@@ -10,6 +10,8 @@ class FlexusCheckpointConfigLoader(ParameterLoader):
                 output_name='flexus_configuration.json',
                 out_folder='cfg'
             )
+            self.experiment_context = experiment_context
+            self.simulation_context = experiment_context.simulation_context
     def get_context(self):
         return {
             "L2_SET" : self.experiment_context.simulation_context.l2_set,
