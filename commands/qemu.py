@@ -16,10 +16,6 @@ class QemuCommonArgParser:
         
         
         self.nic_command = self.experiment_context.simulation_context.qemu_nic.strip().lower()
-        if self.nic_command == 'none':
-            self.nic_command = ''
-        else:
-            self.nic_command = f'-nic {self.nic_command},model=virtio-net-pci'
 
         self.loadvm = ''
         if self.experiment_context.loadvm_name is not None and len(self.experiment_context.loadvm_name) > 0:
