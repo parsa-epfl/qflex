@@ -9,6 +9,8 @@ from commands.load import Load
 from commands.init_warm import InitWarm
 from commands.functional_warming import FunctionalWarming
 from commands.partition import PartitionCommand
+from commands.run_partition import RunPartitionCommand
+from commands.result import RunResultCommand
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -106,8 +108,6 @@ def fw(
 def partition(
     experiment_context: ExperimentContext,
     partition_count: Annotated[int, typer.Option(help="Number of partitions to create.")] = 16,
-    warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
-    measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
 ):
     """
     This command partitions the functional warmup checkpoints into smaller segments for detailed (timing) simulation.
@@ -116,10 +116,40 @@ def partition(
     partition_executor = PartitionCommand(
         experiment_context=experiment_context,
         partition_count=partition_count,
+    )
+    partition_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def run_partition(
+    experiment_context: ExperimentContext,
+    warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
+    measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
+):
+    """
+    This command runs the detailed (timing) simulations for each partition created by the partition command.
+    """
+    run_partition_executor = RunPartitionCommand(
+        experiment_context=experiment_context,
         warming_ratio=warming_ratio,
         measurement_ratio=measurement_ratio
     )
-    partition_executor.execute(to_stdio=True, run_in_background=False)
+    run_partition_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def result(
+    experiment_context: ExperimentContext,
+):
+    """
+    This command aggregates and processes the results from the detailed simulations.
+    It generates a core_info.csv file with the simulation results.
+    """
+    run_result_executor = RunResultCommand(
+        experiment_context=experiment_context,
+    )
+    run_result_executor.execute(to_stdio=True, run_in_background=False)
+
 
 if __name__ == "__main__":
     app()

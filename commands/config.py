@@ -287,14 +287,15 @@ class ExperimentContext(BaseModel):
         if not os.path.exists(target):
             df = pandas.DataFrame([[ipns_info.ipns, ipns_info.core_index] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
             df.to_csv(target, index=False)
-            # TODO revert back to actually computing values
-            # Copy root core_info.csv to cfg folder
-            # os.system(f"cp -u ./core_info.csv {target}")
+        else:
+            print(f"============== core_info.csv already exists at {target}, not overwriting it. ==============")
         # Create a sym link to the core info in cfg folder
         sym_target = f'{self.get_experiment_folder_address()}/run/core_info.csv'
-        if os.path.exists(sym_target):
-            # Remove existing symlink
-            os.remove(sym_target)
+        try:
+            os.system(f"rm {sym_target}")
+        except FileNotFoundError:
+            # As faulty symlink won't show
+            pass
         os.symlink(target, sym_target)
 
 

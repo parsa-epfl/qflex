@@ -6,13 +6,9 @@ class PartitionCommand(Executor):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 partition_count: int,
-                 warming_ratio: int, 
-                 measurement_ratio: int):
+                 partition_count: int):
         self.experiment_context = experiment_context
         self.partition_count = partition_count
-        self.detailed_warming_ratio = warming_ratio
-        self.measurement_ratio = measurement_ratio
         # TODO potential problem that the potential script is created at the init_warm stage change later
         # For now just check the file exists and if not throw an error saying run init_warm first
         self.experiment_folder = self.experiment_context.get_experiment_folder_address()
@@ -27,8 +23,8 @@ class PartitionCommand(Executor):
         # TODO add run_flexus.sh to scripts folder
         # TODO get rid of partition at some point and move run_flexus.sh in our python commands
         # TODO seperate creating partitions and running partitions
+        assert not os.path.exists(f"{self.experiment_folder}/run/partition_0"), "Error: Partitions already exist. Please remove all existing partitions before creating new ones (and rerun fw)."
         return [
             f"cd {self.experiment_folder}",
             f"{self.experiment_folder}/partition.py {self.partition_count}",
-            f"{self.experiment_folder}/run_partitions.sh {self.detailed_warming_ratio} {self.measurement_ratio}"
         ]
