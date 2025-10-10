@@ -25,7 +25,7 @@ class RunResultCommand(Executor):
             # TODO check why this cd is needed
             "cd ./run",
             "ln -s ../cfg/core_info.csv core_info.csv",
-            "echo linked new core_info.csv to run folder",
+            "echo linked new core_info.csv to run folder, ready for another round of fw and partitioning",
             "cat ./core_info.csv",
             "cd ..",
 
