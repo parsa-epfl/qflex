@@ -25,11 +25,8 @@ if len(sys.argv) != 2:
     PARTITION_COUNT: int = cpu_count
 else:
     PARTITION_COUNT = int(sys.argv[1])
+    print(f"Setting partition count to {PARTITION_COUNT}")
 
-# Make sure flags/GEN_CHECKPOINT_DONE exists.
-if not os.path.exists("flags/GEN_CHECKPOINT_DONE"):
-    print("Error: flags directory does not exist.")
-    sys.exit(1)
 
 os.chdir("./run")
 
@@ -84,10 +81,13 @@ NECESSARY_BINARY_FILES = [
 
 for p in range(PARTITION_COUNT):
     for file in NECESSARY_BINARY_FILES:
+        if not os.path.exists(file):
+            raise FileNotFoundError(f"Error: {file} not found.")
         os.symlink(
             f"../{file}",
             f"partition_{p}/{file.split('/')[-1]}"
         )
+print(f"Created {PARTITION_COUNT} partitions.")
 
 folder_list = []
 
@@ -96,6 +96,7 @@ for p in range(PARTITION_COUNT):
     os.system(f"cp ../scripts/run_flexus.sh partition_{p}/run_flexus.sh")
     folder_list.append(f"run/partition_{p}")
 
+print(f"Created {' '.join(folder_list)}.")
 
 cwd_basename = os.path.basename(os.path.dirname(os.getcwd()))
 
