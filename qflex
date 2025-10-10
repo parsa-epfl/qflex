@@ -119,6 +119,7 @@ def partition(
     )
     partition_executor.execute(to_stdio=True, run_in_background=False)
 
+# TODO add formatting for the new variables outside exp_context
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def run_partition(
