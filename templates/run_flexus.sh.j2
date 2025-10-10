@@ -34,7 +34,7 @@ do
 
     # 2. Start flexus
     #pwndbg -ex "set follow-fork-mode parent" --args \
-    ./vanilla-qemu-system-aarch64 \
+    ../vanilla-qemu-system-aarch64 \
         -smp {{ (CORE_COUNT * 2) if DOUBLED_VCPU else CORE_COUNT }} \
         -M virt,gic-version=max,virtualization=off,secure=off \
         -cpu max,pauth=off \
