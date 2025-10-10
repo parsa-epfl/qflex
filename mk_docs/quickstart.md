@@ -76,7 +76,7 @@ Create `./qflex.args` (a.k.a. *qflex.common.args*) with **one argument per line*
 **Run pattern using `xargs`**  
 Use `xargs` to feed the file’s flags to `./qflex`:
 ```bash
-xargs -a ./qflex.args -- ./qflex
+xargs -a ./qflex.args -- ./qflex boot
 ```
 Add any **run-specific** flags after the command:
 ```bash
