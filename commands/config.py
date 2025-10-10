@@ -70,6 +70,12 @@ def create_simulation_context(
     else:
         raise ValueError("Unsupported core count")
 
+    if 'none' == network.strip().lower():
+        network = "-nic none"
+    elif 'user' == network.strip().lower():
+        network = "-nic user,model=virtio-net-pci"
+    else:
+        raise ValueError("Unsupported network type. Supported types are 'none' and 'user'.")
     return SimulationContext(
         core_count=core_count,
         doubled_vcpu=doubled_vcpu,
