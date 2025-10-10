@@ -14,8 +14,8 @@ class CreateImage(Executor):
 
     def cmd(self) -> str:
         if not os.path.isdir(self.image_folder):
-            raise ValueError(f"Image folder {self.image_folder} does not exist.")
-
+            os.makedirs(self.image_folder)
+        # TODO force image to be in run going forward
         return [
             f'./qemu-img create -f qcow2 {self.image_folder}/{self.image_name} {self.size_gb}G',
             f'ls -lh {self.image_folder}/{self.image_name}',
