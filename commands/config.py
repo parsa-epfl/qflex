@@ -43,6 +43,7 @@ class SimulationContext(BaseModel):
     quantum_size: int = Field(description="quantum size for the simulator in nanoseconds")
     is_parallel: bool = Field(default=True, description="whether the simulation is parallel or not")
     check_period_quantum_coeff: float = Field(default=53.0, description="Coefficient to determine the check period based on quantum size")
+    use_cd_rom: bool = Field(default=False, description="Whether to use a CD-ROM for initial setup.")
 
 def create_simulation_context(
     core_count: int,
@@ -53,6 +54,7 @@ def create_simulation_context(
     network: str,
     memory_gb: int,
     check_period_quantum_coeff: float=53.0,
+    use_cd_rom: bool=False,
 ) -> SimulationContext:
     l2_way = 16
     if core_count == 64:
@@ -82,6 +84,7 @@ def create_simulation_context(
         quantum_size=quantum_size,
         is_parallel=is_parallel,
         check_period_quantum_coeff=check_period_quantum_coeff,
+        use_cd_rom=use_cd_rom,
     )
 
 class IPNSInfo(BaseModel):
@@ -346,6 +349,7 @@ def create_experiment_context(
         network=network,
         memory_gb=memory_gb,
         check_period_quantum_coeff=check_period_quantum_coeff,
+        use_cd_rom=use_cd_rom,
     )
 
     if host_name.upper() not in HostType.__members__.keys():
