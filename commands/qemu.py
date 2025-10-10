@@ -33,6 +33,7 @@ class QemuCommonArgParser:
         else:
             self.quantum_command = f'   -icount shift=0,align=off,sleep=off,q={self.simulation_context.quantum_size},check_period={int(self.simulation_context.quantum_size * check_period_quantum_coeff)} '
 
+        self.cd_rom = ''
         self.use_cd_rom = self.simulation_context.use_cd_rom
         if self.use_cd_rom:
             alpine_image_name = 'alpine-virt-3.22.1-aarch64.iso'
