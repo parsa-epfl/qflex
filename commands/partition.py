@@ -18,6 +18,10 @@ class PartitionCommand(Executor):
         if not os.path.exists(f"{self.experiment_folder}/partition.py"):
             raise FileNotFoundError(f"Error: partition.py not found in {self.experiment_folder}. Make sure init_warm command has been run.")
 
+    def clean_partition_command(self):
+        return f"""rm -rf {self.experiment_folder}/run/partition_* && \
+        rm -f {self.experiment_folder}/mem/[0-9]*
+        """
 
     def cmd(self) -> str:
         # TODO add run_flexus.sh to scripts folder
@@ -27,8 +31,7 @@ class PartitionCommand(Executor):
             print("============== PARTITION ALREADY EXISTS ==============")
             print("Error: Partitions already exist. Please remove all existing partitions before creating new ones (and rerun fw).")
             print("If you want to remove previous partitions, you can run the following:")
-            print(f"rm -rf {self.experiment_folder}/run/partition_*")
-            print(f"rm -f {self.experiment_folder}/mem/[0-9]*")
+            print(f"{self.clean_partition_command()}")
             print("If you'd rather just unpartition you can run:")
             print(f"mv {self.experiment_folder}/run/partition_*/snapshot_* {self.experiment_folder}/run")
             print(f"rm -rf {self.experiment_folder}/run/partition_*")
@@ -37,3 +40,14 @@ class PartitionCommand(Executor):
             f"cd {self.experiment_folder}",
             f"{self.experiment_folder}/partition.py {self.partition_count}",
         ]
+
+
+class CleanPartitionCommand(PartitionCommand):
+
+    def __init__(self, experiment_context: ExperimentContext):
+        self.experiment_context = experiment_context
+        self.experiment_folder = self.experiment_context.get_experiment_folder_address()
+
+    def cmd(self):
+        return self.clean_partition_command()
+

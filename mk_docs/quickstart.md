@@ -6,9 +6,18 @@ tags: [getting-started, args, qflex, boot]
 
 # Let's get started
 
+!!! note "Before you begin"
+    Make sure your environment is ready using **one** of the following ways:
+    
+    - **All requirements installed locally**, **or**
+    - **You’ve started the Docker environment with the `dep` helper** (see [Installation](installation.md) and [Docker](reference/docker.md)):
+      ```bash
+      ./dep start-docker --worm --mounting-folder $PWD
+      ```
+
 ---
 
-# Section 0: Create the base image
+## 0) Create the base image
 
 Before booting, create a base image in the **same directory** you use for `--image-folder` and `--working-directory` in your shared args file.
 
@@ -82,19 +91,18 @@ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 
 ## 2) Boot to bring up the OS and install requirements
 
-Use the `boot` action to start the OS with your common arguments. Once the VM is up, install your workload’s dependencies inside the guest (e.g., package manager installs, copying configs, etc.).
+Use the `boot` action to start the OS with your common arguments. Once the VM is up, install your workload’s dependencies inside the qemu image (e.g., package manager installs, copying configs, etc.).
 
 ```bash
 xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 ```
 
-- This brings up the VM using the CPU/memory/topology and paths defined in `qflex.args`.
-- After installing requirements and preparing the environment, you can proceed to your next workflow steps (e.g., sampling).
+- This brings up the VM using the CPU/memory/ defined in `qflex.args`.
 - With `--image-folder` and `--working-directory` pointing to your mount, you can place existing qemu images in `<MOUNT_DIR>` and access them from within the docker contianer and skip this step.
 
 ---
 
-## 3) Save a snapshot of the image
+### Save a snapshot of the image and qemu monitor
 
 Once the VM is in the desired state:
 
@@ -106,21 +114,17 @@ Once the VM is in the desired state:
    (qemu) savevm boot
    ```
 !!! tip "Snapshot name"
-    You can change the snapshot name if you want but would not to replace it for the next steps if you do.
+    You can change the snapshot name if you want but this name is used in later steps in this tutorial.
 
 !!! info "What you have now"
-    You’ve created a reusable image snapshot that can be used by the CLI for the next steps (e.g., statistical sampling).
+    You’ve created a reusable image snapshot that has your workload dependencies installed and is ready for the next steps.
 
 
 ---
-title: Section 4 — Load
-description: Restore the boot snapshot and bring up workload components with ordering and timing.
-tags: [qflex, load, snapshots, orchestration]
----
 
-## 4) Load
+## 3) Load
 
-**Load** restores the prepared VM state you saved after boot and then brings up the workload components that require ordering or timing (e.g., start a server before a client on different cores).
+**Load** restores the prepared VM state you saved after boot and where you can start the workload, and each core will have a clock.
 
 ---
 
@@ -133,52 +137,34 @@ xargs -a ./qflex.args -- ./qflex load \
   --loadvm-name boot
 ```
 
-Afterwards you can run your commands to install and start your workload within qemu.
+Afterwards you can run your commands to start your workload within qemu.
 
 - The value for `--loadvm-name` should match the snapshot you saved in **Section 2 (Boot)**:
   ```text
   (qemu) savevm boot
   ```
-- Loading returns the VM to that exact ready-to-run state so you **don’t repeat OS or package installs**.
 
-Once you have started your workload you can save a snapshot by bringing up qemu monitor and saving a snapshot:
+Once you have started your workload started you can save a snapshot by bringing up qemu monitor and saving a snapshot:
   ```text
   (qemu) savevm loaded
   ```
 ---
 
-## Why “Load” is needed
+### Why “Load” is needed
 
-Workloads often have multiple components that must respect **order** and **time**:
+Workloads often have multiple components that must respect **order** and **time** as they are starting, i.e. a web server must start after the database is up and running and if the components are running on different cores they need to be started within a certain time window of each other. The **Load** step allows you to script and orchestrate this process.
 
-- **Ordering:** Start upstream services first (e.g., server), then downstream components (e.g., client).
-- **Timing:** A client may wait for a server socket to be ready or for a specific time boundary.
-
----
-
-## Tips
-
-!!! tip "Snapshot naming"
-    Use descriptive names (e.g., `boot`, `boot-deps`, `baseline-webapp`) so you can load the right prep stage for your experiment.
-
-!!! tip "Readiness checks"
-    Inside the guest, ensure launch scripts perform **readiness probes** (e.g., wait for port open) so dependent components don’t start prematurely.
-
----
-title: Section 5 — Init Warm
-description: Initialize long-term microarchitectural state (cache, predictors, TLB) before functional warming.
-tags: [qflex, init_warm, microarchitecture, snapshots]
 ---
 
 ## 5) Init Warm
 
-**Init Warm** initializes long-term microarchitectural states—such as **caches**, **branch predictors**, and **TLBs**—to a realistic, steady baseline **before functional warming** begins.
+**Init Warm** initializes long-term microarchitectural states—such as **caches**, **branch predictors**, and **TLBs** so that **functional warming** can start.
 
 ---
 
-## Run init warm
+### Run init warm
 
-Load from the prior **Load** snapshot and initialize the microarchitectural state:
+Load from the prior **loaded** snapshot and initialize the microarchitectural state:
 
 ```bash
 xargs -a ./qflex.args -- ./qflex initialize \
@@ -189,27 +175,24 @@ xargs -a ./qflex.args -- ./qflex initialize \
 
 ---
 
-## Snapshot created automatically
+### Snapshot created automatically
 
-Upon successful completion, a QEMU snapshot named **`init_warmed`** is created on the image.  
+Upon successful initialization, a QEMU snapshot named **`init_warmed`** is created on the image.  
 This snapshot captures the initialized microarchitectural state so subsequent stages can start from a consistent baseline.
 
 !!! info "What you have now"
     A VM snapshot (**`init_warmed`**) with warmed long-term microarchitectural state, ready for the next step.
+    This step and all the steps before it only need to be done once per workload, unless changing the workload configuration.
 
----
-title: Section 6 — Functional Warming
-description: Simulate for the population duration to produce checkpoints for later detailed simulation.
-tags: [qflex, functional-warming, checkpoints, sampling]
 ---
 
 ## 6) Functional Warming
 
-**Functional warming** runs the VM forward for the configured **population length** (in seconds) and emits **checkpoints** that will be used later for detailed simulation. This stage advances time and activity enough to expose representative program phases while remaining much faster than full detailed simulation.
+**Functional warming** runs the VM forward for the configured **population length** (in seconds) and emits **checkpoints** that will be used later for timing (detailed) simulation.
 
 ---
 
-## Run functional warming
+### Run functional warming
 
 Start from the **init_warmed** snapshot created in the previous step:
 
@@ -219,12 +202,47 @@ xargs -a ./qflex.args -- ./qflex fw \
 ```
 
 - The warm length is controlled by your common args (e.g., `--population-seconds 0.00001` and `--sample-size 10`).
-- Output includes **checkpoint markers** that later stages can load to run short, focused detailed slices.
+- Output includes **checkpoints** that later stages can load to run short, timing simulation.
 
 ---
 
-## Parameters used during functional warming
+## 7) Partitioning
 
-The `fw` step is controlled mostly by values you set in your shared args file. Check the CLI section to learn more about the arguements.
+After checkpoints are created from functional warming, you can split the checkpoints into partitions to be ran in parallel during detailed simulation (using flexus). 
+```bash
+xargs -a ./qflex.args -- ./qflex partition --partition-count 16
+```
+
+You can adjust the `--partition-count` to fit your needs.
+
+- This creates folders named `partition_0`, `partition_1`, ..., `partition_15` in the run folder of the experiments folder (for `--partition-count 16`).
+
+
+---
+
+## 8) Running Partitions
+After creating the partitions you will have the script that manages running all partitions in timing simulation using flexus. 
+```
+xargs -a ./qflex.args -- ./qflex --warming-ratio 2 --measurement-ratio 1
+```
+This command will run all the partitions with spending twice as much cycles warming as measuring. You can adjust the `--warming-ratio` and `--measurement-ratio`.
+
+---
+## 9) Collecting Results
+After the detailed simulation is done you can collect the results and decided whether or not you want to reiterate from the functional warming step as it uses an estimate IPC. The result command creates estimated IPCs that can be more accurate and with more accurate IPC you can re-iterate. 
+```bash
+xargs -a ./qflex.args -- ./qflex result
+```
+This will automatically create a new core_info.csv file in the experiment folder with the updated IPC values. ready for you to re-iterate the experiment. 
+
+However if you decide to reiterate you should first remove the partitions folders.
+```bash
+xargs -a ./qflex.args -- ./qflex partition-cleanup
+```
+
+<!-- Warning that this will remove all partition folders and their contents -->
+!!! warning "Warning"
+    This will remove all partition folders and their contents. Make sure you have collected any necessary data before running this command.
+
 
 
