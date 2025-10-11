@@ -258,6 +258,10 @@ However if you decide to reiterate you should first remove the partitions folder
 ```bash
 xargs -a ./qflex.args -- ./qflex partition-cleanup
 ```
+<!-- Warning that this will remove all partition folders and their contents -->
+!!! warning "Warning"
+    This will remove all partition folders and their contents. Make sure you have collected any necessary data before running this command.
+
 
 
 <!-- Tip for debugging -->
@@ -269,10 +273,6 @@ xargs -a ./qflex.args -- ./qflex partition-cleanup
     You can change `partition_0` to the partition you want to debug.
 
 
-
-<!-- Warning that this will remove all partition folders and their contents -->
-!!! warning "Warning"
-    This will remove all partition folders and their contents. Make sure you have collected any necessary data before running this command.
 
 
 
