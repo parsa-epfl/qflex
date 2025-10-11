@@ -23,7 +23,16 @@ class PartitionCommand(Executor):
         # TODO add run_flexus.sh to scripts folder
         # TODO get rid of partition at some point and move run_flexus.sh in our python commands
         # TODO seperate creating partitions and running partitions
-        assert not os.path.exists(f"{self.experiment_folder}/run/partition_0"), "Error: Partitions already exist. Please remove all existing partitions before creating new ones (and rerun fw)."
+        if os.path.exists(f"{self.experiment_folder}/run/partition_0"): 
+            print("============== PARTITION ALREADY EXISTS ==============")
+            print("Error: Partitions already exist. Please remove all existing partitions before creating new ones (and rerun fw).")
+            print("If you want to remove previous partitions, you can run the following:")
+            print(f"rm -rf {self.experiment_folder}/run/partition_*")
+            print(f"rm -f {self.experiment_folder}/mem/[0-9]*")
+            print("If you'd rather just unpartition you can run:")
+            print(f"mv {self.experiment_folder}/run/partition_*/snapshot_* {self.experiment_folder}/run")
+            print(f"rm -rf {self.experiment_folder}/run/partition_*")
+            raise FileExistsError("Partitions already exist.")
         return [
             f"cd {self.experiment_folder}",
             f"{self.experiment_folder}/partition.py {self.partition_count}",
