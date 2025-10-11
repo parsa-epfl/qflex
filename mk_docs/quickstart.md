@@ -1,5 +1,5 @@
 ---
-title: QFlex: Statistical Sampling Quickstart, Fast and Accurate Simulation
+title: QFlex - Statistical Sampling Quickstart, Fast and Accurate Simulation
 description: You bring a workload and a question; QFlex brings fast, accurate answers. This guide walks you through the steps to set up and run a statistical sampling experiment using QFlex.
 tags: [getting-started, QFlex, args, reproducibility, performance, sampling, statistical-simulation, tutorial]
 ---
