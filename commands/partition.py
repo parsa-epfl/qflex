@@ -49,5 +49,9 @@ class CleanPartitionCommand(PartitionCommand):
         self.experiment_folder = self.experiment_context.get_experiment_folder_address()
 
     def cmd(self):
-        return self.clean_partition_command()
+        return [
+            f"echo running '{self.clean_partition_command()}'",
+            self.clean_partition_command(),
+            "echo removed partitions successfully",
+        ]
 

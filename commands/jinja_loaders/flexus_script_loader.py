@@ -25,5 +25,5 @@ class FlexusScriptLoader(ParameterLoader):
             "CORE_COUNT": self.experiment_context.simulation_context.core_count,
             "DOUBLED_VCPU": self.experiment_context.simulation_context.doubled_vcpu,
             "MEMORY": self.experiment_context.simulation_context.memory_gb * 1024,  # in MB
-            "QEMU_NIC": self.experiment_context.simulation_context.qemu_nic.replace('-nic ', '').strip().lower(),
+            "QEMU_NIC": self.experiment_context.simulation_context.qemu_nic.strip().lower(),
         }

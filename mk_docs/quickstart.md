@@ -223,7 +223,7 @@ You can adjust the `--partition-count` to fit your needs.
 ## 8) Running Partitions
 After creating the partitions you will have the script that manages running all partitions in timing simulation using flexus. 
 ```
-xargs -a ./qflex.args -- ./qflex --warming-ratio 2 --measurement-ratio 1
+xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement-ratio 1
 ```
 This command will run all the partitions with spending twice as much cycles warming as measuring. You can adjust the `--warming-ratio` and `--measurement-ratio`.
 
@@ -239,6 +239,17 @@ However if you decide to reiterate you should first remove the partitions folder
 ```bash
 xargs -a ./qflex.args -- ./qflex partition-cleanup
 ```
+
+
+<!-- Tip for debugging -->
+!!! tip "Debugging timing simulation"
+    The previous command runs all the partitions in parallel so you will not see the output of each partition. To debug a specific partition you can run it directly using the following command:
+    ```bash
+    cd /mnt_folder/experiments/<experiment_name>/run/partition_0/run_flexus.sh
+    ```
+    You can change `partition_0` to the partition you want to debug.
+
+
 
 <!-- Warning that this will remove all partition folders and their contents -->
 !!! warning "Warning"

@@ -42,7 +42,7 @@ do
         -boot menu=on \
         -bios ./QEMU_EFI.fd \
         -drive if=virtio,file=root.qcow2,format=qcow2,snapshot=on,tmp-snapshot-name=snapshot_$idx \
-        -nic {{ QEMU_NIC }} \
+        {{ QEMU_NIC }} \
         -rtc clock=vm \
         -loadvm snapshot_$idx,on-demand \
         -icount shift=0,align=off,sleep=off \
