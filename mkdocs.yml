@@ -12,7 +12,7 @@ theme:
 
 plugins:
   - search
-  
+  - mermaid2
 
 markdown_extensions:
   - meta
@@ -23,6 +23,11 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - mkdocs-click
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 
 nav:
   - Home: index.md
@@ -30,3 +35,11 @@ nav:
   - Quickstart: quickstart.md
   - Docker: reference/docker.md
   - CLI: reference/qflex.md
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+
+
+watch:
+  - mk_docs
+  - docs_shim

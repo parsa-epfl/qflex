@@ -2,9 +2,29 @@
 title: Getting Started
 description: Use a shared args file to avoid repeating flags, then boot the OS to install requirements.
 tags: [getting-started, args, qflex, boot]
----
 
+---
 # Let's get started
+
+## Overview of the workflow
+``` mermaid
+graph TD
+  B[Boot] --> L{Load};
+  L --> I[Initialization];
+  I --> F[Functional Warming];
+  F --> P[Partitioning];
+  P --> RP[Run Partitions];
+  RP --> R[Results];
+  R --> C{Check Results};
+  C -->|Variance is low| Fi[Finished];
+  C ---->|Variance is high| U[Update Sample Number];
+  U --> CleanPartition[Clean up partitions, removes old files];
+  CleanPartition --> F;
+```
+By the end of this tutorial, you will have run through the entire workflow of statistical sampling. You will also learn why each step is necessary.
+
+## 0) Prerequisites
+
 
 !!! note "Before you begin"
     Make sure your environment is ready using **one** of the following ways:
@@ -14,14 +34,13 @@ tags: [getting-started, args, qflex, boot]
       ```bash
       ./dep start-docker --worm --mounting-folder $PWD
       ```
-
 ---
 
-## 0) Create the base image
+### Create the base image
 
 Before booting, create a base image in the **same directory** you use for `--image-folder` and `--working-directory` in your shared args file.
 
-## Command
+### Command
 
 ```bash
 ./qflex create-base-image --image-folder <YOUR_FOLDER>
@@ -43,7 +62,7 @@ Before booting, create a base image in the **same directory** you use for `--ima
 
 ---
 
-## 1) Create a shared args file (and the run pattern)
+## Create a shared args file (and the run pattern)
 
 To avoid repeating long flag lists, keep common options in a single file and pass them to `qflex` with `xargs`.
 Create `./qflex.args` (a.k.a. *qflex.common.args*) with **one argument per line**.
@@ -89,7 +108,7 @@ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 
 ---
 
-## 2) Boot to bring up the OS and install requirements
+## 1) Boot to bring up the OS and install requirements
 
 Use the `boot` action to start the OS with your common arguments. Once the VM is up, install your workload’s dependencies inside the qemu image (e.g., package manager installs, copying configs, etc.).
 
@@ -122,7 +141,7 @@ Once the VM is in the desired state:
 
 ---
 
-## 3) Load
+## 2) Load
 
 **Load** restores the prepared VM state you saved after boot and where you can start the workload, and each core will have a clock.
 
@@ -156,7 +175,7 @@ Workloads often have multiple components that must respect **order** and **time*
 
 ---
 
-## 5) Init Warm
+## 3) Init Warm
 
 **Init Warm** initializes long-term microarchitectural states—such as **caches**, **branch predictors**, and **TLBs** so that **functional warming** can start.
 
@@ -186,7 +205,7 @@ This snapshot captures the initialized microarchitectural state so subsequent st
 
 ---
 
-## 6) Functional Warming
+## 4) Functional Warming
 
 **Functional warming** runs the VM forward for the configured **population length** (in seconds) and emits **checkpoints** that will be used later for timing (detailed) simulation.
 
@@ -206,7 +225,7 @@ xargs -a ./qflex.args -- ./qflex fw \
 
 ---
 
-## 7) Partitioning
+## 5) Partitioning
 
 After checkpoints are created from functional warming, you can split the checkpoints into partitions to be ran in parallel during detailed simulation (using flexus). 
 ```bash
@@ -220,7 +239,7 @@ You can adjust the `--partition-count` to fit your needs.
 
 ---
 
-## 8) Running Partitions
+## 6) Running Partitions
 After creating the partitions you will have the script that manages running all partitions in timing simulation using flexus. 
 ```
 xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement-ratio 1
@@ -228,7 +247,7 @@ xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement-r
 This command will run all the partitions with spending twice as much cycles warming as measuring. You can adjust the `--warming-ratio` and `--measurement-ratio`.
 
 ---
-## 9) Collecting Results
+## 7) Collecting Results
 After the detailed simulation is done you can collect the results and decided whether or not you want to reiterate from the functional warming step as it uses an estimate IPC. The result command creates estimated IPCs that can be more accurate and with more accurate IPC you can re-iterate. 
 ```bash
 xargs -a ./qflex.args -- ./qflex result

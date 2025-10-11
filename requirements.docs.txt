@@ -4,3 +4,4 @@ mkdocs-click
 mkdocs-section-index
 mkdocs-literate-nav
 mkdocs-gen-files
+mkdocs-mermaid2-plugin
