@@ -80,16 +80,22 @@ class DockerBuild(Executor):
 
     def cmd(self) -> str:
         
+        local_qflex_name = f"{self.docker_base_image_name}:{self.version}"
+        ghcr_qflex_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-{self.version}"
+
+        local_worm_name = f"{self.docker_image_name_with_worm}:{self.version}"
+        ghcr_worm_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
+
         # TODO centeralize the ghcr.io/parsa-epfl/qflex part
         if not self.worm_only:
             base_image_build_cmd = [
                 f"""
-                docker buildx build -t {self.docker_base_image_name}:{self.version} --build-arg MODE={self.build_type} .
+                docker buildx build -t {local_qflex_name} --build-arg MODE={self.build_type} .
                 """,
-                f"docker tag {self.docker_base_image_name}:{self.version} ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-{self.version}"
+                f"docker tag {local_qflex_name} {ghcr_qflex_name}"
             ]
             base_image_push_cmd = [
-                f"docker push ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-{self.version}"
+                f"docker push {ghcr_qflex_name}"
             ]
         else:
             base_image_build_cmd = [
@@ -101,13 +107,13 @@ class DockerBuild(Executor):
 
         worm_image_cmd = [
             f"""
-            docker buildx build -t {self.docker_image_name_with_worm}:{self.version} --build-arg BASE_IMAGE=ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-latest -f Dockerfile.WormCache .
+            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.WormCache .
             """,
-            f"docker tag {self.docker_image_name_with_worm}:{self.version} ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
+            f"docker tag {local_worm_name} {ghcr_worm_name}"
         ]
         # TODO add a seperate debug image that has the files that can be used for compilation and developement without remaking the docker image
         worm_image_push_cmd = [
-            f"docker push ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
+            f"docker push {ghcr_worm_name}"
         ]
 
         base_cmd = base_image_build_cmd
