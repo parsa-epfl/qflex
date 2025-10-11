@@ -254,10 +254,12 @@ xargs -a ./qflex.args -- ./qflex result
 ```
 This will automatically create a new core_info.csv file in the experiment folder with the updated IPC values. ready for you to re-iterate the experiment. 
 
-However if you decide to reiterate you should first remove the partitions folders.
+## 8) Re-iterating
+If you decide to reiterate you should first remove the partitions folders.
 ```bash
 xargs -a ./qflex.args -- ./qflex partition-cleanup
 ```
+The IPC is already updated in the cfg/core_info.csv file and you just need to update your sample size and can re-iterate from the functional warming step.
 <!-- Warning that this will remove all partition folders and their contents -->
 !!! warning "Warning"
     This will remove all partition folders and their contents. Make sure you have collected any necessary data before running this command.
