@@ -192,6 +192,9 @@ xargs -a ./qflex.args -- ./qflex initialize \
 
 - `--loadvm-name loaded` should match the snapshot produced in **Section 4 (Load)**.
 
+!!! note "Initialization notes"
+    This step makes sure all long-term state have been initialized, therefore make sure you have started the workload, as without a workload using the resources, this step will execute for a long time.
+
 ---
 
 ### Snapshot created automatically
