@@ -30,12 +30,13 @@ def start_docker(
     mounting_folder: Annotated[str, typer.Option(help="Folder to mount for files.")],
     debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False, 
     worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
+    start_directory: Annotated[str, typer.Option(help="Directory to start in inside the container.")] = None,
 ):
     """
     Start a Docker container with the QFlex environment. 
     Useful for development and testing without installing dependencies locally.
     """
-    docker_executor = DockerStarter(mounting_folder=mounting_folder, debug=debug, worm=worm)
+    docker_executor = DockerStarter(mounting_folder=mounting_folder, debug=debug, worm=worm, start_directory=start_directory)
     docker_executor.execute(to_stdio=True, run_in_background=False)
     # TODO bring in the build scripts here as well
 

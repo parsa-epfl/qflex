@@ -9,7 +9,8 @@ class DockerStarter(Executor):
                 #  TODO change to experiment context
                  mounting_folder: str,
                  debug: bool = False,
-                 worm: bool = False,):
+                 worm: bool = False,
+                 start_directory: str = None):
         self.debug = debug
         self.worm = worm
         self.version = get_version()
@@ -17,6 +18,10 @@ class DockerStarter(Executor):
         self.images_folder = './images'
         self.mounting_folder = os.path.abspath(mounting_folder)
         print(f"============== Using QFlex version: {self.version} ==============")
+        self.start_directory = ''
+        if start_directory is not None and len(start_directory) > 0:
+            self.start_directory = f" -w {start_directory} "
+
 
     def cmd(self) -> str:
         cwd = os.getcwd()
@@ -37,7 +42,7 @@ class DockerStarter(Executor):
 
 
         
-        # TODO remove unecessary mounts including .sh ones
+        # TODO remove unecessary mounts including .sh ones and micro_scripts
         return f"""
         docker run -it --entrypoint /bin/bash \
         -v {self.mounting_folder}:{self.mounting_folder} \
@@ -49,8 +54,10 @@ class DockerStarter(Executor):
         -v {cwd}/qflex.args:/home/dev/qflex/qflex.args \
         -v {cwd}/partition.py:/home/dev/qflex/partition.py \
         -v {cwd}/result.py:/home/dev/qflex/result.py \
+        -v {cwd}/micro_scripts:/home/dev/qflex/micro_scripts \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \
+        {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
 
