@@ -11,9 +11,8 @@ if __name__ == "__main__":
     command = f"""xargs -a ./micro_scripts/qflex.args -- ./qflex partition --sample-size 30 --partition-count {first_arg}"""
 
     full_command = " && ".join([
-        "pushd ..",
+        "cd ..",
         command,
-        "popd"
     ])
     os.system(full_command)
 

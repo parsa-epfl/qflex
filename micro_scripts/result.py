@@ -5,15 +5,12 @@ import sys
 
 
 if __name__ == "__main__":
-    # Get first and second argument
-    first_arg = sys.argv[1]
     # sample size will be moved later to only fw as it has no affect here
     command = f"""xargs -a ./micro_scripts/qflex.args -- ./qflex result --sample-size 30 """
 
     full_command = " && ".join([
-        "pushd ..",
+        "cd ..",
         command,
-        "popd"
     ])
     os.system(full_command)
 
