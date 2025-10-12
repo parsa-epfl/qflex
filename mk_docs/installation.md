@@ -26,8 +26,10 @@ Follow these steps to set up the CLI and start the Docker image.
 
 <!-- termynal -->
 ``` bash
+
 $ git clone --branch gitflow-clean-up-cyan-qflex-exp git@github.com:parsa-epfl/qflex.git
 $ cd qflex
+
 ```
 
 ---
@@ -56,13 +58,17 @@ pip install -r requirements.txt
 === "Windows (PowerShell)"
     <!-- termynal -->
     ```powershell
+
     $ python dep start-docker --worm --mounting-folder <mounting_folder>
+
     ```
 
 === "Linux"
     <!-- termynal -->
     ```bash
+
     $ ./dep start-docker --worm --mounting-folder <mounting_folder>
+
     ```
 
 ---
@@ -73,7 +79,9 @@ After the container starts, run:
 
 <!-- termynal -->
 ```bash
+
 $ python dep status
+
 ```
 
 You should see a healthy status indicating the image is running and your working directory is mounted.
