@@ -77,6 +77,10 @@ class ExperimentContextTyper(TyperDataClassMeta):
         use_cd_rom: Annotated[bool, typer.Option(help="Whether to use a CD-ROM for initial setup.")]=False,
     ):
         print("quantum_size_ns:", quantum_size_ns)
+        if unique:
+            print("Unique experiment is deprecated, will skip adding timestamp.")
+            unique = False
+            # TODO remove this in future
         experiment_context: ExperimentContext = create_experiment_context(
             experiment_name=experiment_name,
             image_name=image_name,
