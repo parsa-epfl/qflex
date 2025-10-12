@@ -14,6 +14,7 @@ class FunctionalWarming(Executor):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
+        # TODO move sample size to be an arg only in fw
         self.sample_size = self.experiment_context.workload.sample_size
         self.sampling_interval = math.ceil(
             (self.experiment_context.workload.population + self.sample_size - 1) / self.sample_size

@@ -45,6 +45,7 @@ def create_workload(
         secondary_core_start=secondary_core_start,
     )
 
+    # TODO add checks to make sure the length of sample_intervals is bigger than quantum and the check period
     return Workload(
         name=workload_name,
         IPC_info=ipc_info,
