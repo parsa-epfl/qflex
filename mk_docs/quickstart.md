@@ -33,7 +33,7 @@ By the end of this tutorial, you will have run through the entire workflow of st
     - **All requirements installed locally**, **or**
     - **You’ve started the Docker environment with the `dep` helper** (see [Installation](installation.md) and [Docker](reference/docker.md)):
       ```bash
-      ./dep start-docker --worm --mounting-folder $PWD
+      ./dep start-docker --worm --mounting-folder <MOUNT_DIR>
       ```
 ---
 
