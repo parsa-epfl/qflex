@@ -42,9 +42,9 @@ By the end of this tutorial, you will have run through the entire workflow of st
 Before booting, create a base image in the **same directory** you use for `--image-folder` and `--working-directory` in your shared args file.
 
 ### Command
-
+<!-- termynal -->
 ```bash
-./qflex create-base-image --image-folder <YOUR_FOLDER>
+$ ./qflex create-base-image --image-folder <YOUR_FOLDER>
 ```
 
 - Set `<YOUR_FOLDER>` to the path you use in `qflex.args`:
@@ -99,12 +99,14 @@ Create `./qflex.args` (a.k.a. *qflex.common.args*) with **one argument per line*
 
 **Run pattern using `xargs`**  
 Use `xargs` to feed the file’s flags to `./qflex`:
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex boot
+$ xargs -a ./qflex.args -- ./qflex boot
 ```
 Add any **run-specific** flags after the command:
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
+$ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 ```
 
 ---
@@ -112,9 +114,9 @@ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 ## 1) Boot to bring up the OS and install requirements
 
 Use the `boot` action to start the OS with your common arguments. Once the VM is up, install your workload’s dependencies inside the qemu image (e.g., package manager installs, copying configs, etc.).
-
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
+$ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 ```
 
 - This brings up the VM using the CPU/memory/ defined in `qflex.args`.
@@ -151,20 +153,22 @@ Once the VM is in the desired state:
 ## Restore the snapshot and start the workload
 
 Use the snapshot saved in the previous step (created from the QEMU monitor with `savevm boot`) and load it:
-
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex load \
+$ xargs -a ./qflex.args -- ./qflex load \
   --loadvm-name boot
 ```
 
 Afterwards you can run your commands to start your workload within qemu.
 
 - The value for `--loadvm-name` should match the snapshot you saved in **Section 2 (Boot)**:
+  <!-- termynal -->
   ```text
   (qemu) savevm boot
   ```
 
 Once you have started your workload started you can save a snapshot by bringing up qemu monitor and saving a snapshot:
+  <!-- termynal -->
   ```text
   (qemu) savevm loaded
   ```
@@ -185,9 +189,9 @@ Workloads often have multiple components that must respect **order** and **time*
 ### Run init warm
 
 Load from the prior **loaded** snapshot and initialize the microarchitectural state:
-
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex initialize \
+$ xargs -a ./qflex.args -- ./qflex initialize \
   --loadvm-name loaded
 ```
 
@@ -218,9 +222,9 @@ This snapshot captures the initialized microarchitectural state so subsequent st
 ### Run functional warming
 
 Start from the **init_warmed** snapshot created in the previous step:
-
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex fw \
+$ xargs -a ./qflex.args -- ./qflex fw \
   --loadvm-name init_warmed
 ```
 
@@ -232,8 +236,9 @@ xargs -a ./qflex.args -- ./qflex fw \
 ## 5) Partitioning
 
 After checkpoints are created from functional warming, you can split the checkpoints into partitions to be ran in parallel during detailed simulation (using flexus). 
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex partition --partition-count 16
+$ xargs -a ./qflex.args -- ./qflex partition --partition-count 16
 ```
 
 You can adjust the `--partition-count` to fit your needs.
@@ -253,15 +258,17 @@ This command will run all the partitions with spending twice as much cycles warm
 ---
 ## 7) Collecting Results
 After the detailed simulation is done you can collect the results and decided whether or not you want to reiterate from the functional warming step as it uses an estimate IPC. The result command creates estimated IPCs that can be more accurate and with more accurate IPC you can re-iterate. 
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex result
+$ xargs -a ./qflex.args -- ./qflex result
 ```
 This will automatically create a new core_info.csv file in the experiment folder with the updated IPC values. ready for you to re-iterate the experiment. 
 
 ## 8) Re-iterating
 If you decide to reiterate you should first remove the partitions folders.
+<!-- termynal -->
 ```bash
-xargs -a ./qflex.args -- ./qflex partition-cleanup
+$ xargs -a ./qflex.args -- ./qflex partition-cleanup
 ```
 The IPC is already updated in the cfg/core_info.csv file and you just need to update your sample size and can re-iterate from the functional warming step.
 <!-- Warning that this will remove all partition folders and their contents -->
@@ -273,8 +280,9 @@ The IPC is already updated in the cfg/core_info.csv file and you just need to up
 <!-- Tip for debugging -->
 !!! tip "Debugging timing simulation"
     The previous command runs all the partitions in parallel so you will not see the output of each partition. To debug a specific partition you can run it directly using the following command:
+    <!-- termynal -->
     ```bash
-    cd /mnt_folder/experiments/<experiment_name>/run/partition_0/run_flexus.sh
+    $ cd /mnt_folder/experiments/<experiment_name>/run/partition_0/run_flexus.sh
     ```
     You can change `partition_0` to the partition you want to debug.
 

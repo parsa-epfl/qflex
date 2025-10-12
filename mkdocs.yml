@@ -13,6 +13,10 @@ theme:
 plugins:
   - search
   - mermaid2
+  - termynal:
+      prompt_literal_start:
+        - "$"
+        - "(qemu)"
 
 markdown_extensions:
   - meta
