@@ -274,7 +274,7 @@ class ExperimentContext(BaseModel):
 
         if not is_consolidated:
             for core_idx in range(core_count):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.primary_ipc))
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_primary))
         else:
             primary_core_start = self.workload.core_range.primary_core_start
             secondary_core_start = self.workload.core_range.secondary_core_start
