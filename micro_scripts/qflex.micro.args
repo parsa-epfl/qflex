@@ -9,10 +9,10 @@
 --workload-name web-search
 --population-seconds 5
 --no-consolidated
---primary-ipc 2.1
+--primary-ipc 2.0
 --primary-core-start 0
 --phantom-cpu-ipc 4
---experiment-name experiment_micro003
+--experiment-name experiment_micro001
 --image-name root.qcow2
 --image-folder /mnt/sdb/exp02/run
 --mounting-folder /mnt/sdb/exp02
