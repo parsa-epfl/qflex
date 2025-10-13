@@ -86,6 +86,7 @@ class DockerBuild(Executor):
         print(f"============== Building QFlex version: {self.version} ==============")
 
     def cmd(self) -> str:
+        # TODO add a debug build with all the files so it can be used for development without remaking the image and compiled again
         
         local_qflex_name = f"{self.docker_base_image_name}:{self.version}"
         ghcr_qflex_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-{self.version}"
