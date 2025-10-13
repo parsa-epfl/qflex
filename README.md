@@ -2,7 +2,7 @@
 <p align="center">
   <i>State-of-the-art modeling tools for the computer architecture community.<br/>The QFlex project targets quick, accurate, and flexible simulation of computer systems</i>
   <br/>
-  <img width="600" alt="QFlex" src="docs/readme-assets/qflex_logo.png"/>
+  <img width="600" alt="QFlex" src="docs/readme-assets/qflex_logo.svg"/>
   <br/>
   <b><a href="https://github.com/parsa-epfl/qflex/tree/main/docs">Documentation</a></b> | <b><a href="https://github.com/parsa-epfl/qflex">GitHub</a></b> | <b><a href="https://qflex.epfl.ch">Website</a></b>
   <br/><br/>
