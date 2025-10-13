@@ -7,6 +7,12 @@ class IPCInfo(BaseModel):
     # TODO check the document on the description of secondary_ipc and primary_ipc
     secondary_ipc: float = Field(description="Secondary IPC value for client")
     phantom_cpu_ipc: float = Field(description="Phantom CPU IPC value")
+    # TODO see if machine frequency should be moved to simulation config
+    machine_freq_ghz: float = Field(2.0, description="Machine frequency in GHz")
+    min_ipc: float = Field(description="Minimum IPC value observed")
+    max_ipc: float = Field(description="Maximum IPC value observed")
+    scaling_factor: float = Field(description="Scaling factor based on max IPC and machine frequency")
+    
 
 class CoreRange(BaseModel):
     primary_core_start: int = Field(description="Start of the primary core range")
@@ -20,6 +26,28 @@ class Workload(BaseModel):
     population: int = Field(description="Population size for this workload in ns.")
     sample_size: int = Field(description="Sample size for the workload")
 
+def get_ipc_info(
+    is_consolidated: bool,
+    primary_ipc: float,
+    secondary_ipc: float,
+    phantom_cpu_ipc: float,
+    machine_freq_ghz: float,
+) -> IPCInfo:
+    min_ipc = min(primary_ipc, secondary_ipc) if is_consolidated else primary_ipc
+    max_ipc = max(primary_ipc, secondary_ipc) if is_consolidated else primary_ipc
+    scaling_factor = max_ipc / (round(primary_ipc * machine_freq_ghz, 2))
+    return IPCInfo(
+        is_consolidated=is_consolidated,
+        primary_ipc=primary_ipc,
+        secondary_ipc=secondary_ipc,
+        phantom_cpu_ipc=phantom_cpu_ipc,
+        machine_freq_ghz=machine_freq_ghz,
+        min_ipc=min_ipc,
+        max_ipc=max_ipc,
+        scaling_factor=scaling_factor
+    )
+    
+
 def create_workload(
     workload_name: str,
     # CoreRange section
@@ -32,12 +60,14 @@ def create_workload(
     phantom_cpu_ipc: float,
     population_seconds: float,
     sample_size: int,
+    machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
 ):
-    ipc_info = IPCInfo(
+    ipc_info = get_ipc_info(
         is_consolidated=is_consolidated,
         primary_ipc=primary_ipc,
         secondary_ipc=secondary_ipc,
-        phantom_cpu_ipc=phantom_cpu_ipc,  # Default value, can be modified later
+        phantom_cpu_ipc=phantom_cpu_ipc,
+        machine_freq_ghz=machine_freq_ghz,
     )
 
     core_range = CoreRange(

@@ -259,6 +259,19 @@ class ExperimentContext(BaseModel):
         results: list[IPNSInfo] = []
         
         core_count = self.simulation_context.core_count
+
+        primary_ipc = self.workload.IPC_info.primary_ipc
+        secondary_ipc = self.workload.IPC_info.secondary_ipc
+        phantom_ipc = self.workload.IPC_info.phantom_cpu_ipc
+        min_ipc = self.workload.IPC_info.min_ipc
+        machine_freq_ghz = self.workload.IPC_info.machine_freq_ghz
+        ipns_primary = round(primary_ipc * machine_freq_ghz, 2)
+        ipns_secondary = round(secondary_ipc * machine_freq_ghz, 2)
+        ipns_phantom = round(
+            phantom_ipc * machine_freq_ghz / min_ipc * primary_ipc,
+            2
+        )
+
         if not is_consolidated:
             for core_idx in range(core_count):
                 results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.primary_ipc))
@@ -267,13 +280,13 @@ class ExperimentContext(BaseModel):
             secondary_core_start = self.workload.core_range.secondary_core_start
             # TODO check this with shanqing, changed this so you can give core numbers that are actually used unlike the og script
             for core_idx in range(primary_core_start, secondary_core_start):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.primary_ipc))
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_primary))
             for core_idx in range(secondary_core_start, core_count):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.secondary_ipc))
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_secondary))
             
         if has_client:
             for core_idx in range (core_count, core_count * 2):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=self.workload.IPC_info.phantom_cpu_ipc))
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_phantom))
 
         return results
     
@@ -334,9 +347,31 @@ def create_experiment_context(
     # Default for simulation context
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
+    machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
+
+    workload = create_workload(
+        workload_name=workload_name,
+        primary_core_start=primary_core_start,
+        secondary_core_start=secondary_core_start,
+        is_consolidated=is_consolidated,
+        primary_ipc=primary_ipc,
+        secondary_ipc=secondary_ipc,
+        phantom_cpu_ipc=phantom_cpu_ipc,
+        population_seconds=population_seconds,
+        sample_size=sample_size,
+        machine_freq_ghz=machine_freq_ghz,
+    )
+
+    # TODO turn this into debug prints
+    print("=========== Scaling factor based on max IPC and machine frequency: ", workload.IPC_info.scaling_factor, " ===========")
+    quantum_size = int(quantum_size * workload.IPC_info.scaling_factor)
+    population_seconds = int(population_seconds * workload.IPC_info.scaling_factor)
+    print("=========== Adjusted quantum size: ", quantum_size, " ===========")
+    print("=========== Adjusted population seconds: ", population_seconds, " ===========")
+
     if image_name is None:
         image_name = f"root.qcow2"
 
@@ -364,17 +399,7 @@ def create_experiment_context(
     host_type = HostType[host_name.upper()]
     host = HOSTS[host_type]
 
-    workload = create_workload(
-        workload_name=workload_name,
-        primary_core_start=primary_core_start,
-        secondary_core_start=secondary_core_start,
-        is_consolidated=is_consolidated,
-        primary_ipc=primary_ipc,
-        secondary_ipc=secondary_ipc,
-        phantom_cpu_ipc=phantom_cpu_ipc,
-        population_seconds=population_seconds,
-        sample_size=sample_size,
-    )
+    
 
     
     mounting_folder = os.path.abspath(mounting_folder)

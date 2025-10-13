@@ -75,6 +75,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
             help="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period."
         )] = 53.0,
         use_cd_rom: Annotated[bool, typer.Option(help="Whether to use a CD-ROM for initial setup.")]=False,
+        machine_freq_ghz: Annotated[float, typer.Option(help="Machine frequency in GHz.")]=2.0,
     ):
         print("quantum_size_ns:", quantum_size_ns)
         if unique:
@@ -110,5 +111,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
             mounting_folder=mounting_folder,
             check_period_quantum_coeff=check_period_quantum_coeff,
             use_cd_rom=use_cd_rom,
+            machine_freq_ghz=machine_freq_ghz,
         )
         return experiment_context
