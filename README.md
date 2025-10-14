@@ -31,7 +31,7 @@ The following packages should be installed to build QFlex
 
 ### 2. Clone repositories
 ```sh
-git clone --recursive https://github.com/parsa-epfl/qflex
+git clone --recursive git@github.com:parsa-epfl/qflex.git
 ```
 
 ### 3. Build QEMU
