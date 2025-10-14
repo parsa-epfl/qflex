@@ -130,7 +130,7 @@ class ExperimentContext(BaseModel):
     def get_vanila_qemu_build_folder(self) -> str:
         return f'{self.get_experiment_folder_address()}/qemu-saved'
     def get_pflex_qemu_build_folder(self) -> str:
-        return f'{self.get_experiment_folder_address()}/p-qemu-saved'
+        return f'{self.get_experiment_folder_address()}/parallel-qemu-saved'
     
     def set_up_image(self):
 
@@ -203,21 +203,21 @@ class ExperimentContext(BaseModel):
 
         # check that both build/qemu-system-aarch64 exists in run folder plus efi-virtio.rom
         # link all of them
-        # TODO check if rom and bios files can be linked from p-qemu-saved when using qemu
+        # TODO check if rom and bios files can be linked from parallel-qemu-saved when using qemu
         # TODO check why files are being turned into bz2
         
         run_files = [
-            "./p-qemu-saved/build/qemu-system-aarch64", 
+            "./parallel-qemu-saved/build/qemu-system-aarch64", 
             # TODO if we ever decide to change EFI and bios, this needs to change
             "./QEMU_EFI.fd", 
             "./qemu-saved/build/qemu-system-aarch64",
-            "./p-qemu-saved/pc-bios/efi-virtio.rom",
+            "./parallel-qemu-saved/pc-bios/efi-virtio.rom",
             "./qemu-img",
             "debug.cfg",
         ]
         for f in run_files:
 
-            if "p-qemu-saved/" in f:
+            if "parallel-qemu-saved/" in f:
                 # Link as the name of the file to run folder
                 link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
             elif "qemu-saved/" in f:
