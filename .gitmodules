@@ -1,26 +1,16 @@
 [submodule "flexus"]
 	path = flexus
 	url = git@github.com:parsa-epfl/flexus.git
-	branch = gitflow-cleanup-cyan-qflex-exp
+	branch = develop
 [submodule "qemu"]
 	path = qemu
 	url = git@github.com:parsa-epfl/qemu.git
 	branch = develop
-[submodule "p-qemu"]
-	path = p-qemu
-	url = git@github.com:parsa-epfl/p-qemu.git
-	branch = maintainer/cyan-pf-exp
-[submodule "WormCache"]
-	path = WormCache
-	url = git@github.com:parsa-epfl/WormCache.git
-	branch = gitflow_clean_up_unstable
-[submodule "replica"]
-	path = replica
-	url = git@github.com:parsa-epfl/replica.git
-	branch = release/micro-tutorial-with-speed-measurement
 [submodule "WormCacheQFlex"]
 	path = WormCacheQFlex
 	url = git@github.com:parsa-epfl/WormCacheQFlex.git
+	branch = develop
 [submodule "parallel-qemu"]
 	path = parallel-qemu
 	url = git@github.com:parsa-epfl/parallel-qemu.git
+	branch = develop
