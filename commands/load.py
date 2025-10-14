@@ -18,7 +18,7 @@ class Load(Executor):
         {self.qemu_common_parser.quantum_args()}
         """
     
-        # WormCache/src/parameter.rss
+        # WormCacheQFlex/src/parameter.rss
         return [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run", 
             load_cmd

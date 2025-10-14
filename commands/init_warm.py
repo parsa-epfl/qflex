@@ -38,13 +38,13 @@ class InitWarm(Executor):
     def build_worm_cache(self) -> List[str]:
         experiment_folder = self.experiment_context.get_experiment_folder_address()
         return [
-            f"cp {self.worm_params} {experiment_folder}/lib/WormCache/src/parameter.rs",
-            f"cd {experiment_folder}/lib/WormCache",
+            f"cp {self.worm_params} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",
+            f"cd {experiment_folder}/lib/WormCacheQFlex",
             # TODO check if this needs to be debug
             "cargo build --release",
             f"cd {experiment_folder}/run",
-            f"cp {experiment_folder}/lib/WormCache/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/",
-            f"cp {experiment_folder}/lib/WormCache/target/release/checkpoint_conversion {self.experiment_context.get_experiment_folder_address()}/bin/checkpoint_conversion",
+            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/",
+            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/checkpoint_conversion {self.experiment_context.get_experiment_folder_address()}/bin/checkpoint_conversion",
             #  TODO check if all needed files are copied (check main file of replica plus necessary files declared in partition.py and result.py)
         ]
     

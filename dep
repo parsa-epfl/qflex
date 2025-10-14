@@ -14,7 +14,7 @@ app = typer.Typer(
 def build_docker(
     debug: Annotated[bool, typer.Option(help="Build the Docker image in debug mode.")] = False,
     worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
-    worm_only: Annotated[bool, typer.Option(help="Re-build only the WORMCache component.")] = False,
+    worm_only: Annotated[bool, typer.Option(help="Re-build only the WormCacheQFlex component.")] = False,
     push: Annotated[bool, typer.Option(help="Push the built image to github container registery. Requires authentication.")] = False,
 ):
     """

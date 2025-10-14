@@ -27,7 +27,7 @@ RUN echo 'export RUSTUP_HOME=/home/dev/rust/rustup' >> /etc/bash.bashrc && \
 
 WORKDIR /home/dev/qflex
 
-COPY ./WormCache /home/dev/qflex/WormCache
+COPY ./WormCacheQFlex /home/dev/qflex/WormCacheQFlex
 # TODO temp fix because of not caching in the previous step 
 COPY ./qflex /home/dev/qflex/qflex
 COPY ./commands /home/dev/qflex/commands
