@@ -5,7 +5,7 @@
 [submodule "qemu"]
 	path = qemu
 	url = git@github.com:parsa-epfl/qemu.git
-	branch = gitflow-cleanup-cyan-qflex-exp
+	branch = develop
 [submodule "p-qemu"]
 	path = p-qemu
 	url = git@github.com:parsa-epfl/p-qemu.git
