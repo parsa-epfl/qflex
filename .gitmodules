@@ -21,3 +21,6 @@
 [submodule "WormCacheQFlex"]
 	path = WormCacheQFlex
 	url = git@github.com:parsa-epfl/WormCacheQFlex.git
+[submodule "parallel-qemu"]
+	path = parallel-qemu
+	url = git@github.com:parsa-epfl/parallel-qemu.git
