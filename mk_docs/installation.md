@@ -80,11 +80,11 @@ After the container starts, run:
 <!-- termynal -->
 ```bash
 
-$ python dep status
+$ ./qflex --help
 
 ```
+You should see qflex command-line options.
 
-You should see a healthy status indicating the image is running and your working directory is mounted.
 
 ---
 
