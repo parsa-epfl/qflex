@@ -354,6 +354,11 @@ def create_experiment_context(
     # assert False
     # TODO add how to create experiment name
 
+    
+    # TODO check this to make sure it doesn't have edge cases
+    mounting_folder = os.path.abspath(mounting_folder)
+    image_folder = os.path.abspath(image_folder)
+
     workload = create_workload(
         workload_name=workload_name,
         primary_core_start=primary_core_start,
@@ -403,7 +408,6 @@ def create_experiment_context(
     
 
     
-    mounting_folder = os.path.abspath(mounting_folder)
     e = ExperimentContext(
         experiment_name=experiment_name,
         image_folder=image_folder,
