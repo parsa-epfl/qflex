@@ -17,8 +17,8 @@ graph TD
   P --> RP[Run Partitions];
   RP --> R[Results];
   R --> C{Check Results};
-  C -->|Number of Samples Enough| Fi[Finished];
-  C ---->|Number of Samples Not Enough| U[Update Sample Number];
+  C -->|Number of Samples Is Enough| Fi[Finished];
+  C ---->|Number of Samples Is Not Enough| U[Update Sample Number];
   U --> CleanPartition[Clean Up Partitions, Removes Old Files];
   CleanPartition --> F;
 ```
