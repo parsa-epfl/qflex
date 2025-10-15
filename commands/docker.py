@@ -40,21 +40,35 @@ class DockerStarter(Executor):
         if not os.path.exists('./qflex'):
             binary_mount = ''
 
+        qflex_args = ''
+        if os.path.exists(f'{cwd}/qflex.args'):
+            qflex_args = f'-v {cwd}/qflex.args:/home/dev/qflex/qflex.args '
+        
+        assert os.path.exists(f'{cwd}/QEMU_EFI.fd'), "QEMU_EFI.fd file not found in the current directory."
+        assert os.path.exists(f'{cwd}/templates'), "templates folder not found in the current directory."
+        assert os.path.exists(f'{cwd}/typer_inputs'), "typer_inputs folder not found in the current directory."
+        assert os.path.exists(f'{cwd}/commands'), "commands folder not found in the current directory."
+        assert os.path.exists(f'{cwd}/partition.py'), "partition.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/result.py'), "result.py file not found in the current directory."
+        
+        micro_scripts = ''
+        if os.path.exists(f'{cwd}/micro_scripts'):
+            micro_scripts = f'-v {cwd}/micro_scripts:/home/dev/qflex/micro_scripts '
+
 
         
         # TODO remove unecessary mounts including .sh ones and micro_scripts
         return f"""
         docker run -it --entrypoint /bin/bash \
         -v {self.mounting_folder}:{self.mounting_folder} \
-        -v {cwd}/sample_scripts:/home/dev/qflex/sample_scripts \
         -v {cwd}/QEMU_EFI.fd:/home/dev/qflex/QEMU_EFI.fd \
         -v {cwd}/templates:/home/dev/qflex/templates \
         -v {cwd}/typer_inputs:/home/dev/qflex/typer_inputs \
         -v {cwd}/commands:/home/dev/qflex/commands \
-        -v {cwd}/qflex.args:/home/dev/qflex/qflex.args \
+        {qflex_args} \
         -v {cwd}/partition.py:/home/dev/qflex/partition.py \
         -v {cwd}/result.py:/home/dev/qflex/result.py \
-        -v {cwd}/micro_scripts:/home/dev/qflex/micro_scripts \
+        {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \
         {self.start_directory} \
