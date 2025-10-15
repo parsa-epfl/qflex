@@ -93,13 +93,17 @@ def initialize(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def fw(
     experiment_context: ExperimentContext,
+    sample_size: Annotated[int, typer.Option(
+        help="Sample size for the workload."
+    )],
 ):
     """
     This command performs functional warming of the simulator.
     Functional warming creates the checkpoints that will be used during the detailed simulation phase.
     """
     functional_warm_executor = FunctionalWarming(
-        experiment_context=experiment_context
+        experiment_context=experiment_context,
+        sample_size=sample_size,
     )
     functional_warm_executor.execute(to_stdio=True, run_in_background=False)
 

@@ -28,9 +28,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
         population_seconds: Annotated[float, typer.Option(
             help="Population size for the workload in seconds."
         )],
-        sample_size: Annotated[int, typer.Option(
-            help="Sample size for the workload."
-        )],
         consolidated: Annotated[bool, typer.Option(
             help="Whether the workload is consolidated or not."
         )],
@@ -98,7 +95,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
             workload_name=workload_name,
             is_consolidated=consolidated,
             population_seconds=population_seconds,
-            sample_size=sample_size,
             primary_core_start=primary_core_start,
             primary_ipc=primary_ipc,
             secondary_core_start=secondary_core_start,

@@ -82,7 +82,6 @@ Create `./qflex.args` (a.k.a. *qflex.common.args*) with **one argument per line*
 --host-name SAPHIRE
 --workload-name web-search
 --population-seconds 0.00001
---sample-size 10
 --no-consolidated
 --primary-ipc 4.2
 --primary-core-start 0
@@ -242,12 +241,13 @@ Start from the **init_warmed** snapshot created in the previous step:
 ```bash
 
 $ xargs -a ./qflex.args -- ./qflex fw \
-  --loadvm-name init_warmed
+  --loadvm-name init_warmed --sample-size 30
 
 ```
 
-- The warm length is controlled by your common args (e.g., `--population-seconds 0.00001` and `--sample-size 10`).
+- The warm length is controlled by your common args (e.g., `--population-seconds 0.00001`).
 - Output includes **checkpoints** that later stages can load to run short, timing simulation.
+- `--sample-size 30` controls how many checkpoints are created. You can adjust this number based on your needs and the results you get from the timing simulation in later steps.
 
 ---
 

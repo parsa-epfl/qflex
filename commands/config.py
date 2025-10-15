@@ -333,7 +333,6 @@ def create_experiment_context(
     primary_ipc: float,
     secondary_ipc: float,
     population_seconds: int,
-    sample_size: int,
     phantom_cpu_ipc: float,
     # experiment sections
     image_folder: str,
@@ -361,7 +360,6 @@ def create_experiment_context(
         secondary_ipc=secondary_ipc,
         phantom_cpu_ipc=phantom_cpu_ipc,
         population_seconds=population_seconds,
-        sample_size=sample_size,
         machine_freq_ghz=machine_freq_ghz,
     )
 

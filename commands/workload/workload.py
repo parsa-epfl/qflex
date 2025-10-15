@@ -24,7 +24,6 @@ class Workload(BaseModel):
     core_range: CoreRange = Field(description="Core range information for the workload")
     # TODO add some checks for the * 1000000000 conversion
     population: int = Field(description="Population size for this workload in ns.")
-    sample_size: int = Field(description="Sample size for the workload")
 
 def get_ipc_info(
     is_consolidated: bool,
@@ -59,7 +58,6 @@ def create_workload(
     secondary_ipc: float,
     phantom_cpu_ipc: float,
     population_seconds: float,
-    sample_size: int,
     machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
 ):
     ipc_info = get_ipc_info(
@@ -81,7 +79,6 @@ def create_workload(
         IPC_info=ipc_info,
         core_range=core_range,
         population=population_seconds * 1000000000,
-        sample_size=sample_size,
     )
 
 
