@@ -1,0 +1,32 @@
+{
+  "l1i_sets": 128,
+  "l1i_associativity": 8,
+
+  "l1d_sets": 128,
+  "l1d_associativity": 8,
+
+  "l2_sets": {{ L2_SET }},
+  "l2_associativity": {{ L2_WAY }},
+  "l2_slice_count": {{ CORE_COUNT }},
+
+  "itlb_sets": 1,
+  "itlb_associativity": 48,
+
+  "dtlb_sets": 1,
+  "dtlb_associativity": 48,
+
+  "stlb_sets": 1024,
+  "stlb_associativity": 4,
+  "stlb_inclusion": "Exclusive",
+
+  "directory": {
+    "type": "Standard",
+    "sets": {{ DIRECTORY_SET }},
+    "associativity": {{ DIRECTORY_WAY }}
+  },
+
+  "directory_slice_count": {{ CORE_COUNT }},
+
+  "btb_sets": 4096,
+  "btb_associativity": 4
+}

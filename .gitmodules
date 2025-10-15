@@ -1,8 +1,16 @@
 [submodule "flexus"]
 	path = flexus
 	url = git@github.com:parsa-epfl/flexus.git
-	branch = maintainer/bryan
+	branch = develop
 [submodule "qemu"]
 	path = qemu
 	url = git@github.com:parsa-epfl/qemu.git
-	branch = next
+	branch = develop
+[submodule "WormCacheQFlex"]
+	path = WormCacheQFlex
+	url = git@github.com:parsa-epfl/WormCacheQFlex.git
+	branch = develop
+[submodule "parallel-qemu"]
+	path = parallel-qemu
+	url = git@github.com:parsa-epfl/parallel-qemu.git
+	branch = develop

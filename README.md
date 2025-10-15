@@ -10,6 +10,7 @@
 
 ## [🎯 Features](#features)
 
+* 🚀 **Fast**. First class support for statistical sampling. Near-GIPS full-system server simulation.
 * 🕰 **Timing-First**. 70 KIPS cycle-accurate simulation.
 * 🗂️ **Components-based**. Create custom components.
 * ✨ **Free**. QFlex is completely free and open source.
@@ -18,67 +19,41 @@
 ## [🚀 Getting started](#getting-started)
 
 More information regarding the build system and other subsystem of
-QFlex can be found in the `docs`.
+QFlex can be found in the [documentation](https://parsa-epfl.github.io/qflex/quickstart/).
 
 ### 1. Tools
 
-The following packages should be installed to build QFlex
+The following tools should be installed to start QFlex
 
-- [GNU Compiler](https://gcc.gnu.org/) >= 13.1
-- [cmake](https://cmake.org)
-- [conan](https://conan.io)
-- [meson](https://mesonbuild.com)
+- [Python, pip](https://www.python.org/) >= 3.9
+- [docker](https://www.docker.com/)
 
 ### 2. Clone repositories
 ```sh
-git clone --recursive https://github.com/parsa-epfl/qflex
+git clone --recursive git@github.com:parsa-epfl/qflex.git
 ```
 
-### 3. Build QEMU
+### 3. Build the python requirements
+```sh
+cd qflex
+pip install -r requirements.txt
+```
+
+
+### 4. Start the docker image
 
 ```sh
-./build cq
+./dep --start-docker --worm
 ```
 
-### 4. Build Flexus
+### 5. Show the help from QFlex cli inside the docker image
 ```sh
- conan profile detect #One time only
-./build semikraken
-./build knottykraken
+./qflex --help
 ```
 
-### 5. Create symlinks
-```sh
-ln -s qemu/build/aarch64-softmmu/qemu-system-aarch64 qemu-aarch64
-```
+### 6. Follow the quick start guide
+Follow the quick start on our documentation page: [Quick Start Guide](https://parsa-epfl.github.io/qflex/quickstart/). The guide will help you start your workload and study it using QFlex. It will also help you understand how statistical sampling helps with both accuracy and speed and how to use it within QFlex.
 
-### 6. Add Images
-
-[Download a simple image](https://github.com/parsa-epfl/qflex/releases/latest/) and place it the
-repository root location.
-
-```sh
-wget https://github.com/parsa-epfl/qflex/releases/latest/download/images.tar.xz
-tar -xvf images.tar.xz
-```
-
-The repository tree under images folder should look like this.
-
-```
-images/
-├── busybox
-└── Busybox
-    ├── Image
-    ├── rootfs.ext4
-    └── rootfs.qcow2
-```
-
-### 7. Run
-```sh
-./runq images/bb # run a bare QEMU emulation
-./runq images/bb-timing # run knottykraken release version
-```
-The filesystem now contains basic tools provided by `/bin/busybox` like `ls`, `cd`, etc.
 
 ## [🏆 Contributors](#contributors)
 

@@ -1,0 +1,20 @@
+--core-count 8
+--double-cores
+--quantum-size-ns 2000
+--llc-size-per-tile-mb 2
+--parallel
+--network none
+--memory-gb 32
+--host-name ZEN3
+--workload-name web-search
+--population-seconds 5
+--no-consolidated
+--primary-ipc 2.0
+--primary-core-start 0
+--phantom-cpu-ipc 4
+--experiment-name experiment_micro001
+--image-name root.qcow2
+--image-folder /mnt/sdb/exp02/run
+--mounting-folder /mnt/sdb/exp02
+--check-period-quantum-coeff 53.0
+--no-unique --use-image-directly

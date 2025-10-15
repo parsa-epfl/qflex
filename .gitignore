@@ -1,3 +1,5 @@
+cfg/
+*.pyc
 checkpoint
 *.log
 build/
@@ -8,6 +10,9 @@ images/
 qemu-*
 .vscode/
 **/.vscode
+experiments/
+*.qcow2
+tmp_results/
 
 # Created by https://www.toptal.com/developers/gitignore/api/macos,linux,windows,archive,archives,c,c++,cmake,visualstudiocode,assembler,meson,vim
 # Edit at https://www.toptal.com/developers/gitignore?templates=macos,linux,windows,archive,archives,c,c++,cmake,visualstudiocode,assembler,meson,vim
@@ -137,6 +142,7 @@ dkms.conf
 
 # Compiled Object files
 *.slo
+qflex.args
 
 # Precompiled Headers
 
@@ -157,7 +163,6 @@ CMakeCache.txt
 CMakeFiles
 CMakeScripts
 Testing
-Makefile
 cmake_install.cmake
 install_manifest.txt
 compile_commands.json
@@ -190,7 +195,8 @@ _deps
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
+
 
 # Thumbnails
 ._*

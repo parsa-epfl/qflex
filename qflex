@@ -1,0 +1,174 @@
+#!/usr/bin/env python
+
+import typer
+from typing import Annotated
+from commands.createimage import CreateImage
+from commands.boot import Boot
+from commands.config import ExperimentContext
+from commands.load import Load
+from commands.init_warm import InitWarm
+from commands.functional_warming import FunctionalWarming
+from commands.partition import PartitionCommand, CleanPartitionCommand
+from commands.run_partition import RunPartitionCommand
+from commands.result import RunResultCommand
+from typer_inputs.config import ExperimentContextTyper
+from typer_inputs.config_wrapper import data_class_wrap
+
+app = typer.Typer(
+    name="./qflex",
+    help="A CLI tool to manage QFlex operations. (suggest running ./qflex --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
+)
+
+
+@app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
+def create_base_image(
+    image_folder: Annotated[str, typer.Option(
+        help="Where to create the image"
+    )] = ".",
+    image_name: Annotated[str,typer.Option(
+        help="Name of the base image file to create."
+    )] = "root.qcow2",
+    image_size_gb: Annotated[int, typer.Option(help="Size of the base image in GB.")] = 8 
+):
+    """
+    Create a base image for QEMU. 
+    This is the first step to create the images for an experiment.
+    """ 
+    create_image_executor = CreateImage(
+        image_folder=image_folder,
+        image_name=image_name, 
+        size_gb=image_size_gb
+    )
+    create_image_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def boot(
+    experiment_context: ExperimentContext,
+):
+    """
+    Boot a QEMU virtual machine with specified parameters.
+    Once booted, you can log in with username 'root' and no password.
+    After installing your desired packages and making changes,
+    you can save the state with Ctrl+A, then C to create a snapshot named 'base' by savevm base, 
+    then exit with Ctrl+C, then quit.
+    This is the second step to create the images for an experiment, with all the necessary packages installed.
+    """
+    boot_executor = Boot(
+        experiment_context=experiment_context,
+    )
+    boot_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def load(
+    experiment_context: ExperimentContext,
+):
+    """
+    Load a QEMU virtual machine from a snapshot with specified parameters.
+    This is done to warm up long-term microarchitectural state before functional warming starts.
+    This is the third step, to prepare for functional warming.
+    """
+    load_executor = Load(
+        experiment_context=experiment_context
+    )
+    load_executor.execute(to_stdio=True, run_in_background=False)
+
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def initialize(
+    experiment_context: ExperimentContext,
+):
+    """
+    This command initializes the long-term microarchitectural state of the simulator such as caches and TLBs.
+    This is done before functional warming starts.
+    """
+    init_warm_executor = InitWarm(
+        experiment_context=experiment_context
+    )
+    init_warm_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def fw(
+    experiment_context: ExperimentContext,
+    sample_size: Annotated[int, typer.Option(
+        help="Sample size for the workload."
+    )]=30,
+):
+    """
+    This command performs functional warming of the simulator.
+    Functional warming creates the checkpoints that will be used during the detailed simulation phase.
+    """
+    functional_warm_executor = FunctionalWarming(
+        experiment_context=experiment_context,
+        sample_size=sample_size,
+    )
+    functional_warm_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def partition(
+    experiment_context: ExperimentContext,
+    partition_count: Annotated[int, typer.Option(help="Number of partitions to create.")] = 16,
+):
+    """
+    This command partitions the functional warmup checkpoints into smaller segments for detailed (timing) simulation.
+    It also generates the necessary scripts to run the detailed simulations.
+    """
+    partition_executor = PartitionCommand(
+        experiment_context=experiment_context,
+        partition_count=partition_count,
+    )
+    partition_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def partition_cleanup(
+    experiment_context: ExperimentContext,
+):
+    """
+    This command cleans up the partition directories created by the partition command.
+    """
+    partition_cleaner_executor = CleanPartitionCommand(experiment_context=experiment_context)
+    partition_cleaner_executor.execute(to_stdio=True, run_in_background=False)
+
+
+
+# TODO add formatting for the new variables outside exp_context
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def run_partition(
+    experiment_context: ExperimentContext,
+    warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
+    measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
+):
+    """
+    This command runs the detailed (timing) simulations for each partition created by the partition command.
+    """
+    run_partition_executor = RunPartitionCommand(
+        experiment_context=experiment_context,
+        warming_ratio=warming_ratio,
+        measurement_ratio=measurement_ratio
+    )
+    run_partition_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def result(
+    experiment_context: ExperimentContext,
+):
+    """
+    This command aggregates and processes the results from the detailed simulations.
+    It generates a core_info.csv file with the simulation results.
+    """
+    run_result_executor = RunResultCommand(
+        experiment_context=experiment_context,
+    )
+    run_result_executor.execute(to_stdio=True, run_in_background=False)
+
+
+
+if __name__ == "__main__":
+    app()

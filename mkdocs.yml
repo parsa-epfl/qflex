@@ -1,0 +1,49 @@
+site_name: QFlex
+docs_dir: mk_docs
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - content.code.copy
+    - toc.follow
+  logo: logo/qflex_logo.svg        # optional
+  favicon: logo/qflex_logo.svg  # optional
+
+plugins:
+  - search
+  - mermaid2
+  - termynal:
+      prompt_literal_start:
+        - "$"
+        - "(qemu)"
+
+markdown_extensions:
+  - meta
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.tabbed:
+      alternate_style: true
+  - mkdocs-click
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Docker: reference/docker.md
+  - CLI: reference/qflex.md
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+
+
+watch:
+  - mk_docs
+  - docs_shim
