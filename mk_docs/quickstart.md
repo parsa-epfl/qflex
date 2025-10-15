@@ -17,9 +17,9 @@ graph TD
   P --> RP[Run Partitions];
   RP --> R[Results];
   R --> C{Check Results};
-  C -->|Variance is low| Fi[Finished];
-  C ---->|Variance is high| U[Update Sample Number];
-  U --> CleanPartition[Clean up partitions, removes old files];
+  C -->|Number of Samples Enough| Fi[Finished];
+  C ---->|Number of Samples Not Enough| U[Update Sample Number];
+  U --> CleanPartition[Clean Up Partitions, Removes Old Files];
   CleanPartition --> F;
 ```
 By the end of this tutorial, you will have run through the entire workflow of statistical sampling. You will also learn why each step is necessary.
