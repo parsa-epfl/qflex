@@ -79,20 +79,19 @@ Create `./qflex.args` (a.k.a. *qflex.common.args*) with **one argument per line*
 --parallel
 --network none
 --memory-gb 32
---host-name SAPHIRE
+--host-name ZEN3
 --workload-name web-search
---population-seconds 0.00001
+--population-seconds 5
 --no-consolidated
---primary-ipc 4.2
+--primary-ipc 2.0
 --primary-core-start 0
---phantom-cpu-ipc 8
---experiment-name experiment004
+--phantom-cpu-ipc 4
+--experiment-name experiment_name_001
 --image-name root.qcow2
---image-folder <MOUNT_DIR>
---working-directory <MOUNT_DIR>
---check-period-quantum-coeff 2
---no-unique
---use-image-directly
+--image-folder <MOUNT_DIR>/<IMAGE_DIR>
+--mounting-folder <MOUNT_DIR>
+--check-period-quantum-coeff 53.0
+--no-unique --use-image-directly
 ```
 
 !!! tip "Inline flags are possible, but"
