@@ -4,7 +4,7 @@
   <br/>
   <img width="600" alt="QFlex" src="docs/readme-assets/qflex_logo.svg"/>
   <br/>
-  <b><a href="https://github.com/parsa-epfl/qflex/tree/main/docs">Documentation</a></b> | <b><a href="https://github.com/parsa-epfl/qflex">GitHub</a></b> | <b><a href="https://qflex.epfl.ch">Website</a></b>
+  <b><a href="https://parsa-epfl.github.io/qflex/quickstart/">Documentation</a></b> | <b><a href="https://github.com/parsa-epfl/qflex">GitHub</a></b> | <b><a href="https://qflex.epfl.ch">Website</a></b>
   <br/><br/>
 </p>
 

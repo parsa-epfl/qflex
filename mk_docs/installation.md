@@ -27,7 +27,7 @@ Follow these steps to set up the CLI and start the Docker image.
 <!-- termynal -->
 ``` bash
 
-$ git clone --branch gitflow-clean-up-cyan-qflex-exp git@github.com:parsa-epfl/qflex.git
+$ git clone --recursive git@github.com:parsa-epfl/qflex.git
 $ cd qflex
 
 ```
