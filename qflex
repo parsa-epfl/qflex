@@ -95,7 +95,7 @@ def fw(
     experiment_context: ExperimentContext,
     sample_size: Annotated[int, typer.Option(
         help="Sample size for the workload."
-    )],
+    )]=30,
 ):
     """
     This command performs functional warming of the simulator.
