@@ -2,9 +2,9 @@ name: gh-pages-build
 
 on:
   push:
-    branches: [ "gitflow-clean-up-cyan-qflex-exp" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "gitflow-clean-up-cyan-qflex-exp" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
