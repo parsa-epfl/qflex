@@ -44,7 +44,9 @@ Before booting, create a base image in the **same directory** you use for `--ima
 ### Command
 <!-- termynal -->
 ```bash
+
 $ ./qflex create-base-image --image-folder <YOUR_FOLDER>
+
 ```
 
 - Set `<YOUR_FOLDER>` to the path you use in `qflex.args`:
