@@ -190,6 +190,9 @@ class ExperimentContext(BaseModel):
         if not os.path.exists(f"{self.get_experiment_folder_address()}/run/{self.image_name}"):
             if not os.path.exists(self.get_local_image_address()):
                 raise FileNotFoundError(f"Error: Image file {self.get_local_image_address()} not found.")
+            # TODO see why sys link could fail here
+            # TODO see if we even need this image
+            os.system(f"rm -f {self.get_experiment_folder_address()}/run/{self.image_name}")
             os.symlink(self.get_local_image_address(), f"{self.get_experiment_folder_address()}/run/{self.image_name}")
 
         root_sls = [
