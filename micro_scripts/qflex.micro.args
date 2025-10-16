@@ -12,9 +12,9 @@
 --primary-ipc 2.0
 --primary-core-start 0
 --phantom-cpu-ipc 4
---experiment-name experiment_micro004
+--experiment-name experiment_micro
 --image-name root.qcow2
---image-folder ./images
---mounting-folder ./
+--image-folder ../images
+--mounting-folder ../
 --check-period-quantum-coeff 53.0
 --no-unique --use-image-directly
