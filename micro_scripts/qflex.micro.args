@@ -14,7 +14,7 @@
 --phantom-cpu-ipc 4
 --experiment-name experiment_micro
 --image-name root.qcow2
---image-folder ../images
+--image-folder ../
 --mounting-folder ../
 --check-period-quantum-coeff 53.0
 --no-unique --use-image-directly
