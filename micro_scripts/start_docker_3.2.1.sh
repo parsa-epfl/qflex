@@ -10,7 +10,7 @@ docker run -it --entrypoint /bin/bash \
     -w /home/dev/qflex/micro_scripts \
     --security-opt seccomp=unconfined \
     --cap-add SYS_PTRACE \
-    ghcr.io/parsa-epfl/qflex:qflex-worm-release-3.2.1 -c "mkdir -p /home/dev/exp01/lib && cp /home/dev/qflex/kraken_out/* /home/dev/exp01/lib && mkdir -p /home/dev/exp02/lib && cp /home/dev/qflex/kraken_out/* /home/dev/exp02/lib  && bash"
+    ghcr.io/parsa-epfl/qflex:qflex-worm-release-3.2.1 -c "rm -rf /home/dev/exp01/lib && mkdir -p /home/dev/exp01/lib && cp /home/dev/qflex/kraken_out/* /home/dev/exp01/lib && rm -rf /home/dev/exp02/lib && mkdir -p /home/dev/exp02/lib && cp /home/dev/qflex/kraken_out/* /home/dev/exp02/lib  && bash"
 
 
 
