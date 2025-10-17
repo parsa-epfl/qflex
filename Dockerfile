@@ -61,6 +61,8 @@ ARG MODE=release
 
 WORKDIR /home/dev/qflex
 
+
+# TODO add a check later to make sure qflex folder it self is never mounted, as we need the binaries, or change where they are craeted
 # TODO address the two qemu versions
 RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw conan profile detect --force && \
     conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out -b missing && \
