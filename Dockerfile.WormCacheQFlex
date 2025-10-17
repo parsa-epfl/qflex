@@ -34,8 +34,8 @@ COPY ./commands /home/dev/qflex/commands
 
 # TODO temp fix for micro for old imports
 RUN mkdir /qflex
-RUN ln -s /qflex/qemu-saved /qflex/qemu-saved
-RUN ln -s /qflex/p-qemu-saved /qflex/parallel-qemu-saved
+RUN ln -s /home/dev/qflex/qemu-saved /qflex/qemu-saved 
+RUN ln -s /home/dev/qflex/parallel-qemu-saved /qflex/p-qemu-saved 
 
 CMD ["bash"]
 
