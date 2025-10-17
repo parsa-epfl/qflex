@@ -32,6 +32,11 @@ COPY ./WormCacheQFlex /home/dev/qflex/WormCacheQFlex
 COPY ./qflex /home/dev/qflex/qflex
 COPY ./commands /home/dev/qflex/commands
 
+# TODO temp fix for micro for old imports
+RUN mkdir /qflex
+RUN ln -s /qflex/qemu-saved /qflex/qemu-saved
+RUN ln -s /qflex/p-qemu-saved /qflex/parallel-qemu-saved
+
 CMD ["bash"]
 
 
