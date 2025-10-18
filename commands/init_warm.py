@@ -8,19 +8,28 @@ from .jinja_loaders import wormloader, FlexusCheckpointConfigLoader, TimingLoade
 class InitWarm(Executor):
 
     def __init__(self,
-                 experiment_context: ExperimentContext,):
+                 experiment_context: ExperimentContext,
+                 generate_cfg: bool = True):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
-        self.worm_parameter_loader = wormloader.WormConfigLoader(
-            experiment_context=experiment_context
-        )
-        self.flexus_configuration_loader = FlexusCheckpointConfigLoader(
-            experiment_context=experiment_context
-        )
-        self.timing_loader = TimingLoader(
-            experiment_context=experiment_context
-        )
+
+        if generate_cfg:
+            self.worm_parameter_loader = wormloader.WormConfigLoader(
+                experiment_context=experiment_context
+            )
+            self.flexus_configuration_loader = FlexusCheckpointConfigLoader(
+                experiment_context=experiment_context
+            )
+            self.timing_loader = TimingLoader(
+                experiment_context=experiment_context
+            )
+
+            self.worm_params = self.worm_parameter_loader.load_parameters()
+            self.flexus_config = self.flexus_configuration_loader.load_parameters()
+            self.timing_config = self.timing_loader.load_parameters()
+        else:
+            print("Skipping configuration generation as per user request. Please make sure all necessary configuration files are present in cfg folder.")
 
         # TODO potential problem that the potential script is created at the init_warm stage change later and move to partition file
         self.flexus_script_loader = FlexusScriptLoader(
@@ -29,10 +38,6 @@ class InitWarm(Executor):
         self.flexus_script = self.flexus_script_loader.load_parameters()
 
 
-
-        self.worm_params = self.worm_parameter_loader.load_parameters()
-        self.flexus_config = self.flexus_configuration_loader.load_parameters()
-        self.timing_config = self.timing_loader.load_parameters()
 
 
     def build_worm_cache(self) -> List[str]:
