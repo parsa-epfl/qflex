@@ -371,13 +371,6 @@ def create_experiment_context(
         machine_freq_ghz=machine_freq_ghz,
     )
 
-    # TODO turn this into debug prints
-    print("=========== Scaling factor based on max IPC and machine frequency: ", workload.IPC_info.scaling_factor, " ===========")
-    quantum_size = int(quantum_size * workload.IPC_info.scaling_factor)
-    population_seconds = int(population_seconds * workload.IPC_info.scaling_factor)
-    print("=========== Adjusted quantum size: ", quantum_size, " ===========")
-    print("=========== Adjusted population seconds: ", population_seconds, " ===========")
-
     if image_name is None:
         image_name = f"root.qcow2"
 

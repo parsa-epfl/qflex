@@ -7,6 +7,8 @@ docker run -it --entrypoint /bin/bash \
     -v $parent/qflex/micro_scripts:/home/dev/qflex/micro_scripts \
     -v $parent/../exp02:/home/dev/exp02 \
     -v $parent/../exp01:/home/dev/exp01 \
+    -v $parent/qflex/micro_scripts:/home/dev/qflex/micro_scripts \
+    -v $parent/qflex/commands:/home/dev/qflex/commands \
     -w /home/dev/qflex/micro_scripts \
     --security-opt seccomp=unconfined \
     --cap-add SYS_PTRACE \
