@@ -73,6 +73,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         )] = 53.0,
         use_cd_rom: Annotated[bool, typer.Option(help="Whether to use a CD-ROM for initial setup.")]=False,
         machine_freq_ghz: Annotated[float, typer.Option(help="Machine frequency in GHz.")]=2.0,
+        include_affinity: Annotated[bool, typer.Option(
+            help="Whether or not generate affinity index in core_info.csv."
+        )]=False,
     ):
         print("quantum_size_ns:", quantum_size_ns)
         if unique:
@@ -108,5 +111,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
             check_period_quantum_coeff=check_period_quantum_coeff,
             use_cd_rom=use_cd_rom,
             machine_freq_ghz=machine_freq_ghz,
+            include_affinity=include_affinity
         )
         return experiment_context

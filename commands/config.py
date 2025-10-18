@@ -113,6 +113,7 @@ class ExperimentContext(BaseModel):
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
+    include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
 
     def get_mounting_folder(self) -> str:
         return self.mounting_folder
@@ -301,7 +302,10 @@ class ExperimentContext(BaseModel):
         # Check if file exists, if it does not exist create a default one
         target = f'{self.get_experiment_folder_address()}/cfg/core_info.csv'
         if not os.path.exists(target):
-            df = pandas.DataFrame([[ipns_info.ipns, ipns_info.core_index] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
+            if self.include_affinity:
+                df = pandas.DataFrame([[ipns_info.ipns, ipns_info.core_index] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
+            else:
+                df = pandas.DataFrame([[ipns_info.ipns] for ipns_info in self.get_ipns_per_core()], columns=["ipns"])
             df.to_csv(target, index=False)
         else:
             print(f"============== core_info.csv already exists at {target}, not overwriting it. ==============")
@@ -350,6 +354,7 @@ def create_experiment_context(
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
     machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
+    include_affinity: bool = False
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -412,7 +417,8 @@ def create_experiment_context(
         mounting_folder=mounting_folder,
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
-        loadvm_name=loadvm_name
+        loadvm_name=loadvm_name,
+        include_affinity=include_affinity
     )
 
     e.set_up_folders()
