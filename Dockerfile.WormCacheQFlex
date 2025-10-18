@@ -36,6 +36,7 @@ COPY ./commands /home/dev/qflex/commands
 RUN mkdir /qflex
 RUN ln -s /home/dev/qflex/qemu-saved /qflex/qemu-saved 
 RUN ln -s /home/dev/qflex/parallel-qemu-saved /qflex/p-qemu-saved 
+COPY ./micro_scripts /home/dev/qflex/micro_scripts
 
 CMD ["bash"]
 
