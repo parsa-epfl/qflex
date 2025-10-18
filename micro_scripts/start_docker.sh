@@ -1,5 +1,7 @@
 pushd ..
 
+docker pull ghcr.io/parsa-epfl/qflex:qflex-worm-release-3.2.1
+
 parent=$(realpath $PWD/..)
 docker run -it --entrypoint /bin/bash \
     -v $parent/experiments/:/home/dev/experiments \
