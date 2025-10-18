@@ -79,13 +79,17 @@ def load(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def initialize(
     experiment_context: ExperimentContext,
+    skip_generate_cfg: Annotated[bool, typer.Option(
+        help="Whether to skip generating configuration files."
+    )]=False,
 ):
     """
     This command initializes the long-term microarchitectural state of the simulator such as caches and TLBs.
     This is done before functional warming starts.
     """
     init_warm_executor = InitWarm(
-        experiment_context=experiment_context
+        experiment_context=experiment_context,
+        skip_generate_cfg=skip_generate_cfg,
     )
     init_warm_executor.execute(to_stdio=True, run_in_background=False)
 

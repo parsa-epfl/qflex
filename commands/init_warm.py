@@ -9,12 +9,12 @@ class InitWarm(Executor):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 generate_cfg: bool = True):
+                 skip_generate_cfg: bool = False):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
 
-        if generate_cfg:
+        if not skip_generate_cfg:
             self.worm_parameter_loader = wormloader.WormConfigLoader(
                 experiment_context=experiment_context
             )
