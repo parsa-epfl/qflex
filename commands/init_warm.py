@@ -1,9 +1,9 @@
+import os
 from commands import Executor
 from .config import ExperimentContext
 from commands.qemu import QemuCommonArgParser
 from typing import List
 from .jinja_loaders import wormloader, FlexusCheckpointConfigLoader, TimingLoader, FlexusScriptLoader
-
 
 class InitWarm(Executor):
 
@@ -14,6 +14,8 @@ class InitWarm(Executor):
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
 
+        experiment_folder = self.experiment_context.get_experiment_folder_address()
+        self.worm_params_address = f"{experiment_folder}/cfg/parameter.rs"
         if not skip_generate_cfg:
             self.worm_parameter_loader = wormloader.WormConfigLoader(
                 experiment_context=experiment_context
@@ -26,10 +28,12 @@ class InitWarm(Executor):
             )
 
             self.worm_params = self.worm_parameter_loader.load_parameters()
+            assert self.worm_params_address == self.worm_params, "Worm parameter file path mismatch"
             self.flexus_config = self.flexus_configuration_loader.load_parameters()
             self.timing_config = self.timing_loader.load_parameters()
         else:
             print("Skipping configuration generation as per user request. Please make sure all necessary configuration files are present in cfg folder.")
+            assert os.path.exists(self.worm_params_address), "Worm parameter file does not exist, cannot skip generation."
 
         # TODO potential problem that the potential script is created at the init_warm stage change later and move to partition file
         self.flexus_script_loader = FlexusScriptLoader(
@@ -43,7 +47,7 @@ class InitWarm(Executor):
     def build_worm_cache(self) -> List[str]:
         experiment_folder = self.experiment_context.get_experiment_folder_address()
         return [
-            f"cp {self.worm_params} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",
+            f"cp {self.worm_params_address} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",
             f"cd {experiment_folder}/lib/WormCacheQFlex",
             # TODO check if this needs to be debug
             "cargo build --release",
