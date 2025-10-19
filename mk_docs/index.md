@@ -15,7 +15,7 @@ The QFlex project targets quick, accurate, and flexible simulation of multi-node
 
 - QFlex’s source code is hosted on **GitHub**: [parsa-epfl/qflex](https://github.com/parsa-epfl/qflex)  
 - QFlex is available both as a **command-line tool (CLI)** and as a **Docker image**, making setup and integration straightforward.  
-- For more details on installation, usage, and configuration, visit the [CLI documentation](reference/cli/).
+- For a quick start, visit the [quickstart section](quickstart).
 
 ---
 
