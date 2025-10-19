@@ -5,7 +5,7 @@ title: QFlex — Quick & Flexible Computer Architecture Simulation
 # QFlex | Quick & Flexible Computer Architecture Simulation
 
 State-of-the-art modeling tools for the computer architecture community.  
-The QFlex project targets quick, accurate, and flexible simulation of multi-node computer systems.
+The QFlex project targets quick, accurate, and flexible simulation of computer systems.
 
 ![QFlex Overview](logo/qflex_overview_scheme.jpg)
 
