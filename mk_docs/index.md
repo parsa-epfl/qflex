@@ -23,13 +23,13 @@ The QFlex project targets quick, accurate, and flexible simulation of multi-node
 
 Computer system designers traditionally rely on fast emulation and full-system simulation to instrument designs, develop system software, model hardware components, and measure metrics of interest. In recent years, post-Moore platforms have introduced more heterogeneity (e.g. accelerators), demanding integrated hardware/software co-design.
 
-Effective integration requires open tools to allow fast instrumentation of applications, full-system models for network and storage controllers, and support for multi-node systems. Full-system server instrumentation needs several orders of magnitude in speed to be practical.
+Effective integration requires open tools to allow fast instrumentation of applications, full-system models for network and storage controllers. Full-system server instrumentation needs several orders of magnitude in speed to be practical.
 
-QFlex is a family of full-system instrumentation tools built on top of QEMU, currently supporting **ARM** and **RISC-V** ISAs. It includes:
+QFlex is a family of full-system instrumentation tools built on top of QEMU, currently supporting **ARM** ISA. It includes:
 
 - A **trace-based model** for quickly instrumenting existing QEMU images  
 - **Timing models** to simulate multicore CPU microarchitecture  
-- Support for multi-node simulation and system stacks
+- With support for multi-node simulation coming soon.
 
 For more details, modules, and citations, see the project documentation and the GitHub repo.
 

@@ -2,9 +2,9 @@ name: gh-pages-build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "website" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main" , "website" ]
   workflow_dispatch:
 
 jobs:
