@@ -21,11 +21,7 @@ The QFlex project targets quick, accurate, and flexible simulation of computer s
 
 ## About QFlex
 
-Computer system designers traditionally rely on fast emulation and full-system simulation to instrument designs, develop system software, model hardware components, and measure metrics of interest. In recent years, post-Moore platforms have introduced more heterogeneity (e.g. accelerators), demanding integrated hardware/software co-design.
-
-Effective integration requires open tools to allow fast instrumentation of applications, full-system models for network and storage controllers. Full-system server instrumentation needs several orders of magnitude in speed to be practical.
-
-QFlex is a family of full-system instrumentation tools built on top of QEMU, currently supporting **ARM** ISA. It includes:
+Computer systems hardware and software designers have traditionally relied on fast emulation and full-system simulation to instrument a design of interest, develop and debug system software, model new hardware components and measure design metrics of interest. Post-Moore platforms in recent years have not only seen a proliferation of accelerators but also the need for system hardware/software co-design to help integrate heterogeneity into the system stack. Effective integration requires open-source tools that enable fast instrumentation of application and system software, full-system models for network and storage controllers, and models of multi-node computer systems. Full-system server instrumentation and modeling requires several orders of magnitude in speed to enable practical turnaround. QFlex is a family of full-system instrumentation tools based on QEMU which currently supports the ARM and RISC-V ISA. QFlex includes a trace-based model to quickly instrument existing QEMU images, and timing models to simulate multi-core CPUs in detail. It includes:
 
 - A **trace-based model** for quickly instrumenting existing QEMU images  
 - **Timing models** to simulate multicore CPU microarchitecture  
