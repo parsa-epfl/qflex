@@ -44,16 +44,18 @@ class QemuCommonArgParser:
         
     def get_qemu_base_args(self) -> str:
 
+        # {self.nic_command} \
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores} \
         -cpu max,pauth=off -m {self.memory_size_mb} \
         -boot order=d,menu=on \
         -bios ./QEMU_EFI.fd \
         -drive if=virtio,file={self.image_address},format=qcow2 \
-        {self.nic_command} \
         -rtc clock=vm \
         {self.loadvm} \
         {self.cd_rom} \
+        -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
+        -device e1000,netdev=net0 \
         -nographic -no-reboot"""
         print("="*50+"QEMU command arguments:"+"="*50)
         print(qemu_args)

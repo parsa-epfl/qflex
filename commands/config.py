@@ -216,6 +216,7 @@ class ExperimentContext(BaseModel):
             "./QEMU_EFI.fd", 
             "./qemu-saved/build/qemu-system-aarch64",
             "./parallel-qemu-saved/pc-bios/efi-virtio.rom",
+            "./parallel-qemu-saved/pc-bios/efi-e1000.rom",
             "./qemu-img",
             "debug.cfg",
         ]

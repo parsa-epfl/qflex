@@ -173,6 +173,22 @@ def result(
     run_result_executor.execute(to_stdio=True, run_in_background=False)
 
 
+from commands.multinode import Multi
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def multi(
+    experiment_context: ExperimentContext,
+):
+    """
+    Placeholder for future multi-node functionality.
+    """
+    multi_executor = Multi(
+        experiment_context=experiment_context,
+    )
+    multi_executor.execute(to_stdio=True, run_in_background=False)
+    
+
 
 if __name__ == "__main__":
     app()

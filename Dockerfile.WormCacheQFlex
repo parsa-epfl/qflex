@@ -27,6 +27,11 @@ RUN echo 'export RUSTUP_HOME=/home/dev/rust/rustup' >> /etc/bash.bashrc && \
 
 WORKDIR /home/dev/qflex
 
+RUN apt-get update && apt-get install -y \
+    iproute2 \
+    qemu-system-x86 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY ./WormCacheQFlex /home/dev/qflex/WormCacheQFlex
 # TODO temp fix because of not caching in the previous step 
 COPY ./qflex /home/dev/qflex/qflex

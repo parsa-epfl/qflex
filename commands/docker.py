@@ -68,9 +68,11 @@ class DockerStarter(Executor):
         {qflex_args} \
         -v {cwd}/partition.py:/home/dev/qflex/partition.py \
         -v {cwd}/result.py:/home/dev/qflex/result.py \
+        -v {cwd}/multi-node-scripts/:/home/dev/qflex/multi-node-scripts \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \
+        --cap-add=NET_ADMIN --device=/dev/net/tun  \
         {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
