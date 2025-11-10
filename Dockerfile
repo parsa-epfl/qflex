@@ -42,6 +42,7 @@ RUN apt install -y --no-install-recommends zstd
 RUN apt install -y --no-install-recommends vim
 RUN apt install -y --no-install-recommends tmux
 RUN apt install -y --no-install-recommends htop
+RUN apt install -y qemu-system-x86 qemu-utils cloud-image-utils genisoimage libguestfs-tools expect telnet
 
 RUN apt-get update && apt-get install -y \
     iproute2 \
