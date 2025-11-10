@@ -114,6 +114,7 @@ class ExperimentContext(BaseModel):
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
+    node_number: int = Field(default=-1, description="Node number in multi-node setup, -1 means single node.")
 
     def get_mounting_folder(self) -> str:
         return self.mounting_folder
@@ -166,6 +167,20 @@ class ExperimentContext(BaseModel):
                 # Create a symlink to the new image in the experiment folder
                 os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
                 print(f"Linked image to")
+            
+        if self.node_number >=0:
+            print(f"Setting up node-specific image for node {self.node_number}...")
+            old_address = self.image_address
+
+            image_name_parts = self.image_name.split('.')
+            new_image_name = '.'.join(image_name_parts[:-1]) + f'-node{self.node_number}.' + image_name_parts[-1]
+            self.image_address = self.image_address.replace(self.image_name, new_image_name)
+            self.image_name = new_image_name
+            
+            if not os.path.exists(self.image_address):
+                print(f"Creating node-specific image for node {self.node_number}...")
+                os.system(f"cp -u {old_address} {self.image_address}")
+            print(f"Node-specific image address: {self.image_address}")
 
             
 
@@ -355,7 +370,8 @@ def create_experiment_context(
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
     machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
-    include_affinity: bool = False
+    include_affinity: bool = False,
+    node_number: int = -1,
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -419,7 +435,8 @@ def create_experiment_context(
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
-        include_affinity=include_affinity
+        include_affinity=include_affinity,
+        node_number=node_number,
     )
 
     e.set_up_folders()

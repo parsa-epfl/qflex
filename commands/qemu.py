@@ -2,7 +2,8 @@ import os
 from commands.config import ExperimentContext
 
 class QemuCommonArgParser:
-    def __init__(self, experiment_context: ExperimentContext):
+    def __init__(self, 
+                 experiment_context: ExperimentContext):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.image_address = self.experiment_context.get_local_image_address()
@@ -14,12 +15,25 @@ class QemuCommonArgParser:
             self.core_coeff = 2
 
         
-        
+        self.node_number = self.experiment_context.node_number
+
         self.nic_command = self.experiment_context.simulation_context.qemu_nic.strip().lower()
+
+        self.monitor_port = 55555
+        if self.node_number >=0:
+            self.monitor_port += self.node_number
+
+        if self.node_number >=0:
+            # self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0"""
+            # TODO 56 + needs to change
+            self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
+
+        # TEMP TODO change it for a specific part:
+        self.internet_nic = '-netdev user,id=net1 -device e1000,netdev=net1'
 
         self.loadvm = ''
         if self.experiment_context.loadvm_name is not None and len(self.experiment_context.loadvm_name) > 0:
-            self.loadvm = f'-loadvm {self.experiment_context.loadvm_name}'
+            self.loadvm = f' -loadvm {self.experiment_context.loadvm_name}'
     
         check_period_quantum_coeff = self.simulation_context.check_period_quantum_coeff
         self.quantum_command = ''
@@ -44,18 +58,22 @@ class QemuCommonArgParser:
         
     def get_qemu_base_args(self) -> str:
 
-        # {self.nic_command} \
+        # TODO REMOVE the hardcoded drive 
+        # TODO remove second seed file
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores} \
         -cpu max,pauth=off -m {self.memory_size_mb} \
         -boot order=d,menu=on \
         -bios ./QEMU_EFI.fd \
         -drive if=virtio,file={self.image_address},format=qcow2 \
+        -drive if=virtio,file=/home/dev/qflex/multi-node-scripts/seed{self.node_number}.qcow2,format=qcow2 \
         -rtc clock=vm \
         {self.loadvm} \
         {self.cd_rom} \
-        -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
-        -device e1000,netdev=net0 \
+        {self.nic_command} \
+        {self.internet_nic} \
+        -serial stdio \
+        -monitor telnet:127.0.0.1:{self.monitor_port},server,nowait \
         -nographic -no-reboot"""
         print("="*50+"QEMU command arguments:"+"="*50)
         print(qemu_args)

@@ -7,9 +7,11 @@ from commands.qemu import QemuCommonArgParser
 class Multi(Executor):
 
     def __init__(self, 
-                 experiment_context: ExperimentContext):
+                 experiment_context: ExperimentContext,):
         self.experiment_context = experiment_context
-        self.qemu_common_parser = QemuCommonArgParser(experiment_context)
+        self.qemu_common_parser = QemuCommonArgParser(
+            experiment_context,
+        )
 
     def cmd(self) -> str:
         
@@ -18,8 +20,10 @@ class Multi(Executor):
         {self.qemu_common_parser.get_qemu_base_args()}
         """
 
+        print(f"{boot_cmd}")
 
-        return [            
+
+        return [    
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             boot_cmd
         ]

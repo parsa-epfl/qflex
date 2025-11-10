@@ -76,6 +76,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         include_affinity: Annotated[bool, typer.Option(
             help="Whether or not generate affinity index in core_info.csv."
         )]=False,
+        node_number: Annotated[int, typer.Option(
+            help="Node number in multi-node setup, -1 means single node."
+        )]=-1,
     ):
         print("quantum_size_ns:", quantum_size_ns)
         if unique:
@@ -111,6 +114,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
             check_period_quantum_coeff=check_period_quantum_coeff,
             use_cd_rom=use_cd_rom,
             machine_freq_ghz=machine_freq_ghz,
-            include_affinity=include_affinity
+            include_affinity=include_affinity,
+            node_number=node_number,
         )
         return experiment_context
