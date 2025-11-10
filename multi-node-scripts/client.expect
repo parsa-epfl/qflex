@@ -1,0 +1,44 @@
+set timeout 1000
+
+spawn xargs -a ./multi-node-scripts/qflex.multinode.args -- ./qflex multi --node-number 1 --loadvm-name boot
+set qemu_stdio2 $spawn_id
+send  -i $qemu_stdio2 -- "\r\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "ip link show \r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "ip addr add 192.168.100.2/24 dev enp0s1 \r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "ip link set enp0s1 up \r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "ip addr show enp0s1 \r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+
+# the following is because client and server for now have shared vm state
+send  -i $qemu_stdio2 -- "ip link set enp0s1 down\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "ip link set enp0s1 address 52:54:00:12:34:57\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "ip link set enp0s1 up\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "ip addr add 192.168.100.2/24 dev enp0s1\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+
+
+# Send message from VM2
+send -i $qemu_stdio2 -- "ping -c 2 192.168.100.1 \r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "echo 'Hello from VM2!' | nc -q 0 192.168.100.1 5555 \r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+
+send  -i $qemu_stdio2 -- "echo 'going back to client'  \r\r\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+# VM2 should return to prompt after sending
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+# Now both VMs should be back at their prompts
+send  -i $qemu_stdio2 -- "echo 'Test complete on VM2'\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}

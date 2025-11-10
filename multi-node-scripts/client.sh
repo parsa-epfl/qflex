@@ -3,7 +3,7 @@
 
 pushd ..
 
-ln -s ./multi-node-scripts/client.exp  client.exp
-expect client.exp
+ln -s ./multi-node-scripts/client.expect  client.expect
+expect client.expect
 
 popd

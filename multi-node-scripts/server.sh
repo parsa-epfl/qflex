@@ -3,7 +3,7 @@
 
 pushd ..
 
-ln -s ./multi-node-scripts/server.exp  server.exp
-expect server.exp
+ln -s ./multi-node-scripts/server.expect  server.expect
+expect server.expect
 
 popd
