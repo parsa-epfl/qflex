@@ -13,7 +13,7 @@
 --primary-core-start 0
 --phantom-cpu-ipc 4
 --experiment-name multi_node_experiment
---image-name root.qcow2
+--image-name ubuntu-22.04-server-cloudimg-arm64.img
 --image-folder /mnt/sdb/pooria-multi-node/
 --mounting-folder /mnt/sdb/pooria-multi-node/
 --check-period-quantum-coeff 53.0

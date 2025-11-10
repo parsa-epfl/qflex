@@ -1,0 +1,20 @@
+#cloud-config
+disable_root: false
+chpasswd:
+  list: |
+    root:root
+  expire: False
+
+# Your script
+write_files:
+  - path: /root/test.sh
+    content: |
+      #!/bin/bash
+      echo "Hello from script test"
+      echo =============== hello from the other side XD test ================
+      # Your commands here
+    permissions: '0755'
+  
+
+runcmd:
+  - /root/test.sh
