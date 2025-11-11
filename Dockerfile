@@ -42,7 +42,7 @@ RUN apt install -y --no-install-recommends zstd
 RUN apt install -y --no-install-recommends vim
 RUN apt install -y --no-install-recommends tmux
 RUN apt install -y --no-install-recommends htop
-RUN apt install -y qemu-system-x86 qemu-utils cloud-image-utils genisoimage libguestfs-tools expect telnet
+RUN apt-get install -y expect telnet
 
 RUN apt-get update && apt-get install -y \
     iproute2 \
@@ -67,38 +67,6 @@ ARG MODE=release
 WORKDIR /home/dev/qflex
 
 
-# TODO add a check later to make sure qflex folder it self is never mounted, as we need the binaries, or change where they are craeted
-# TODO address the two qemu versions
-RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw conan profile detect --force && \
-    conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out -b missing && \
-    conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /home/dev/qflex/out -b missing && \
-    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out && \
-    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /home/dev/qflex/out && \
-    conan cache clean -v && \
-    conan remove -c "*" && \
-    ./build cq ${MODE} && \
-    python3 build-multiple-kraken_vanilla.py \
-    mkdir /home/dev/qflex/kraken_out && \
-    cp -r out/lib/Release /home/dev/qflex/kraken_out && \
-    rm -rf out && \
-    mkdir qemu-saved && \
-    cp -r /home/dev/qflex/qemu/pc-bios /home/dev/qflex/qemu-saved/pc-bios && \
-    cp -r /home/dev/qflex/qemu/build /home/dev/qflex/qemu-saved/build
-
-RUN --mount=type=bind,source=./parallel-qemu,target=/home/dev/qflex/parallel-qemu,rw cd parallel-qemu && \
-    ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
-    ninja -C build && \
-    mkdir /home/dev/qflex/parallel-qemu-saved && \
-    cp -r /home/dev/qflex/parallel-qemu/pc-bios /home/dev/qflex/parallel-qemu-saved/pc-bios && \
-    cp -r /home/dev/qflex/parallel-qemu/build /home/dev/qflex/parallel-qemu-saved/build
-
-
-
-
-WORKDIR /home/dev/qflex
-# Post-build file link
-RUN ln -s /home/dev/qflex/parallel-qemu-saved/build/aarch64-softmmu/qemu-system-aarch64 /home/dev/qflex/qemu-aarch64
-RUN ln -s /home/dev/qflex/parallel-qemu-saved/build/qemu-img /home/dev/qflex/qemu-img
 
 RUN pip install -r requirements.txt
 COPY  ./commands /home/dev/qflex/commands

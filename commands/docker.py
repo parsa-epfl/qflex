@@ -65,9 +65,11 @@ class DockerStarter(Executor):
         -v {cwd}/templates:/home/dev/qflex/templates \
         -v {cwd}/typer_inputs:/home/dev/qflex/typer_inputs \
         -v {cwd}/commands:/home/dev/qflex/commands \
+        -v {cwd}/flexus:/home/dev/qflex/flexus \
         {qflex_args} \
         -v {cwd}/partition.py:/home/dev/qflex/partition.py \
         -v {cwd}/result.py:/home/dev/qflex/result.py \
+        -v {cwd}/Makefile:/home/dev/qflex/Makefile \
         -v {cwd}/multi-node-scripts/:/home/dev/qflex/multi-node-scripts \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
@@ -109,12 +111,20 @@ class DockerBuild(Executor):
 
         local_worm_name = f"{self.docker_image_name_with_worm}:{self.version}"
         ghcr_worm_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
+        
+        # TODO do some docker renamig
+        dep_image_name = "qflex-dependencies"
+        dep_docker_build_cmd = [
+            f"""docker buildx build -t {dep_image_name} . -f Dockerfile
+            """,
+        ]
+
 
         # TODO centeralize the ghcr.io/parsa-epfl/qflex part
         if not self.worm_only:
             base_image_build_cmd = [
                 f"""
-                docker buildx build -t {local_qflex_name} --build-arg MODE={self.build_type} .
+                docker buildx build -t {local_qflex_name} . -f Dockerfile.qemu.{self.build_type} --build-arg BASE_IMAGE={dep_image_name}
                 """,
                 f"docker tag {local_qflex_name} {ghcr_qflex_name}"
             ]
@@ -140,7 +150,7 @@ class DockerBuild(Executor):
             f"docker push {ghcr_worm_name}"
         ]
 
-        base_cmd = base_image_build_cmd
+        base_cmd = dep_docker_build_cmd + base_image_build_cmd
         worm_cmd = worm_image_cmd
         if self.push:
             base_cmd += base_image_push_cmd

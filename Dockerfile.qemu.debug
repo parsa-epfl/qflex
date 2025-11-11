@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1.17-labs
+
+ARG BASE_IMAGE
+
+FROM ${BASE_IMAGE}
+
+
+WORKDIR /home/dev/qflex
+
+
+# TODO add a check later to make sure qflex folder it self is never mounted, as we need the binaries, or change where they are craeted
+# TODO address the two qemu versions
+COPY ./qemu /home/dev/qflex/qemu
+RUN make MODE=debug qemu-build
+
+COPY ./parallel-qemu /home/dev/qflex/parallel-qemu
+RUN make MODE=debug parallel-qemu-build
+
+
+
+CMD ["bash"]
