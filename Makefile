@@ -27,7 +27,7 @@ endif
 	./build cq ${MODE} && \
 	python3 build-multiple-kraken_vanilla.py
 	mkdir ./kraken_out && \
-	cp -r out/lib/Release ./kraken_out && \
+	cp -r out/lib/Release/* ./kraken_out && \
 	rm -rf out && \
 	mkdir qemu-saved && \
 	cp -r ./qemu/pc-bios ./qemu-saved/pc-bios && \
