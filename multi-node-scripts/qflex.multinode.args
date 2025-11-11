@@ -1,6 +1,6 @@
---core-count 8
+--core-count 1
 --double-cores
---quantum-size-ns 20000
+--quantum-size-ns 200
 --llc-size-per-tile-mb 2
 --parallel
 --network none
