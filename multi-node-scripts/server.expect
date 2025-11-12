@@ -1,33 +1,39 @@
+# SERVER
 set timeout 1000
 spawn xargs -a ./multi-node-scripts/qflex.multinode.args -- ./qflex multi --node-number 0 --loadvm-name boot
 set qemu_stdio $spawn_id
-# Sync to an actual shell prompt (strict match)
+
+# sync to prompt
 send  -i $qemu_stdio -- "\r\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio -- "ip link show \r"
-expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio -- "ip addr add 192.168.100.1/24 dev enp0s1 \r"
-expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio -- "ip link set enp0s1 up \r"
-expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio -- "ip addr show enp0s1 \r"
+
+# show links (optional)
+send  -i $qemu_stdio -- "ip link show\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
 
-
-# setup vm1 with a listener
-send  -i $qemu_stdio -- "echo 'setting up nc' \r"
+# EXACT sequence you asked for:
+send  -i $qemu_stdio -- "ip link set enp0s1 down\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio -- "nc -l 5555 \r"
-# Don't expect a prompt here - nc is now listening and blocking
+send  -i $qemu_stdio -- "ip link set enp0s1 address 52:54:00:12:34:56\r"
+expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio -- "ip link set enp0s1 up\r"
+expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio -- "ip addr add 192.168.100.1/24 dev enp0s1\r"
+expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
 
+# verify
+send  -i $qemu_stdio -- "ip addr show enp0s1\r"
+expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
 
-# Wait for the message to appear on VM1 (where nc is listening)
+# listener
+send  -i $qemu_stdio -- "echo 'setting up nc'\r"
+expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio -- "nc -l 5555\r"
+# nc blocks; don't expect a prompt now
+
+# wait for client message then for prompt to return
 expect -i $qemu_stdio "Hello from VM2!"
-
-# The nc listener on VM1 should exit after receiving the message
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
 
-# 
-# Now both VMs should be back at their prompts
 send  -i $qemu_stdio -- "echo 'Test complete on VM1'\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
