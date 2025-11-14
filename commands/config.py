@@ -246,8 +246,7 @@ class ExperimentContext(BaseModel):
             else:
                 link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
 
-            if not os.path.exists(link_address):
-                os.system(f"cp -u {f} {link_address}")
+            os.system(f"cp -u {f} {link_address}")
         # TODO turn WormCacheQFlex address into a parameter
         # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
         if not os.path.exists(f"./WormCacheQFlex"):

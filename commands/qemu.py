@@ -26,8 +26,14 @@ class QemuCommonArgParser:
         if self.node_number >=0:
             # self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0"""
             # TODO 56 + needs to change
-            self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
-
+            # self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
+            # TODO make this so it takes in the topology into account
+            shm_send = "pdes_1_to_0"
+            shm_recv = "pdes_0_to_1"
+            if self.node_number == 1:
+                shm_send = "pdes_0_to_1"
+                shm_recv = "pdes_1_to_0"
+            self.nic_command = f"""-netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv} -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
         # TEMP TODO change it for a specific part:
         self.internet_nic = '-netdev user,id=net1 -device e1000,netdev=net1'
 

@@ -26,17 +26,18 @@ endif
 	conan remove -c "*" && \
 	./build cq ${MODE} && \
 	python3 build-multiple-kraken_vanilla.py
-	mkdir ./kraken_out && \
+	mkdir -p ./kraken_out && \
 	cp -r out/lib/Release/* ./kraken_out && \
 	rm -rf out && \
-	mkdir qemu-saved && \
+	mkdir -p qemu-saved && \
 	cp -r ./qemu/pc-bios ./qemu-saved/pc-bios && \
 	cp -r ./qemu/build ./qemu-saved/build
 
 parallel-qemu-build:
 	cd parallel-qemu && \
-    ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
-    ninja -C build && \
-    mkdir ../parallel-qemu-saved && \
-    cp -r ../parallel-qemu/pc-bios ../parallel-qemu-saved/pc-bios && \
-    cp -r ../parallel-qemu/build ../parallel-qemu-saved/build
+	./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
+  	ninja -C build && \
+	cd .. && \
+	rm -rf parallel-qemu-saved  && mkdir -p parallel-qemu-saved && \
+	cp -r parallel-qemu/build parallel-qemu-saved/build && \
+	mv parallel-qemu-saved/build/pc-bios parallel-qemu-saved/pc-bios

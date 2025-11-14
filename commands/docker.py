@@ -71,6 +71,7 @@ class DockerStarter(Executor):
         -v {cwd}/result.py:/home/dev/qflex/result.py \
         -v {cwd}/Makefile:/home/dev/qflex/Makefile \
         -v {cwd}/multi-node-scripts/:/home/dev/qflex/multi-node-scripts \
+        -v {cwd}/parallel-qemu/:/home/dev/qflex/parallel-qemu \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \
