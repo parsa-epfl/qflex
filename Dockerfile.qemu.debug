@@ -14,9 +14,9 @@ COPY ./qemu /home/dev/qflex/qemu
 COPY ./parallel-qemu /home/dev/qflex/parallel-qemu
 
 
-RUN make MODE=debug qemu-build
+RUN make MODE=debug qemu-config && make MODE=debug qemu-build 
 
-RUN make MODE=debug parallel-qemu-build
+RUN make MODE=debug parallel-qemu-config && make MODE=debug parallel-qemu-build
 
 
 

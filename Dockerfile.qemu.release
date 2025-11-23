@@ -10,8 +10,8 @@ WORKDIR /home/dev/qflex
 
 # TODO add a check later to make sure qflex folder it self is never mounted, as we need the binaries, or change where they are craeted
 # TODO address the two qemu versions
-RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw make MODE=release qemu-build
-RUN --mount=type=bind,source=./parallel-qemu,target=/home/dev/qflex/parallel-qemu,rw make MODE=release parallel-qemu-build
+RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw make MODE=release qemu-config && make MODE=release qemu-build
+RUN --mount=type=bind,source=./parallel-qemu,target=/home/dev/qflex/parallel-qemu,rw make MODE=release parallel-qemu-config && make MODE=release parallel-qemu-build
 
 
 

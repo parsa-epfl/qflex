@@ -13,7 +13,7 @@ install-dev-requirements:
 	pip install uv && \
 	uv tool install bump-my-version
 
-qemu-build:
+qemu-config:
 ifndef MODE
 	$(error MODE is not set. Usage: make qemu-build MODE=debug|release)
 endif
@@ -24,8 +24,23 @@ endif
 	conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of ./out && \
 	conan cache clean -v && \
 	conan remove -c "*" && \
-	./build cq ${MODE} && \
-	python3 build-multiple-kraken_vanilla.py
+	cd qemu && \
+	./configure --target-list=aarch64-softmmu       \
+	--disable-docs                      \
+	--enable-capstone                   \
+	--enable-slirp                      \
+	--enable-libqflex                   \
+	--enable-snapvm-external            \
+	--disable-gtk                       \
+	$(if $(filter debug,$(MODE)),--enable-debug) && \
+	cd ..
+
+	
+# TODO this still has some config in it, move it to speed up building
+
+qemu-move-files:
+	python3 build-multiple-kraken_vanilla.py && \
+	rm -rf ./kraken_out  && rm -rf ./qemu-saved && \
 	mkdir -p ./kraken_out && \
 	cp -r out/lib/Release/* ./kraken_out && \
 	rm -rf out && \
@@ -33,11 +48,27 @@ endif
 	cp -r ./qemu/pc-bios ./qemu-saved/pc-bios && \
 	cp -r ./qemu/build ./qemu-saved/build
 
-parallel-qemu-build:
+qemu-ninja:
+	cd qemu && \
+	ninja -C build && \
+	cd .. && \
+	make qemu-move-files
+
+# TODO check if it can be replaced with qemu-ninja
+qemu-build:
+	make -C qemu -j && \
+	make qemu-move-files
+
+parallel-qemu-config:
 	cd parallel-qemu && \
 	./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
+	cd .. && \
+
+parallel-qemu-build:
+	cd parallel-qemu && \
   	ninja -C build && \
 	cd .. && \
 	rm -rf parallel-qemu-saved  && mkdir -p parallel-qemu-saved && \
 	cp -r parallel-qemu/build parallel-qemu-saved/build && \
+	cp -r parallel-qemu/pc-bios parallel-qemu-saved/pc-bios && \
 	mv parallel-qemu-saved/build/pc-bios parallel-qemu-saved/pc-bios
