@@ -17,7 +17,8 @@ class Multi(Executor):
         
         boot_cmd = f"""
         ./qemu-system-aarch64 \
-        {self.qemu_common_parser.get_qemu_base_args()}
+        {self.qemu_common_parser.get_qemu_base_args()} \
+        -icount shift=0,align=off,sleep=off
         """
         # -icount shift=0,align=off,sleep=off
 
