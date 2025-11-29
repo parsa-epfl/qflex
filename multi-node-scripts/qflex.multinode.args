@@ -1,4 +1,4 @@
---core-count 2
+--core-count 1
 --no-double-cores
 --quantum-size-ns 2000
 --llc-size-per-tile-mb 2
@@ -12,7 +12,6 @@
 --primary-ipc 2.0
 --primary-core-start 0
 --phantom-cpu-ipc 4
---experiment-name multi_node_experiment
 --image-name vanilla-image.img
 --image-folder /mnt/sdb/pooria-multi-node/
 --mounting-folder /mnt/sdb/pooria-multi-node/

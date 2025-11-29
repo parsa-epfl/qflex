@@ -1,7 +1,7 @@
 # CLIENT
 set timeout 1000
 set logfile [open "/mnt/sdb/pooria-multi-node/timing.log" "a"]
-spawn xargs -a ./multi-node-scripts/qflex.multinode.args -- ./qflex multi --node-number 1 --loadvm-name boot
+spawn xargs -a ./multi-node-scripts/qflex.multinode.args -- ./qflex multi --node-number 1 --experiment-name multi_node_experiment1 --loadvm-name boot-pooria-multinode2
 set qemu_stdio2 $spawn_id
 
 send  -i $qemu_stdio2 -- "\r\r"
@@ -12,9 +12,9 @@ send  -i $qemu_stdio2 -- "ip link show\r"
 expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
 
 # EXACT sequence you asked for:
-send  -i $qemu_stdio2 -- "ip link set enp0s1 up\r"
+send  -i $qemu_stdio2 -- "ip link set enp0s2 up\r"
 expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio2 -- "ip addr add 192.168.100.2/24 dev enp0s1\r"
+send  -i $qemu_stdio2 -- "ip addr add 192.168.100.2/24 dev enp0s2\r"
 expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
 
 # test connectivity

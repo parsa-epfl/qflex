@@ -22,6 +22,9 @@ RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y
 
 # Need to update after installing the previous dependencies
 RUN apt-get update -y
+RUN apt install -y --no-install-recommends net-tools
+RUN apt install --yes cloud-image-utils qemu-system-x86
+RUN apt install -y --no-install-recommends net-tools
 RUN apt install -y --no-install-recommends wget 
 RUN apt install -y --no-install-recommends curl
 RUN apt install -y --no-install-recommends git                 

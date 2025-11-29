@@ -39,14 +39,18 @@ endif
 # TODO this still has some config in it, move it to speed up building
 
 qemu-move-files:
-	python3 build-multiple-kraken_vanilla.py && \
-	rm -rf ./kraken_out  && rm -rf ./qemu-saved && \
-	mkdir -p ./kraken_out && \
-	cp -r out/lib/Release/* ./kraken_out && \
-	rm -rf out && \
+	rm -rf ./qemu-saved && \
 	mkdir -p qemu-saved && \
 	cp -r ./qemu/pc-bios ./qemu-saved/pc-bios && \
 	cp -r ./qemu/build ./qemu-saved/build
+
+build-kraken:
+	python3 build-multiple-kraken_vanilla.py && \
+	rm -rf ./kraken_out&& \
+	mkdir -p ./kraken_out && \
+	cp -r out/lib/Release/* ./kraken_out && \
+	rm -rf out
+
 
 qemu-ninja:
 	cd qemu && \

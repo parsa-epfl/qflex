@@ -17,9 +17,11 @@ class QemuCommonArgParser:
         
         self.node_number = self.experiment_context.node_number
 
+        # self.node_number = 1
+
         self.nic_command = self.experiment_context.simulation_context.qemu_nic.strip().lower()
 
-        self.monitor_port = 55555
+        self.monitor_port = 55558
         if self.node_number >=0:
             self.monitor_port += self.node_number
 
@@ -33,7 +35,8 @@ class QemuCommonArgParser:
             if self.node_number == 1:
                 shm_send = "pdes_0_to_1"
                 shm_recv = "pdes_1_to_0"
-            self.nic_command = f"""-netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv} -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
+            
+            self.nic_command = f"""-netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns=500,sync=false -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
         # TEMP TODO change it for a specific part:
         self.internet_nic = '-netdev user,id=net1 -device e1000,netdev=net1'
 
@@ -66,18 +69,20 @@ class QemuCommonArgParser:
 
         # TODO REMOVE the hardcoded drive 
         # TODO remove second seed file
+        # self.node_number = 1
+        # self.image_address = '/mnt/sdb/pooria-multi-node/vanilla-image-node1.img'
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores} \
+        -drive if=virtio,file=/home/dev/qflex/multi-node-scripts/seed{self.node_number}.qcow2,format=qcow2 \
         -cpu max,pauth=off -m {self.memory_size_mb} \
         -boot order=d,menu=on \
         -bios ./QEMU_EFI.fd \
         -drive if=virtio,file={self.image_address},format=qcow2 \
-        -drive if=virtio,file=/home/dev/qflex/multi-node-scripts/seed{self.node_number}.qcow2,format=qcow2 \
         -rtc clock=vm \
         {self.loadvm} \
         {self.cd_rom} \
-        {self.nic_command} \
         {self.internet_nic} \
+        {self.nic_command} \
         -serial stdio \
         -monitor telnet:127.0.0.1:{self.monitor_port},server,nowait \
         -nographic -no-reboot"""

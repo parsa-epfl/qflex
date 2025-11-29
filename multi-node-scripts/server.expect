@@ -1,6 +1,6 @@
 # SERVER
 set timeout 1000
-spawn xargs -a ./multi-node-scripts/qflex.multinode.args -- ./qflex multi --node-number 0 --loadvm-name boot
+spawn xargs -a ./multi-node-scripts/qflex.multinode.args -- ./qflex multi --node-number 0 --experiment-name multi_node_experiment0 --loadvm-name boot-pooria-multinode2
 set qemu_stdio $spawn_id
 
 # sync to prompt
@@ -12,17 +12,17 @@ send  -i $qemu_stdio -- "ip link show\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
 
 # EXACT sequence you asked for:
-send  -i $qemu_stdio -- "ip link set enp0s1 down\r"
+send  -i $qemu_stdio -- "ip link set enp0s2 down\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio -- "ip link set enp0s1 address 52:54:00:12:34:56\r"
+send  -i $qemu_stdio -- "ip link set enp0s2 address 52:54:00:12:34:56\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio -- "ip link set enp0s1 up\r"
+send  -i $qemu_stdio -- "ip link set enp0s2 up\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
-send  -i $qemu_stdio -- "ip addr add 192.168.100.1/24 dev enp0s1\r"
+send  -i $qemu_stdio -- "ip addr add 192.168.100.1/24 dev enp0s2\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
 
 # verify
-send  -i $qemu_stdio -- "ip addr show enp0s1\r"
+send  -i $qemu_stdio -- "ip addr show enp0s2\r"
 expect -i $qemu_stdio -re {root@ubuntu:.*#\s?$}
 
 # listener
