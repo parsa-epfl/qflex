@@ -57,6 +57,7 @@ class DockerStarter(Executor):
 
 
         
+        # TODO temp for this issue
         # TODO remove unecessary mounts including .sh ones and micro_scripts
         return f"""
         docker run -it --entrypoint /bin/bash \
@@ -71,6 +72,7 @@ class DockerStarter(Executor):
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \
+        -v ./issue_59:/home/dev/qflex/issue_59 \
         {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
