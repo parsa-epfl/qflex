@@ -239,18 +239,18 @@ class ExperimentContext(BaseModel):
         if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"):
             os.system(f"cp -r ./WormCacheQFlex {self.get_experiment_folder_address()}/lib/WormCacheQFlex")
 
-        # Move files to lib
+        # Create & Move files to lib
         lib_files = [
             "libknottykraken.so", 
             "libsemikraken.so"
         ]
         for f in lib_files:
-            if not os.path.exists(f"/home/dev/qflex/kraken_out/{f}"):
-                raise FileNotFoundError(f"Error: {f} not found in ./home/dev/qflex/kraken_out/")
             if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/{f}"):
-                os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
-
-        
+                os.system(f"python3 ./build-multiple-kraken_vanilla.py --core-count {self.simulation_context.core_count} --memory-controller {self.simulation_context.mem_controller_count}")
+                print(f"Created Kraken libraries")
+                if not os.path.exists(f"/home/dev/qflex/out/lib/Release/{f}"):
+                    raise FileNotFoundError(f"Error: {f} not found in /home/dev/qflex/out/lib/Release/")
+                os.system(f"cp /home/dev/qflex/out/lib/Release/{f} {self.get_experiment_folder_address()}/lib/{f}")        
 
 
 

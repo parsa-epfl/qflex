@@ -4,6 +4,7 @@ import os
 import sys
 import math
 import glob
+import argparse
 
 '''
 How this program works:
@@ -15,8 +16,17 @@ How this program works:
 6. Copy the starting_script to each partition folder.
 '''
 
-# By default the partition is equal to the number of CPU cores.
-if len(sys.argv) != 2:
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Partition snapshot files for parallel execution.')
+parser.add_argument('--partition-count', type=int, nargs='?', default=None,
+                    help='Number of partitions (default: CPU core count)')
+parser.add_argument('--image-name', type=str, default='root.qcow2',
+                    help='QEMU image filename (default: root.qcow2)')
+
+args = parser.parse_args()
+
+# Set partition count
+if args.partition_count is None:
     print("Default PARTITION_COUNT is the number of CPU cores.")
     cpu_count = os.cpu_count()
     if cpu_count is None:
@@ -24,8 +34,12 @@ if len(sys.argv) != 2:
         sys.exit(1)
     PARTITION_COUNT: int = cpu_count
 else:
-    PARTITION_COUNT = int(sys.argv[1])
+    PARTITION_COUNT = args.partition_count
     print(f"Setting partition count to {PARTITION_COUNT}")
+
+QEMU_IMAGE_NAME = args.image_name
+if QEMU_IMAGE_NAME != 'root.qcow2':
+    print(f"Using QEMU image: {QEMU_IMAGE_NAME}")
 
 
 os.chdir("./run")
@@ -71,7 +85,7 @@ mem_folder_name = mem_folder_name[0]
 # Create symbolic links for the necessary bindary files in the current folder.
 NECESSARY_BINARY_FILES = [
     "QEMU_EFI.fd",
-    "root.qcow2",
+    QEMU_IMAGE_NAME,
     "debug.cfg",
     "../cfg/flexus_configuration.json",
     "../cfg/timing.cfg",
