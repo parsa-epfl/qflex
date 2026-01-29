@@ -63,6 +63,12 @@ def boot(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def load(
     experiment_context: ExperimentContext,
+    warmup_magic_phrase: Annotated[str, typer.Option(
+        help="A magic phrase to indicate that workload warmup is completed."
+    )]="",
+    post_warmup_savevm_name: Annotated[str, typer.Option(
+        help="Name of the savevm snapshot to create after warmup."
+    )]="load",
 ):
     """
     Load a QEMU virtual machine from a snapshot with specified parameters.
@@ -70,7 +76,9 @@ def load(
     This is the third step, to prepare for functional warming.
     """
     load_executor = Load(
-        experiment_context=experiment_context
+        experiment_context=experiment_context,
+        warmup_magic_phrase=warmup_magic_phrase,
+        post_warmup_savevm_name=post_warmup_savevm_name,
     )
     load_executor.execute(to_stdio=True, run_in_background=False)
 

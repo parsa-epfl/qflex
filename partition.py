@@ -91,6 +91,7 @@ NECESSARY_BINARY_FILES = [
     "../cfg/timing.cfg",
     "../bin/checkpoint_conversion",
     mem_folder_name,
+    "efi-virtio.rom"
 ]
 
 for p in range(PARTITION_COUNT):
