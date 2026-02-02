@@ -66,7 +66,7 @@ qemu-build:
 parallel-qemu-config:
 	cd parallel-qemu && \
 	./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
-	cd .. && \
+	cd ..
 
 parallel-qemu-build:
 	cd parallel-qemu && \

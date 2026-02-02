@@ -36,7 +36,7 @@ class QemuCommonArgParser:
                 shm_send = "pdes_0_to_1"
                 shm_recv = "pdes_1_to_0"
             
-            self.nic_command = f"""-netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns=500,sync=false -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
+            self.nic_command = f"""-netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns=500000,sync=true -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
         # TEMP TODO change it for a specific part:
         self.internet_nic = '-netdev user,id=net1 -device e1000,netdev=net1'
 
