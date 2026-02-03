@@ -16,7 +16,7 @@ class Multi(Executor):
     def cmd(self) -> str:
         
         boot_cmd = f"""
-        ./qemu-system-aarch64 \
+        gdb --args ./qemu-system-aarch64 \
         {self.qemu_common_parser.get_qemu_base_args()} \
         -icount shift=0,align=off,sleep=off
         """

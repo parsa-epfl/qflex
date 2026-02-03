@@ -20,11 +20,11 @@ expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
 # test connectivity
 
 
-set start [clock milliseconds]
-send  -i $qemu_stdio2 -- "ping -c 2 -D 192.168.100.1\r"
-expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
-set elapsed [expr {[clock milliseconds] - $start}]
-puts $logfile "Time elapsed for taking ping down: $elapsed ms"
+# set start [clock milliseconds]
+# send  -i $qemu_stdio2 -- "ping -c 2 -D 192.168.100.1\r"
+# expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+# set elapsed [expr {[clock milliseconds] - $start}]
+# puts $logfile "Time elapsed for taking ping down: $elapsed ms"
 set start [clock milliseconds]
 
 send  -i $qemu_stdio2 -- "echo 'Hello from VM2!' | nc -q 0 192.168.100.1 5555\r"

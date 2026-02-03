@@ -26,6 +26,13 @@ class QemuCommonArgParser:
             self.monitor_port += self.node_number
 
         if self.node_number >=0:
+            # TODO have a list of variables based on node number that need to be propogated up
+            master = "true"
+
+            if self.node_number > 0:
+                master = "false"
+
+
             # self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0"""
             # TODO 56 + needs to change
             # self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
@@ -36,7 +43,7 @@ class QemuCommonArgParser:
                 shm_send = "pdes_0_to_1"
                 shm_recv = "pdes_1_to_0"
             
-            self.nic_command = f"""-netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns=500000,sync=true -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
+            self.nic_command = f"""-netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns=500000,sync=false,master={master} -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
         # TEMP TODO change it for a specific part:
         self.internet_nic = '-netdev user,id=net1 -device e1000,netdev=net1'
 
@@ -83,9 +90,9 @@ class QemuCommonArgParser:
         {self.cd_rom} \
         {self.internet_nic} \
         {self.nic_command} \
-        -serial stdio \
-        -monitor telnet:127.0.0.1:{self.monitor_port},server,nowait \
         -nographic -no-reboot"""
+        # -serial stdio \
+        # -monitor telnet:127.0.0.1:{self.monitor_port},server,nowait \
         print("="*50+"QEMU command arguments:"+"="*50)
         print(qemu_args)
         return qemu_args
