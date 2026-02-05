@@ -80,5 +80,5 @@ ip addr add 192.168.100.2/24 dev eth1
 su qflex
 
 # Test client:
-ping -c 2 192.168.100.1
+ping 192.168.100.1 -i 0.05 -c 1000
 echo 'Hello from VM2!' | nc 192.168.100.1 5555

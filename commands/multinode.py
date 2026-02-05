@@ -15,14 +15,22 @@ class Multi(Executor):
 
     def cmd(self) -> str:
         
+        # boot_cmd = f"""
+        # gdb --args ./qemu-system-aarch64 \
+        # {self.qemu_common_parser.get_qemu_base_args()} \
+        # -icount shift=0,align=off,sleep=off
+        # """
+
+
+
         boot_cmd = f"""
         gdb --args ./qemu-system-aarch64 \
         {self.qemu_common_parser.get_qemu_base_args()} \
-        -icount shift=0,align=off,sleep=off
+        {self.qemu_common_parser.quantum_args()} 
         """
+
         # -icount shift=0,align=off,sleep=off
 
-        # {self.qemu_common_parser.quantum_args()} 
 
         print(f"{boot_cmd}")
 
