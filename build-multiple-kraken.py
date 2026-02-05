@@ -2,8 +2,8 @@
 
 import os
 
-CORE_COUNT = [1, 4, 16, 64]
-MEMORY_CONTROLLER = [1, 1, 2, 8]
+CORE_COUNT = [1, 2, 4, 16, 64]
+MEMORY_CONTROLLER = [1, 1, 1, 2, 8]
 
 TARGETS = [
     "knottykraken",
@@ -23,7 +23,7 @@ for (core_count, mem_count) in zip(CORE_COUNT, MEMORY_CONTROLLER):
 
         with open(f"flexus/target/{target}/wiring.cpp", "w") as f:
             f.write("".join(config))
-        
+
         # then, execute the build command
         assert os.system(f"nix develop -i -c ./build {target}") == 0
 
@@ -31,5 +31,4 @@ for (core_count, mem_count) in zip(CORE_COUNT, MEMORY_CONTROLLER):
         os.system(f"rm -rf flexus/build-{target}-{core_count}c")
         os.system(f"mv flexus/build-{target} flexus/build-{target}-{core_count}c")
 
-    
-        
+
