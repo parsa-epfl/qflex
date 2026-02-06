@@ -74,6 +74,7 @@ class DockerStarter(Executor):
         -v {cwd}/parallel-qemu/:/home/dev/qflex/parallel-qemu \
         -v {cwd}/qemu/:/home/dev/qflex/qemu \
         -v {cwd}/multi-node-web-search/:/home/dev/qflex/multi-node-web-search \
+        -v {cwd}/WormCacheQFlex:/home/dev/qflex/WormCacheQFlex \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \

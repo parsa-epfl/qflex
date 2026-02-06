@@ -65,14 +65,7 @@ cp /etc/resolv.conf /tmp/resolv.conf sed 's/nameserver 10.90.36.3/# nameserver 1
 su
 ip link set eth1 up 
 udhcpc -i eth1
-
-
-
-
-# general fixes for NIC stuff
-su
 apk add iproute2
-su qflex
 
 # Server NIC fixes
 su
@@ -96,5 +89,5 @@ ip addr add 192.168.100.2/24 dev eth0
 su qflex
 
 # Test client:
-ping 192.168.100.1 -i 0.05 -c 1000
+ping 192.168.100.1 -i 0.05 -c 10000000
 echo 'Hello from VM2!' | nc 192.168.100.1 5555

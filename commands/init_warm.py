@@ -45,6 +45,8 @@ class InitWarm(Executor):
 
 
     def build_worm_cache(self) -> List[str]:
+        print("building workm cache")
+        # TODO fix bug of not being able to recompile in docker, and let it be compilable and also make this step fully compile things, one file at least is not being removed after recompilation in exp folder
         experiment_folder = self.experiment_context.get_experiment_folder_address()
         return [
             f"cp {self.worm_params_address} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",

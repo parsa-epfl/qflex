@@ -1,0 +1,4 @@
+--node-number 1 
+--experiment-name multi_web_experiment1 
+--neighbor-nodes "0" 
+--latancies-ns "10000000000"

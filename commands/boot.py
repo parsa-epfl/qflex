@@ -17,6 +17,9 @@ class Boot(Executor):
         {self.qemu_common_parser.get_qemu_base_args()}
         """
 
+        print(f"Boot command:")
+        print(f"{boot_cmd}")
+
         return [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             boot_cmd

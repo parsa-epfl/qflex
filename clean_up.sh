@@ -9,4 +9,5 @@ ps -a | grep 'qemu-system-aar' | grep -v grep | awk '{print $1}' | while read pi
     kill -9 "$pid" && echo "Killed qemu process $pid" || echo "Failed to kill $pid"
 done
 
-rm /dev/shm/pdes*
+# TODO explain in docs how old messages either need to be checkpointed or removed
+rm -f /dev/shm/pdes*

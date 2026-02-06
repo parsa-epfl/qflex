@@ -52,10 +52,12 @@ class QemuCommonArgParser:
 
         image_arg = f"""-drive if=virtio,file={self.image_address},format=qcow2 """
         if len(self.experiment_context.seed_image_name) > 0:
+            print(f"Using seed image {self.experiment_context.seed_image_name} at address {self.experiment_context.seed_image_address}")
             image_arg += f""" -drive if=virtio,file={self.experiment_context.seed_image_address},format=qcow2 """
         telnet_monitor_arg = ''
         if self.experiment_context.use_telnet_monitor:
-            telnet_monitor_arg = f""" -serial stdio -monitor telnet:127.0.0.1:{self.experiment_context.telnet_port},server,nowait """
+            print(f"Using telnet monitor at port {self.experiment_context.telnet_port}")
+            telnet_monitor_arg = f""" -monitor telnet:127.0.0.1:{self.experiment_context.telnet_port},server,nowait """
         
         
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \
@@ -69,7 +71,7 @@ class QemuCommonArgParser:
         {self.cd_rom} \
         {self.simulation_context.qemu_nic} \
         {telnet_monitor_arg} \
-        -nographic -no-reboot"""
+        -serial mon:stdio -nographic -no-reboot"""
         
         
         print("="*50+"QEMU command arguments:"+"="*50)
