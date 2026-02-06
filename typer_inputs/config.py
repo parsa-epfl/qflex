@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, List
 import typer
 from commands.config import create_experiment_context, ExperimentContext
 from .typer_base import TyperDataClassMeta
@@ -17,7 +17,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
         quantum_size_ns: Annotated[int, typer.Option(help="Quantum size for the simulator in nanoseconds.")],
         llc_size_per_tile_mb: Annotated[int, typer.Option(help="LLC size per tile in MB.")],
         parallel: Annotated[bool, typer.Option(help="Whether the simulation is parallel or not.")],
-        network: Annotated[str, typer.Option(help="Network mode, either user or none")],
+        network: Annotated[str, typer.Option(help="Network mode, either user or none, this is in addition to connecting to internet and other nodes that are there by default.")],
         memory_gb: Annotated[int, typer.Option(help="Memory size for the VM in GB.")],
         # Host section
         host_name:Annotated[str, typer.Option(help="Host name, used to create initial ipns file")],
@@ -76,11 +76,50 @@ class ExperimentContextTyper(TyperDataClassMeta):
         include_affinity: Annotated[bool, typer.Option(
             help="Whether or not generate affinity index in core_info.csv."
         )]=False,
+        # Multi-node section
         node_number: Annotated[int, typer.Option(
-            help="Node number in multi-node setup, -1 means single node."
+            help="Node number in multi-node setup, -1 means single node. 0 is the master node."
         )]=-1,
-    ):
-        print("quantum_size_ns:", quantum_size_ns)
+        neighbor_nodes: Annotated[str, typer.Option(
+            help="Comma separated list of neighbor node numbers in multi-node setup, only used if node_number is not -1."
+        )]="",
+        latancies_ns: Annotated[str, typer.Option(
+            help="Comma separated list of latencies to neighbor nodes in nanoseconds, only used if node_number is not -1. The order should be the same as neighbor_nodes."
+        )]="",
+        syncs: Annotated[str, typer.Option(
+            help="Comma separated list of sync options to neighbor nodes, only used if node_number is not -1. The order should be the same as neighbor_nodes. The value should be either true or false."
+        )]="",
+
+
+        # Seed image settings
+        seed_image_name: Annotated[str, typer.Option(
+            help="Name of the seed image file to use in multi-node setup."
+        )] = '',
+
+
+        # STDIO settings
+        use_telnet_monitor: Annotated[bool, typer.Option(
+            help="Whether to use telnet monitor for QEMU instead of stdio."
+        )]=False,
+        telnet_port: Annotated[int, typer.Option(
+            help="Telnet port for QEMU monitor instead of stdio."
+        )]=-1,
+    ):        
+        has_neighbors = len(neighbor_nodes) > 0
+        neighbor_node_list: List[int] = []
+        latencies_ns_list: List[int] = []
+        syncs_list: [] = []
+        if has_neighbors:
+            neighbor_node_list = [int(x) for x in neighbor_nodes.split(",")]
+            latencies_ns_list = [int(x) for x in latancies_ns.split(",")]
+            syncs_list = [x.strip() for x in syncs.split(",")]
+        else:
+            neighbor_node_list = []
+            latencies_ns_list = []
+            syncs_list = []
+
+
+
         if unique:
             print("Unique experiment is deprecated, will skip adding timestamp.")
             unique = False
@@ -116,5 +155,11 @@ class ExperimentContextTyper(TyperDataClassMeta):
             machine_freq_ghz=machine_freq_ghz,
             include_affinity=include_affinity,
             node_number=node_number,
+            neighbor_node_list=neighbor_node_list,
+            latencies_ns_list=latencies_ns_list,
+            syncs_list=syncs_list,
+            seed_image_name=seed_image_name,
+            telnet_port=telnet_port,
+            use_telnet_monitor=use_telnet_monitor
         )
         return experiment_context

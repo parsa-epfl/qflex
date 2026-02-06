@@ -17,35 +17,6 @@ class QemuCommonArgParser:
         
         self.node_number = self.experiment_context.node_number
 
-        # self.node_number = 1
-
-        self.nic_command = self.experiment_context.simulation_context.qemu_nic.strip().lower()
-
-        self.monitor_port = 55558
-        if self.node_number >=0:
-            self.monitor_port += self.node_number
-
-        if self.node_number >=0:
-            # TODO have a list of variables based on node number that need to be propogated up
-            master = "true"
-
-            if self.node_number > 0:
-                master = "false"
-
-
-            # self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0"""
-            # TODO 56 + needs to change
-            # self.nic_command = f"""-netdev tap,id=net0,ifname=tap{self.node_number},script=no,downscript=no -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
-            # TODO make this so it takes in the topology into account
-            shm_send = "pdes_1_to_0"
-            shm_recv = "pdes_0_to_1"
-            if self.node_number == 1:
-                shm_send = "pdes_0_to_1"
-                shm_recv = "pdes_1_to_0"
-            
-            self.nic_command = f"""-netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns=10000000000,sync=true,master={master} -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}"""
-        # TEMP TODO change it for a specific part:
-        self.internet_nic = '-netdev user,id=net1 -device e1000,netdev=net1'
 
         self.loadvm = ''
         if self.experiment_context.loadvm_name is not None and len(self.experiment_context.loadvm_name) > 0:
@@ -78,21 +49,29 @@ class QemuCommonArgParser:
         # TODO remove second seed file
         # self.node_number = 1
         # self.image_address = '/mnt/sdb/pooria-multi-node/vanilla-image-node1.img'
+
+        image_arg = f"""-drive if=virtio,file={self.image_address},format=qcow2 """
+        if len(self.experiment_context.seed_image_name) > 0:
+            image_arg += f""" -drive if=virtio,file={self.experiment_context.seed_image_address},format=qcow2 """
+        telnet_monitor_arg = ''
+        if self.experiment_context.use_telnet_monitor:
+            telnet_monitor_arg = f""" -serial stdio -monitor telnet:127.0.0.1:{self.experiment_context.telnet_port},server,nowait """
+        
+        
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores} \
-        -drive if=virtio,file=/home/dev/qflex/multi-node-scripts/seed{self.node_number}.qcow2,format=qcow2 \
         -cpu max,pauth=off -m {self.memory_size_mb} \
         -boot order=d,menu=on \
         -bios ./QEMU_EFI.fd \
-        -drive if=virtio,file={self.image_address},format=qcow2 \
+        {image_arg} \
         -rtc clock=vm \
         {self.loadvm} \
         {self.cd_rom} \
-        {self.internet_nic} \
-        {self.nic_command} \
+        {self.simulation_context.qemu_nic} \
+        {telnet_monitor_arg} \
         -nographic -no-reboot"""
-        # -serial stdio \
-        # -monitor telnet:127.0.0.1:{self.monitor_port},server,nowait \
+        
+        
         print("="*50+"QEMU command arguments:"+"="*50)
         print(qemu_args)
         return qemu_args
