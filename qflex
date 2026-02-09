@@ -19,7 +19,7 @@ app = typer.Typer(
     help="A CLI tool to manage QFlex operations. (suggest running ./qflex --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
 )
 
-
+# TODO IMPORTANT, remove vanilla option
 @app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
 def create_base_image(
     image_folder: Annotated[str, typer.Option(
@@ -45,6 +45,9 @@ def create_base_image(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def boot(
     experiment_context: ExperimentContext,
+    vanilla: Annotated[bool, typer.Option(
+        help="Whether to load the VM with the vanilla QEMU for functional warming preparation. This is temp for multi-node testing"
+    )]=False,
 ):
     """
     Boot a QEMU virtual machine with specified parameters.
@@ -56,6 +59,7 @@ def boot(
     """
     boot_executor = Boot(
         experiment_context=experiment_context,
+        vanilla=vanilla
     )
     boot_executor.execute(to_stdio=True, run_in_background=False)
 
@@ -63,6 +67,9 @@ def boot(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def load(
     experiment_context: ExperimentContext,
+    vanilla: Annotated[bool, typer.Option(
+        help="Whether to load the VM with the vanilla QEMU for functional warming preparation. This is temp for multi-node testing"
+    )]=False,
 ):
     """
     Load a QEMU virtual machine from a snapshot with specified parameters.
@@ -70,7 +77,8 @@ def load(
     This is the third step, to prepare for functional warming.
     """
     load_executor = Load(
-        experiment_context=experiment_context
+        experiment_context=experiment_context,
+        vanilla=vanilla
     )
     load_executor.execute(to_stdio=True, run_in_background=False)
 
