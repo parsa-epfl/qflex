@@ -14,3 +14,7 @@
 	path = parallel-qemu
 	url = git@github.com:parsa-epfl/parallel-qemu.git
 	branch = develop
+[submodule "QPoints"]
+	path = QPoints
+	url = https://github.com/parsa-epfl/QPoints.git
+	branch = gem5_ckp_conversion
