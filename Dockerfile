@@ -42,6 +42,8 @@ RUN apt install -y --no-install-recommends zstd
 RUN apt install -y --no-install-recommends vim
 RUN apt install -y --no-install-recommends tmux
 RUN apt install -y --no-install-recommends htop
+RUN apt install -y --no-install-recommends telnet
+RUN apt install -y --no-install-recommends expect
 
 # --break-system-package for ubuntu 24.04
 RUN pip install conan && pip cache purge
@@ -72,7 +74,7 @@ RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw conan profile
     conan cache clean -v && \
     conan remove -c "*" && \
     ./build cq ${MODE} && \
-    python3 build-multiple-kraken_vanilla.py \
+    python3 build-multiple-kraken_vanilla.py --core-count 8 --memory-controller 1 \
     mkdir /home/dev/qflex/kraken_out && \
     cp -r out/lib/Release /home/dev/qflex/kraken_out && \
     rm -rf out && \
