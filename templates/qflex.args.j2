@@ -1,0 +1,24 @@
+--workload-name {{ WORKLOAD_NAME }}
+--experiment-name {{ EXPERIMENT_NAME }}
+--image-name {{ IMAGE_NAME }}
+--image-folder {{ IMAGE_FOLDER }}
+--mounting-folder {{ MOUNTING_FOLDER }}
+{{ UNIQUE_FLAG }}
+{{ USE_IMAGE_DIRECTLY_FLAG }}
+--core-count {{ CORE_COUNT }}
+{{ DOUBLE_CORES_FLAG }}
+--llc-size-per-tile-mb {{ LLC_SIZE_PER_TILE_MB }}
+--network {{ NETWORK }}
+--memory-gb {{ MEMORY_GB }}
+--host-name {{ HOST_NAME }}
+--machine-freq-ghz {{ MACHINE_FREQ_GHZ }}
+--quantum-size-ns {{ QUANTUM_SIZE_NS }}
+--check-period-quantum-coeff {{ CHECK_PERIOD_QUANTUM_COEFF }}
+--population-seconds {{ POPULATION_SECONDS }}
+{{ PARALLEL_FLAG }}
+{{ CONSOLIDATED_FLAG }}
+--primary-ipc {{ PRIMARY_IPC }}
+--primary-core-start {{ PRIMARY_CORE_START }}
+--phantom-cpu-ipc {{ PHANTOM_CPU_IPC }}
+{{ SECONDARY_IPC_ARG }}
+{{ SECONDARY_CORE_START_ARG }}

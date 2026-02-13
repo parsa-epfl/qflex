@@ -1,0 +1,9 @@
+# S3 Configuration for QFlex Workload Downloads
+# EPFL Object Storage configuration
+# Note: These are public read-only credentials for downloading workload images
+
+# TODO: Add keys
+aws_access_key_id: E22OJOGXXS6S3LF5I07C
+aws_secret_access_key: UC1xHfW9ic/vgY/3G6Yk0KoA4kG4vRhbURcvhglb
+region: us-east-1
+endpoint_url: https://s3.epfl.ch

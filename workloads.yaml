@@ -1,0 +1,329 @@
+# QFlex Workloads Configuration
+# This file defines default settings and workload-specific configurations
+
+default:
+  version: "latest"
+  experiment:
+    name: "experiment_name_001"
+    unique: false
+  image:
+    name: "root.qcow2"
+    folder: "<IMAGE_FOLDER>"
+    use_image_directly: false
+  mounting_directory: "<MOUNT_DIR>"
+  resources:
+    cores:
+      count: 8
+      double_cores: true
+    llc:
+      size_per_tile_mb: 2
+    memory:
+      size_gb: 32
+    network:
+      type: "none"
+    machine_freq_ghz: 2.0
+    host_name: "ZEN3"
+  simulation:
+    parallel: true
+    consolidated: false
+    population: 30
+    sample_size: 50
+    ipc:
+      primary_ipc: 2.0
+      primary_core_start: 0
+      phantom_cpu_ipc: 4
+      secondary_ipc: null
+      secondary_core_start: null
+    quantum:
+      quantum_size_ns: 2000
+      check_period_quantum_coeff: 53.0
+  s3:
+    bucket_name: "11837-214f5313859d4e78b1365abfcebf7fcd"
+    remote_path: "workloads"
+
+workloads:
+  - workload: "data-analytics"
+    resources:
+      cores:
+        double_cores: false
+      memory:
+        size_gb: 64
+      network:
+        type: "none"
+    simulation:
+      population: 60
+      sample_size: 200
+      consolidated: false
+      ipc:
+        primary_ipc: 2.0
+        phantom_cpu_ipc: 0
+    s3:
+      remote_path: "workloads/cloudsuite4.0/data-analytics"
+
+  - workload: "data-caching"
+    resources:
+      cores:
+        double_cores: true
+      memory:
+        size_gb: 64
+      network:
+        type: "user"
+    simulation:
+      population: 4
+      sample_size: 100
+      consolidated: false
+      ipc:
+        primary_ipc: 1.2
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/data-caching"
+
+  - workload: "data-serving"
+    resources:
+      cores:
+        double_cores: true
+      memory:
+        size_gb: 96
+      network:
+        type: "none"
+    simulation:
+      population: 20
+      sample_size: 300
+      consolidated: false
+      ipc:
+        primary_ipc: 1.2
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/data-serving"
+
+  - workload: "graph-analytics"
+    resources:
+      cores:
+        double_cores: false
+      memory:
+        size_gb: 64
+      network:
+        type: "none"
+    simulation:
+      population: 30
+      sample_size: 100
+      consolidated: false
+      ipc:
+        primary_ipc: 2.0
+        phantom_cpu_ipc: 0
+    s3:
+      remote_path: "workloads/cloudsuite4.0/graph-analytics"
+
+  - workload: "in-memory-analytics"
+    resources:
+      cores:
+        double_cores: false
+      memory:
+        size_gb: 64
+      network:
+        type: "none"
+    simulation:
+      population: 30
+      sample_size: 100
+      consolidated: false
+      ipc:
+        primary_ipc: 2.0
+        phantom_cpu_ipc: 0
+    s3:
+      remote_path: "workloads/cloudsuite4.0/in-memory-analytics"
+
+  - workload: "media-streaming"
+    resources:
+      cores:
+        double_cores: true
+      memory:
+        size_gb: 64
+      network:
+        type: "user"
+    simulation:
+      population: 4
+      sample_size: 100
+      consolidated: false
+      ipc:
+        primary_ipc: 2.0
+        phantom_cpu_ipc: 6
+    s3:
+      remote_path: "workloads/cloudsuite4.0/media-streaming"
+
+  - workload: "web-search"
+    resources:
+      cores:
+        double_cores: true
+      memory:
+        size_gb: 32
+      network:
+        type: "none"
+    simulation:
+      population: 5
+      sample_size: 100
+      consolidated: false
+      ipc:
+        primary_ipc: 2.0
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/web-search"
+
+  - workload: "web-serving-os"
+    resources:
+      cores:
+        double_cores: true
+      memory:
+        size_gb: 32
+      network:
+        type: "none"
+    simulation:
+      population: 10
+      sample_size: 300
+      consolidated: false
+      ipc:
+        primary_ipc: 1.6
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/web-serving-os"
+
+  - workload: "media-microservices-os"
+    resources:
+      cores:
+        double_cores: true
+      memory:
+        size_gb: 64
+      network:
+        type: "none"
+    simulation:
+      population: 5
+      sample_size: 300
+      consolidated: false
+      ipc:
+        primary_ipc: 0.6
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/media-microservices-os"
+
+  - workload: "multi-data-caching"
+    resources:
+      cores:
+        double_cores: true
+      memory:
+        size_gb: 64
+      network:
+        type: "none"
+    simulation:
+      population: 4
+      sample_size: 100
+      consolidated: false
+      ipc:
+        primary_ipc: 1.2
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/multi-data-caching"
+
+  - workload: "multi-data-serving"
+    resources:
+      cores:
+        double_cores: true
+      memory:
+        size_gb: 128
+      network:
+        type: "none"
+    simulation:
+      population: 4
+      sample_size: 300
+      consolidated: false
+      ipc:
+        primary_ipc: 1.2
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/multi-data-serving"
+
+  - workload: "opa-16"
+    resources:
+      cores:
+        count: 16
+        double_cores: true
+      memory:
+        size_gb: 128
+      network:
+        type: "none"
+    simulation:
+      population: 30
+      sample_size: 300
+      consolidated: true
+      ipc:
+        primary_ipc: 1.2
+        primary_core_start: 0
+        secondary_ipc: 2.0
+        secondary_core_start: 8
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/opa"
+
+  - workload: "opa-64"
+    resources:
+      cores:
+        count: 64
+        double_cores: true
+      memory:
+        size_gb: 128
+      network:
+        type: "none"
+    simulation:
+      population: 30
+      sample_size: 300
+      consolidated: true
+      ipc:
+        primary_ipc: 1.2
+        primary_core_start: 0
+        secondary_ipc: 2.0
+        secondary_core_start: 16
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/opa"
+
+  - workload: "opo-16"
+    resources:
+      cores:
+        count: 16
+        double_cores: true
+      memory:
+        size_gb: 64
+      network:
+        type: "none"
+    simulation:
+      population: 5
+      sample_size: 100
+      consolidated: true
+      ipc:
+        primary_ipc: 1.2
+        primary_core_start: 0
+        secondary_ipc: 2.0
+        secondary_core_start: 8
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/opo"
+
+  - workload: "opo-64"
+    resources:
+      cores:
+        count: 64
+        double_cores: true
+      memory:
+        size_gb: 64
+      network:
+        type: "none"
+    simulation:
+      population: 5
+      sample_size: 100
+      consolidated: true
+      ipc:
+        primary_ipc: 1.2
+        primary_core_start: 0
+        secondary_ipc: 2.0
+        secondary_core_start: 16
+        phantom_cpu_ipc: 4
+    s3:
+      remote_path: "workloads/cloudsuite4.0/opo"

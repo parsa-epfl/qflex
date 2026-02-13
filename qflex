@@ -11,6 +11,7 @@ from commands.functional_warming import FunctionalWarming
 from commands.partition import PartitionCommand, CleanPartitionCommand
 from commands.run_partition import RunPartitionCommand
 from commands.result import RunResultCommand
+from commands.downloadworkload import DownloadWorkloadImage
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -40,6 +41,43 @@ def create_base_image(
         size_gb=image_size_gb
     )
     create_image_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command(help='downloads a workload image from S3 and generates qflex.args configuration file')
+def download_workload_image(
+    workload: Annotated[str, typer.Argument(
+        help="Name of the workload to download (e.g., web-search, opa-16, )"
+    )],
+    image_folder: Annotated[str, typer.Option(
+        help="Directory where the image will be downloaded"
+    )],
+    output: Annotated[str, typer.Option(
+        "-o", "--output",
+        help="Output path for the generated qflex.args file"
+    )] = "./qflex.args",
+    config_file: Annotated[str, typer.Option(
+        help="Path to the workloads.yaml configuration file"
+    )] = "./workloads.yaml",
+    s3_config: Annotated[str, typer.Option(
+        help="Path to the S3 credentials configuration file"
+    )] = "./s3.config",
+):
+    """
+    Download a workload image from S3 and generate the qflex.args configuration file.
+    
+    This command:
+    1. Reads workload configuration from workloads.yaml
+    2. Downloads the specified workload image from S3
+    3. Generates a qflex.args file with all necessary parameters
+    4. Verifies image integrity if checksums are available
+    """
+    download_executor = DownloadWorkloadImage(
+        workload_name=workload,
+        image_folder=image_folder,
+        config_file=config_file,
+        output_path=output,
+        s3_config_file=s3_config
+    )
+    download_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))

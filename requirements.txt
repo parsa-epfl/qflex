@@ -5,3 +5,6 @@ pandas
 numpy
 plotext
 rich
+boto3
+PyYAML
+tqdm
