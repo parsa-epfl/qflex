@@ -12,6 +12,7 @@ from commands.partition import PartitionCommand, CleanPartitionCommand
 from commands.run_partition import RunPartitionCommand
 from commands.result import RunResultCommand
 from commands.downloadworkload import DownloadWorkloadImage
+from commands.listworkloads import ListWorkloads
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -78,6 +79,29 @@ def download_workload_image(
         s3_config_file=s3_config
     )
     download_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command(help='lists all available workloads from S3')
+def list_workloads(
+    config_file: Annotated[str, typer.Option(
+        help="Path to the workloads.yaml configuration file"
+    )] = "./workloads.yaml",
+    s3_config: Annotated[str, typer.Option(
+        help="Path to the S3 credentials configuration file"
+    )] = "./s3-config.yaml",
+):
+    """
+    List all available workloads from S3.
+    
+    This command:
+    1. Reads workload configurations from workloads.yaml
+    2. Checks S3 for each workload's existence
+    3. Displays available workloads with their versions
+    """
+    list_executor = ListWorkloads(
+        config_file=config_file,
+        s3_config_file=s3_config
+    )
+    list_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
