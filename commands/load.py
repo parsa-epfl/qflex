@@ -17,9 +17,9 @@ class Load(Executor):
         
         if not self.vanilla:
             load_cmd = f"""
-            ./qemu-system-aarch64 \
+            gdb -ex run --args ./qemu-system-aarch64 \
             {self.qemu_common_parser.get_qemu_base_args()} \
-            {self.qemu_common_parser.quantum_args()}
+            -icount shift=0,align=off,sleep=off
             """
         else:
             load_cmd = f"""
