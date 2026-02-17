@@ -77,7 +77,8 @@ class DockerStarter(Executor):
         -v {cwd}/WormCacheQFlex:/home/dev/qflex/WormCacheQFlex \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
-        --cap-add SYS_PTRACE \
+        --cap-add SYS_PTRACE --cap-add SYS_ADMIN \
+        --pid=host \
         --cap-add=NET_ADMIN --device=/dev/net/tun  \
         {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}

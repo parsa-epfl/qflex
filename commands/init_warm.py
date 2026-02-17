@@ -65,14 +65,20 @@ class InitWarm(Executor):
 
         # TODO check if we need variables for the plugin
         init_cmd = f"""
-        ./qemu-system-aarch64 \
+        gdb -ex run --args ./qemu-system-aarch64 \
         {self.qemu_common_parser.get_qemu_base_args()} \
         {self.qemu_common_parser.quantum_args()} \
         -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init
         """
 
 
-        return self.build_worm_cache() + [
+        # return self.build_worm_cache() + [
+        #     f"cd {self.experiment_context.get_experiment_folder_address()}/run",
+        #     "ls",
+        #     init_cmd
+        # ]
+        
+        return [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             "ls",
             init_cmd

@@ -74,6 +74,12 @@ EOF
 apt-get update -y
 apt-get install -y iputils-ping
 
+apt-get install -y linux-tools-common linux-tools-generic
+apt-get update -y
+apt-get install -y linux-tools-$(uname -r) linux-cloud-tools-$(uname -r)
+apt-get install -y linux-tools-generic linux-cloud-tools-generic
+cargo install inferno
+
 
 # connect to internet:
 su
@@ -106,10 +112,10 @@ ip addr add 192.168.100.2/24 dev eth0
 su qflex
 
 # Test client:
-ping 192.168.100.1 -i 0.05 -c 10000000
+ping 192.168.100.1 -i 0.05 -c 10
 echo 'Hello from VM2!' | nc 192.168.100.1 5555
 
 
 # New test for server too:
-echo 'Hello from VM2!' | nc 192.168.100.2 5555
-ping 192.168.100.2 -i 0.05 -c 10000000
+echo 'Hello from VM2!' | nc 192.168.100.1 5555
+ping 192.168.100.2 -i 0.05 -c 10
