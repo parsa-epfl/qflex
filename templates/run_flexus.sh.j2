@@ -41,7 +41,7 @@ do
         -m {{ MEMORY }} \
         -boot menu=on \
         -bios ./QEMU_EFI.fd \
-        -drive if=virtio,file=root.qcow2,format=qcow2,snapshot=on,tmp-snapshot-name=snapshot_$idx \
+        -drive if=virtio,file={{ QEMU_IMAGE_NAME }},format=qcow2,snapshot=on,tmp-snapshot-name=snapshot_$idx \
         {{ QEMU_NIC }} \
         -rtc clock=vm \
         -loadvm snapshot_$idx,on-demand \

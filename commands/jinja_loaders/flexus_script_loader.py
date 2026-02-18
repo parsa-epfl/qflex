@@ -20,10 +20,12 @@ class FlexusScriptLoader(ParameterLoader):
         return result
 
     def get_context(self):
+        # TODO to move this to qemu args class, as without it we will have code divergance as seen with QEMU_IMAGE_NAME 
         return {
             # TODO add some check to make sure this core_count is not the doubled version as that is being sent in as a separate parameter
             "CORE_COUNT": self.experiment_context.simulation_context.core_count,
             "DOUBLED_VCPU": self.experiment_context.simulation_context.doubled_vcpu,
             "MEMORY": self.experiment_context.simulation_context.memory_gb * 1024,  # in MB
             "QEMU_NIC": self.experiment_context.simulation_context.qemu_nic.strip().lower(),
+            "QEMU_IMAGE_NAME": self.experiment_context.image_name,
         }
