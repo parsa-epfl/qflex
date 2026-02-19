@@ -7,6 +7,7 @@ from commands.boot import Boot
 from commands.config import ExperimentContext
 from commands.load import Load
 from commands.init_warm import InitWarm
+from commands.test_worm import TestWorm
 from commands.functional_warming import FunctionalWarming
 from commands.partition import PartitionCommand, CleanPartitionCommand
 from commands.run_partition import RunPartitionCommand
@@ -92,6 +93,27 @@ def initialize(
         skip_generate_cfg=skip_generate_cfg,
     )
     init_warm_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def test_worm(
+    experiment_context: ExperimentContext,
+    skip_generate_cfg: Annotated[bool, typer.Option(
+        help="Whether to skip generating configuration files."
+    )]=False,
+    branch_trace: Annotated[bool, typer.Option(
+        help="Whether to log branch PCs to per-core files."
+    )]=False,
+):
+    """
+    Run a test QEMU session with WormCache in normal mode (no snapshots).
+    """
+    test_worm_executor = TestWorm(
+        experiment_context=experiment_context,
+        skip_generate_cfg=skip_generate_cfg,
+        branch_trace=branch_trace,
+    )
+    test_worm_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))

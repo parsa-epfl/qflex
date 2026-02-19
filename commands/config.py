@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 import os
+import shutil
 import pandas
 
 from .host import Host, SMTHost, HOSTS, HostType
@@ -114,6 +115,7 @@ class ExperimentContext(BaseModel):
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
+    refresh_wormcache: bool = Field(default=False, description="Whether to refresh WormCacheQFlex in the experiment folder.")
 
     def get_mounting_folder(self) -> str:
         return self.mounting_folder
@@ -234,10 +236,16 @@ class ExperimentContext(BaseModel):
                 os.system(f"cp -u {f} {link_address}")
         # TODO turn WormCacheQFlex address into a parameter
         # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
-        if not os.path.exists(f"./WormCacheQFlex"):
-            raise FileNotFoundError("WormCacheQFlex folder not found in the working directory.")
-        if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"):
-            os.system(f"cp -r ./WormCacheQFlex {self.get_experiment_folder_address()}/lib/WormCacheQFlex")
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        wormcache_src = os.path.join(repo_root, "WormCacheQFlex")
+        if not os.path.exists(wormcache_src):
+            raise FileNotFoundError(f"WormCacheQFlex folder not found at {wormcache_src}.")
+        wormcache_dest = f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"
+        if not os.path.exists(wormcache_dest):
+            shutil.copytree(wormcache_src, wormcache_dest, symlinks=True)
+        elif self.refresh_wormcache:
+            shutil.rmtree(wormcache_dest)
+            shutil.copytree(wormcache_src, wormcache_dest, symlinks=True)
 
         # Move files to lib
         lib_files = [
@@ -354,7 +362,8 @@ def create_experiment_context(
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
     machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
-    include_affinity: bool = False
+    include_affinity: bool = False,
+    refresh_wormcache: bool = False
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -418,7 +427,8 @@ def create_experiment_context(
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
-        include_affinity=include_affinity
+        include_affinity=include_affinity,
+        refresh_wormcache=refresh_wormcache
     )
 
     e.set_up_folders()
