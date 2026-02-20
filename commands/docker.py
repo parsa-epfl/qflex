@@ -10,11 +10,19 @@ class DockerStarter(Executor):
                  mounting_folder: str,
                  debug: bool = False,
                  worm: bool = False,
+                 qpoints: bool = False,
+                 all_ext: bool = False,
                  start_directory: str = None):
         self.debug = debug
         self.worm = worm
+        self.qpoints = qpoints
+        self.all_ext = all_ext or (worm and qpoints)
         self.version = get_version()
-        self.docker_image_name = f"ghcr.io/parsa-epfl/qflex:{get_docker_image_name(debug=self.debug, worm=self.worm)}-{self.version}"
+        self.docker_image_name = (
+            f"ghcr.io/parsa-epfl/qflex:"
+            f"{get_docker_image_name(debug=self.debug, worm=self.worm, qpoints=self.qpoints, all_ext=self.all_ext)}"
+            f"-{self.version}"
+        )
         self.images_folder = './images'
         self.mounting_folder = os.path.abspath(mounting_folder)
         print(f"============== Using QFlex version: {self.version} ==============")
@@ -81,15 +89,25 @@ class DockerBuild(Executor):
     def __init__(self, 
                  debug: bool = False,
                  worm: bool = False,
+                 qpoints: bool = False,
+                 all_ext: bool = False,
                  worm_only: bool = False,
                  push: bool = False):
         self.debug = debug
         self.worm = worm
-        if self.worm:
+        self.qpoints = qpoints
+        self.all_ext = all_ext or (worm and qpoints)
+        if self.worm_only and (not self.worm or self.qpoints or self.all_ext):
+            raise AssertionError("--worm-only can only be used with --worm.")
+        if self.worm or self.all_ext:
             # Check if folder "WormCacheQFlex" exists
             assert os.path.isdir('./WormCacheQFlex'), "WormCacheQFlex folder not found. Please clone the WormCacheQFlex repository."
-        self.docker_base_image_name = get_docker_image_name(debug=self.debug, worm=False)
-        self.docker_image_name_with_worm = get_docker_image_name(debug=self.debug, worm=True)
+        if self.qpoints or self.all_ext:
+            assert os.path.isdir('./QPoints'), "QPoints folder not found. Please clone the QPoints repository."
+        self.docker_base_image_name = get_docker_image_name(debug=self.debug, worm=False, qpoints=False, all_ext=False)
+        self.docker_image_name_with_worm = get_docker_image_name(debug=self.debug, worm=True, qpoints=False, all_ext=False)
+        self.docker_image_name_with_qpoints = get_docker_image_name(debug=self.debug, worm=False, qpoints=True, all_ext=False)
+        self.docker_image_name_with_all = get_docker_image_name(debug=self.debug, worm=False, qpoints=False, all_ext=True)
         self.build_type = 'release'
         if self.debug:
             self.build_type = 'debug'
@@ -107,6 +125,12 @@ class DockerBuild(Executor):
 
         local_worm_name = f"{self.docker_image_name_with_worm}:{self.version}"
         ghcr_worm_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
+
+        local_qpoints_name = f"{self.docker_image_name_with_qpoints}:{self.version}"
+        ghcr_qpoints_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_qpoints}-{self.version}"
+
+        local_all_name = f"{self.docker_image_name_with_all}:{self.version}"
+        ghcr_all_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_all}-{self.version}"
 
         # TODO centeralize the ghcr.io/parsa-epfl/qflex part
         if not self.worm_only:
@@ -138,17 +162,44 @@ class DockerBuild(Executor):
             f"docker push {ghcr_worm_name}"
         ]
 
+        qpoints_image_cmd = [
+            f"""
+            docker buildx build -t {local_qpoints_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.QPoints .
+            """,
+            f"docker tag {local_qpoints_name} {ghcr_qpoints_name}"
+        ]
+        qpoints_image_push_cmd = [
+            f"docker push {ghcr_qpoints_name}"
+        ]
+
+        all_image_cmd = [
+            f"""
+            docker buildx build -t {local_all_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.QFlexAll .
+            """,
+            f"docker tag {local_all_name} {ghcr_all_name}"
+        ]
+        all_image_push_cmd = [
+            f"docker push {ghcr_all_name}"
+        ]
+
         base_cmd = base_image_build_cmd
         worm_cmd = worm_image_cmd
+        qpoints_cmd = qpoints_image_cmd
+        all_cmd = all_image_cmd
         if self.push:
             base_cmd += base_image_push_cmd
             worm_cmd += worm_image_push_cmd
+            qpoints_cmd += qpoints_image_push_cmd
+            all_cmd += all_image_push_cmd
 
 
 
         cmd = base_cmd
-        if self.worm:
+        if self.all_ext:
+            cmd += all_cmd
+        elif self.worm:
             cmd += worm_cmd
+        elif self.qpoints:
+            cmd += qpoints_cmd
 
         return cmd
-

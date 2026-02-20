@@ -1,0 +1,12 @@
+ARG BASE_IMAGE
+
+FROM ${BASE_IMAGE}
+
+WORKDIR /home/dev/qflex
+
+COPY ./WormCacheQFlex /home/dev/qflex/WormCacheQFlex
+COPY ./QPoints /home/dev/qflex/QPoints
+
+RUN bash /home/dev/qflex/QPoints/setup.sh
+
+CMD ["bash"]
