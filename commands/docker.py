@@ -97,6 +97,7 @@ class DockerBuild(Executor):
         self.worm = worm
         self.qpoints = qpoints
         self.all_ext = all_ext or (worm and qpoints)
+        self.worm_only = worm_only
         if self.worm_only and (not self.worm or self.qpoints or self.all_ext):
             raise AssertionError("--worm-only can only be used with --worm.")
         if self.worm or self.all_ext:
