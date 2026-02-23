@@ -12,6 +12,7 @@ from commands.functional_warming import FunctionalWarming
 from commands.partition import PartitionCommand, CleanPartitionCommand
 from commands.run_partition import RunPartitionCommand
 from commands.result import RunResultCommand
+from commands.qpoints import convert_single as qpoints_convert_single
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -20,6 +21,8 @@ app = typer.Typer(
     help="A CLI tool to manage QFlex operations. (suggest running ./qflex --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
 )
 
+qpoints_app = typer.Typer(help="QPoints utilities.")
+app.add_typer(qpoints_app, name="qpoints")
 
 @app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
 def create_base_image(
@@ -194,6 +197,38 @@ def result(
     )
     run_result_executor.execute(to_stdio=True, run_in_background=False)
 
+
+
+@qpoints_app.command("convert-single")
+def qpoints_convert_single_cmd(
+    qflex_ckp_dir: Annotated[str, typer.Option(help="QFlex checkpoint directory.")],
+    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")],
+    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
+    memory_gb: Annotated[int, typer.Option(help="Memory size in GB.")],
+    base: Annotated[str, typer.Option(help="Base disk image (qcow2).")],
+    snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")],
+    ssh_host: Annotated[str, typer.Option(help="SSH host for the VM.")] = "127.0.0.1",
+    ssh_user: Annotated[str, typer.Option(help="SSH user for the VM.")] = "qflex",
+    monitor_base: Annotated[int, typer.Option(help="Base port for QEMU monitor.")] = 45454,
+    qmp_base: Annotated[int, typer.Option(help="Base port for QMP.")] = 4444,
+    ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
+):
+    """
+    Convert a single QPoints snapshot by running the QEMU emulation and gem5 checkpoint generation.
+    """
+    qpoints_convert_single(
+        qflex_ckp_dir=qflex_ckp_dir,
+        gem5_ckp_dir=gem5_ckp_dir,
+        core_count=core_count,
+        memory_gb=memory_gb,
+        base=base,
+        snapshot=snapshot,
+        ssh_host=ssh_host,
+        ssh_user=ssh_user,
+        monitor_base=monitor_base,
+        qmp_base=qmp_base,
+        ssh_base=ssh_base,
+    )
 
 
 if __name__ == "__main__":
