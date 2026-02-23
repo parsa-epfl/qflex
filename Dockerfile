@@ -49,7 +49,7 @@ RUN pip install conan && pip cache purge
 # TODO everything before this, should be in another base image 
 # Copy local dir to container
 WORKDIR /home/dev/qflex
-COPY --link --exclude=parallel-qemu --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCacheQFlex . /home/dev/qflex
+COPY --link --exclude=parallel-qemu --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCacheQFlex --exclude=QPoints --exclude=.venv . /home/dev/qflex
 
 # Build QFlex
 
