@@ -1,8 +1,13 @@
 import os
-from commands import Executor
-from .config import ExperimentContext
 
-class RunPartitionCommand(Executor):
+import glob
+
+from .executer import ParallelExecutor
+from .config import ExperimentContext, clone_experiment_context
+from .run_single_partition import RunSinglePartitionCommand
+
+
+class RunPartitionCommand(ParallelExecutor):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
@@ -11,14 +16,26 @@ class RunPartitionCommand(Executor):
         self.experiment_context = experiment_context
         self.detailed_warming_ratio = warming_ratio
         self.measurement_ratio = measurement_ratio
-        self.experiment_folder = self.experiment_context.get_experiment_folder_address()
-        assert os.path.exists(f"{self.experiment_folder}/scripts/run_flexus.sh"), "Error: run_flexus.sh not found. Please run the init_warm command first to generate necessary scripts."
-        assert os.path.exists(f"{self.experiment_folder}/run_partitions.sh"), "Error: run_partitions.sh not found. Make sure partition command has been run."
+        # glob all folders with partition_idx
+        self.partition_folders = glob.glob(f"partition_*", root_dir=self.experiment_context.get_experiment_folder_address()+"/run")
+        self.partition_folders.sort()
+        if len(self.partition_folders) == 0:
+            raise ValueError(f"No partition folders found in {self.experiment_context.get_experiment_folder_address()}/run. Expected folders with prefix 'partition_'.")
+        self.idxs = [int(f.removeprefix(f"partition_")) for f in self.partition_folders]
+        self.idxs.sort()
+        for i in range(max(self.idxs)+1):
+            if i not in self.idxs:
+                raise ValueError(f"Missing partition folder for index {i}. Found partition folders for indices {self.idxs}.")
+        print(f"Found partition folders for indices {self.idxs}.")
+        
+        executors = []
+        for idx in self.idxs:
+            new_experiment_context = clone_experiment_context(self.experiment_context, partition_number=idx)
+            single_partition_cmd = RunSinglePartitionCommand(new_experiment_context, self.detailed_warming_ratio, self.measurement_ratio)
+            executors.append(single_partition_cmd)
 
+        print(f"Created RunSinglePartitionCommand executors for partition indices {self.idxs}.")
+        
+        super().__init__(executors)
 
-    def cmd(self) -> str:
-        # TODO get rid of partition at some point and move run_flexus.sh in our python commands
-        return [
-            f"cd {self.experiment_folder}",
-            f"{self.experiment_folder}/run_partitions.sh {self.detailed_warming_ratio} {self.measurement_ratio}"
-        ]
+        

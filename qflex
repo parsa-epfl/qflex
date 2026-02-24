@@ -10,6 +10,8 @@ from commands.init_warm import InitWarm
 from commands.functional_warming import FunctionalWarming
 from commands.partition import PartitionCommand, CleanPartitionCommand
 from commands.run_partition import RunPartitionCommand
+from commands.run_idx import RunIdxCommand
+from commands.run_single_partition import RunSinglePartitionCommand
 from commands.result import RunResultCommand
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
@@ -147,14 +149,48 @@ def partition_cleanup(
     partition_cleaner_executor.execute(to_stdio=True, run_in_background=False)
 
 
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def run_idx(
+    experiment_context: ExperimentContext,
+    idx: Annotated[int, typer.Option(help="Partition index to run.")] = 0,
+    warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
+    measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
+):
+    run_idx_executor = RunIdxCommand(
+        experiment_context=experiment_context,
+        idx=idx,
+        warming_ratio=warming_ratio,
+        measurement_ratio=measurement_ratio
+    )
+    run_idx_executor.execute(to_stdio=True, run_in_background=False)
+
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def run_single_partition(
+    experiment_context: ExperimentContext,
+    warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
+    measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
+):
+    run_single_partition_executor = RunSinglePartitionCommand(
+        experiment_context=experiment_context,
+        warming_ratio=warming_ratio,
+        measurement_ratio=measurement_ratio
+    )
+    run_single_partition_executor.execute(to_stdio=True, run_in_background=False)
+
 
 # TODO add formatting for the new variables outside exp_context
+# TODO change name to run_partitions
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def run_partition(
     experiment_context: ExperimentContext,
     warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
     measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
+    to_stdio: Annotated[bool, typer.Option(help="Whether to print the commands to stdio instead of running them.")] = False,
+    run_in_background: Annotated[bool, typer.Option(help="Whether to run the commands in background.")] = False,
 ):
     """
     This command runs the detailed (timing) simulations for each partition created by the partition command.
@@ -164,7 +200,7 @@ def run_partition(
         warming_ratio=warming_ratio,
         measurement_ratio=measurement_ratio
     )
-    run_partition_executor.execute(to_stdio=True, run_in_background=False)
+    run_partition_executor.execute(to_stdio=to_stdio, run_in_background=run_in_background)
 
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
