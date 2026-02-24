@@ -14,6 +14,7 @@ from commands.run_partition import RunPartitionCommand
 from commands.result import RunResultCommand
 from commands.qpoints import convert_single as qpoints_convert_single
 from commands.qpoints import convert_multi as qpoints_convert_multi
+from commands.qpoints import run_gem5 as qpoints_run_gem5
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -267,6 +268,28 @@ def qpoints_convert_multi_cmd(
         monitor_base=monitor_base,
         qmp_base=qmp_base,
         ssh_base=ssh_base,
+    )
+
+
+@qpoints_app.command("run-gem5")
+def qpoints_run_gem5_cmd(
+    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")],
+    experiment: Annotated[str, typer.Option(help="Experiment name.")],
+    snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")],
+    inst: Annotated[int, typer.Option(help="Instruction count.")],
+    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
+    branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging.")] = False,
+):
+    """
+    Run gem5 for a single snapshot using QPoints run_gem5.sh.
+    """
+    qpoints_run_gem5(
+        gem5_ckp_dir=gem5_ckp_dir,
+        experiment=experiment,
+        snapshot=snapshot,
+        inst=inst,
+        core_count=core_count,
+        branch_trace=branch_trace,
     )
 
 

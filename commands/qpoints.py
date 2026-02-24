@@ -243,3 +243,38 @@ def convert_multi(
         text=True,
         check=True,
     )
+
+
+def run_gem5(
+    gem5_ckp_dir: str,
+    experiment: str,
+    snapshot: str,
+    inst: int,
+    core_count: int,
+    branch_trace: bool = False,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    qpoints_root = repo_root / "QPoints"
+    run_gem5_sh = qpoints_root / "run_gem5.sh"
+    args = [
+        "bash",
+        str(run_gem5_sh),
+        "--gem5-ckp-dir",
+        gem5_ckp_dir,
+        "--experiment",
+        experiment,
+        "--snapshot",
+        snapshot,
+        "--inst",
+        str(inst),
+        "--cores",
+        str(core_count),
+    ]
+    if branch_trace:
+        args.append("--branch-trace")
+    subprocess.run(
+        args,
+        cwd=str(qpoints_root),
+        text=True,
+        check=True,
+    )
