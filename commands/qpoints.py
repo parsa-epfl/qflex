@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+import sys
+import signal
 
 
 def _ensure_executable(path: Path) -> None:
@@ -23,6 +25,7 @@ def convert_single(
     monitor_base: int = 45454,
     qmp_base: int = 4444,
     ssh_base: int = 2222,
+    overwrite: bool = False,
 ) -> None:
     start_time = time.time()
 
@@ -49,7 +52,25 @@ def convert_single(
 
     qemu_log = run_dir / f"qemu_emu_{snapshot}.log"
     qemu_proc = None
+    def _terminate_qemu() -> None:
+        if qemu_proc is None:
+            return
+        if qemu_proc.poll() is not None:
+            return
+        qemu_proc.terminate()
+        try:
+            qemu_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            qemu_proc.kill()
+            qemu_proc.wait()
+
+    def _handle_signal(_signum, _frame) -> None:
+        _terminate_qemu()
+        raise KeyboardInterrupt
     try:
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+        print(f"[{snapshot}] starting qemu emulation")
         with qemu_log.open("w") as log_file:
             qemu_proc = subprocess.Popen(
                 [
@@ -97,11 +118,31 @@ def convert_single(
             print(f"[{snapshot}] waiting for vm ssh ({ssh_user}@{ssh_host}:{ssh_port})...")
             time.sleep(0.5)
 
+        print(f"[{snapshot}] generating gem5 checkpoint")
+        img_dest_dir = Path(gem5_ckp_dir) / snapshot
+        if img_dest_dir.exists():
+            if overwrite:
+                shutil.rmtree(img_dest_dir)
+            elif sys.stdin.isatty():
+                resp = input(
+                    f"Destination directory already exists: {img_dest_dir}\n"
+                    "Delete it and proceed? [y/n]: "
+                )
+                if resp.strip().lower() not in {"y", "yes"}:
+                    raise RuntimeError("Aborting.")
+                shutil.rmtree(img_dest_dir)
+            else:
+                raise RuntimeError(
+                    f"Destination directory already exists: {img_dest_dir}. "
+                    "Re-run with --overwrite to remove it."
+                )
+
         gen_snapshot = qpoints_root / "gen_snapshot.sh"
         tmp_log = run_dir / f"gen_snapshot_{snapshot}.log"
         with tmp_log.open("w") as err_log:
             subprocess.run(
                 [
+                    "bash",
                     str(gen_snapshot),
                     gem5_ckp_dir,
                     snapshot,
@@ -111,16 +152,17 @@ def convert_single(
                     str(monitor_port),
                 ],
                 stderr=err_log,
+                cwd=str(qpoints_root),
                 text=True,
                 check=True,
             )
 
-        img_dest_dir = Path(gem5_ckp_dir) / snapshot
         if img_dest_dir.is_dir():
             shutil.move(str(tmp_log), str(img_dest_dir / tmp_log.name))
         else:
             raise RuntimeError(f"[{snapshot}] Destination directory does not exist: {img_dest_dir}")
 
+        print(f"[{snapshot}] converting disk image")
         convert_sh = run_dir / "convert.sh"
         if not convert_sh.exists():
             src = qpoints_root / "scripts" / "qflex" / "convert.sh"
@@ -128,7 +170,7 @@ def convert_single(
         _ensure_executable(convert_sh)
 
         subprocess.run(
-            [str(convert_sh), base, snapshot],
+            ["bash", str(convert_sh), base, snapshot],
             cwd=str(run_dir),
             text=True,
             check=True,
@@ -140,9 +182,9 @@ def convert_single(
         else:
             raise RuntimeError(f"[{snapshot}] Converted image not found: {img_src}")
     except KeyboardInterrupt:
-        if qemu_proc is not None:
-            qemu_proc.terminate()
+        _terminate_qemu()
         raise
     finally:
+        _terminate_qemu()
         elapsed = int(time.time() - start_time)
         print(f"[{snapshot}] convert-single completed in {elapsed}s")

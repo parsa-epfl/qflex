@@ -212,6 +212,7 @@ def qpoints_convert_single_cmd(
     monitor_base: Annotated[int, typer.Option(help="Base port for QEMU monitor.")] = 45454,
     qmp_base: Annotated[int, typer.Option(help="Base port for QMP.")] = 4444,
     ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
+    overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directory.")] = False,
 ):
     """
     Convert a single QPoints snapshot by running the QEMU emulation and gem5 checkpoint generation.
@@ -228,6 +229,7 @@ def qpoints_convert_single_cmd(
         monitor_base=monitor_base,
         qmp_base=qmp_base,
         ssh_base=ssh_base,
+        overwrite=overwrite,
     )
 
 
