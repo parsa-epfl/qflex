@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 import sys
 import signal
+import threading
+import concurrent.futures
 
 
 def _ensure_executable(path: Path) -> None:
@@ -68,8 +70,9 @@ def convert_single(
         _terminate_qemu()
         raise KeyboardInterrupt
     try:
-        signal.signal(signal.SIGINT, _handle_signal)
-        signal.signal(signal.SIGTERM, _handle_signal)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, _handle_signal)
+            signal.signal(signal.SIGTERM, _handle_signal)
         print(f"[{snapshot}] starting qemu emulation")
         with qemu_log.open("w") as log_file:
             qemu_proc = subprocess.Popen(
@@ -204,45 +207,57 @@ def convert_multi(
     monitor_base: int = 45454,
     qmp_base: int = 4444,
     ssh_base: int = 2222,
+    overwrite: bool = False,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    qpoints_root = repo_root / "QPoints"
-    run_all_multi = qpoints_root / "run_all_multi_snapshot.sh"
-    subprocess.run(
-        [
-            "bash",
-            str(run_all_multi),
-            "--first",
-            first,
-            "--last",
-            last,
-            "--parallel",
-            str(parallel),
-            "--qflex-ckp-dir",
-            qflex_ckp_dir,
-            "--gem5-ckp-dir",
-            gem5_ckp_dir,
-            "--core-count",
-            str(core_count),
-            "--memory-gb",
-            str(memory_gb),
-            "--base",
-            base,
-            "--ssh-host",
-            ssh_host,
-            "--ssh-user",
-            ssh_user,
-            "--monitor-base",
-            str(monitor_base),
-            "--qmp-base",
-            str(qmp_base),
-            "--ssh-base",
-            str(ssh_base),
-        ],
-        cwd=str(qpoints_root),
-        text=True,
-        check=True,
-    )
+    first_match = re.fullmatch(r"snapshot_(\d+)", first)
+    last_match = re.fullmatch(r"snapshot_(\d+)", last)
+    if not first_match or not last_match:
+        raise RuntimeError("First/last must be in the form snapshot_N.")
+    first_idx = int(first_match.group(1))
+    last_idx = int(last_match.group(1))
+    if first_idx > last_idx:
+        raise RuntimeError("First snapshot index must be <= last snapshot index.")
+    if parallel < 1:
+        raise RuntimeError("Parallel must be >= 1.")
+
+    snapshots = [f"snapshot_{i}" for i in range(first_idx, last_idx + 1)]
+    start_time = time.time()
+    errors = []
+
+    def _run(snapshot: str) -> None:
+        convert_single(
+            qflex_ckp_dir=qflex_ckp_dir,
+            gem5_ckp_dir=gem5_ckp_dir,
+            core_count=core_count,
+            memory_gb=memory_gb,
+            base=base,
+            snapshot=snapshot,
+            ssh_host=ssh_host,
+            ssh_user=ssh_user,
+            monitor_base=monitor_base,
+            qmp_base=qmp_base,
+            ssh_base=ssh_base,
+            overwrite=overwrite,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
+        future_map = {executor.submit(_run, snap): snap for snap in snapshots}
+        for future in concurrent.futures.as_completed(future_map):
+            snap = future_map[future]
+            try:
+                future.result()
+            except Exception as exc:
+                errors.append((snap, exc))
+                for pending in future_map:
+                    pending.cancel()
+                break
+
+    if errors:
+        snap, exc = errors[0]
+        raise RuntimeError(f"convert-multi failed at {snap}: {exc}") from exc
+
+    elapsed = int(time.time() - start_time)
+    print(f"convert-multi completed in {elapsed}s")
 
 
 def run_gem5(
