@@ -2,6 +2,9 @@
 WormCache/.git/
 QPoints/.git/
 p-qemu/.git/
+QPoints/.gitmodules
+QPoints/.gitignore
+WormCacheQFlex/.git/
 replica/.git/
 replica/
 qflex.args
