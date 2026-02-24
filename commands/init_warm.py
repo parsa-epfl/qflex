@@ -45,6 +45,8 @@ class InitWarm(Executor):
 
 
     def build_worm_cache(self) -> List[str]:
+        print("building workm cache")
+        # TODO fix bug of not being able to recompile in docker, and let it be compilable and also make this step fully compile things, one file at least is not being removed after recompilation in exp folder
         experiment_folder = self.experiment_context.get_experiment_folder_address()
         return [
             f"cp {self.worm_params_address} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",
@@ -63,14 +65,20 @@ class InitWarm(Executor):
 
         # TODO check if we need variables for the plugin
         init_cmd = f"""
-        ./qemu-system-aarch64 \
+        gdb -ex run --args ./qemu-system-aarch64 \
         {self.qemu_common_parser.get_qemu_base_args()} \
         {self.qemu_common_parser.quantum_args()} \
         -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init
         """
 
 
-        return self.build_worm_cache() + [
+        # return self.build_worm_cache() + [
+        #     f"cd {self.experiment_context.get_experiment_folder_address()}/run",
+        #     "ls",
+        #     init_cmd
+        # ]
+        
+        return [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             "ls",
             init_cmd

@@ -68,14 +68,22 @@ mem_folder_name = glob.glob("*.mem")
 assert len(mem_folder_name) == 1, "There should be exactly one memory checkpoint file in the current folder."
 mem_folder_name = mem_folder_name[0]
 
+
+#TODO this needs to be fixed later to get it from exp config
+# Find the file with root*.qcow2 in the current folder, and check if there is exactly one such file.
+qcow2_files = glob.glob("root*.qcow2")
+assert len(qcow2_files) == 1, "There should be exactly one qcow2 file in the current folder."
+qcow2_file_name = qcow2_files[0] 
+
 # Create symbolic links for the necessary bindary files in the current folder.
 NECESSARY_BINARY_FILES = [
     "QEMU_EFI.fd",
-    "root.qcow2",
+    qcow2_file_name,
     "debug.cfg",
     "../cfg/flexus_configuration.json",
     "../cfg/timing.cfg",
     "../bin/checkpoint_conversion",
+    "efi-e1000.rom",
     mem_folder_name,
 ]
 

@@ -1,6 +1,7 @@
 import abc
 import subprocess
 import os
+from typing import List, Tuple
 
 
 class Executor(abc.ABC):
@@ -48,3 +49,33 @@ class Executor(abc.ABC):
                 cwd=cwd,
             )
             return r
+        
+class ParallelExecutor(Executor):
+
+    def cmd(self) -> str:
+        raise NotImplementedError("ParallelExecutor call childrens execute instead.")
+
+    def __init__(self, children: list[Executor]):
+        self.children = children
+
+    def execute(self, to_stdio: bool = False, run_in_background: bool = False):
+        processes: List[Tuple[Executor, subprocess.Popen]] = []
+        for child in self.children:
+            proc = child.execute(to_stdio=to_stdio, run_in_background=run_in_background)
+            processes.append((child, proc))
+
+        if run_in_background:
+            return processes
+
+        for _, proc in processes:
+            proc.wait()
+            print(f"Process for {proc.args} finished with return code {proc.returncode}.")
+
+        failed = [(child, proc) for child, proc in processes if proc.returncode != 0]
+        if failed:
+            descriptions = [f"  {child.__class__.__name__} (rc={proc.returncode})" for child, proc in failed]
+            raise RuntimeError(
+                f"{len(failed)}/{len(processes)} parallel tasks failed:\n" + "\n".join(descriptions)
+            )
+
+        return processes

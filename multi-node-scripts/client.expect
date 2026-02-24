@@ -1,0 +1,40 @@
+# CLIENT
+set timeout 1000
+set logfile [open "/mnt/sdb/pooria-multi-node/timing.log" "a"]
+spawn xargs -a ./multi-node-scripts/qflex.multinode.args -- ./qflex multi --node-number 1 --experiment-name multi_node_experiment1 --loadvm-name boot-pooria-multinode2
+set qemu_stdio2 $spawn_id
+
+send  -i $qemu_stdio2 -- "\r\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+# show links (optional)
+send  -i $qemu_stdio2 -- "ip link show\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+# EXACT sequence you asked for:
+send  -i $qemu_stdio2 -- "ip link set enp0s2 up\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+send  -i $qemu_stdio2 -- "ip addr add 192.168.100.2/24 dev enp0s2\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+# test connectivity
+
+
+# set start [clock milliseconds]
+# send  -i $qemu_stdio2 -- "ping -c 2 -D 192.168.100.1\r"
+# expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+# set elapsed [expr {[clock milliseconds] - $start}]
+# puts $logfile "Time elapsed for taking ping down: $elapsed ms"
+set start [clock milliseconds]
+
+send  -i $qemu_stdio2 -- "echo 'Hello from VM2!' | nc -q 0 192.168.100.1 5555\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+set elapsed [expr {[clock milliseconds] - $start}]
+puts $logfile "Time elapsed for taking final down: $elapsed ms"
+
+send  -i $qemu_stdio2 -- "echo 'going back to client'\r\r\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+
+send  -i $qemu_stdio2 -- "echo 'Test complete on VM2'\r"
+expect -i $qemu_stdio2 -re {root@ubuntu:.*#\s?$}
+flush $logfile

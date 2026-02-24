@@ -1,6 +1,9 @@
-from pydantic import BaseModel, Field
+from typing import List
+
+from pydantic import BaseModel, Field, PrivateAttr
 import os
 import pandas
+
 
 from .host import Host, SMTHost, HOSTS, HostType
 from .workload import Workload, create_workload
@@ -39,7 +42,7 @@ class SimulationContext(BaseModel):
     mem_controller_count: int = Field(description="number of memory controllers")
     mem_controller_positions: str = Field(description="positions of memory controllers")
     memory_gb: int = Field(description="memory size in GB")
-    qemu_nic: str = Field(description="type of NIC to use in QEMU")
+    qemu_nic: str = Field(description="type of NIC to use in QEMU, this is in addition to connecting to internet and other nodes that are there by default.")
     quantum_size: int = Field(description="quantum size for the simulator in nanoseconds")
     is_parallel: bool = Field(default=True, description="whether the simulation is parallel or not")
     check_period_quantum_coeff: float = Field(default=53.0, description="Coefficient to determine the check period based on quantum size")
@@ -113,7 +116,45 @@ class ExperimentContext(BaseModel):
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
+    seed_image_address: str = Field(default="", description="Full address of the seed image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
+    node_number: int = Field(default=-1, description="Node number in multi-node setup, -1 means single node. 0 is the master node.")
+
+    neighbor_node_list: List[int] = Field(default=[], description="List of neighbor node numbers in multi-node setup.")
+    latencies_ns_list: List[int] = Field(default=[], description="List of latencies to neighbor nodes in nanoseconds.")
+    syncs_list: List[str] = Field(default=[], description="List of sync settings ('true' or 'false') for neighbor nodes.")
+    partition_number: int = Field(default=-1, description="Partition number for this node, used for some qemu options.")
+    seed_image_name: str = Field(default='', description="Name of the seed image file to use in multi-node setup.")
+    telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
+    use_telnet_monitor: bool = Field(default=False, description="Whether to use telnet monitor for QEMU instead of stdio.")
+    _creation_kwargs: dict = PrivateAttr(default_factory=dict)
+
+
+    def get_partition_folder(self) -> str:
+        if self.partition_number < 0:
+            raise ValueError("Partition number is not set for this experiment context.")
+        return self.get_experiment_folder_address() + f"/run/partition_{self.partition_number}"
+
+    def is_multi_node(self) -> bool:
+        return self.node_number >= 0
+
+    def get_neighbor_count(self) -> int:
+        return len(self.neighbor_node_list)
+
+    def is_master_node(self) -> bool:
+        return self.node_number == 0
+
+    def get_shm_names(self, recieve: bool) -> List[str]:
+        shm_names = []
+        partition_str = ""
+        if self.partition_number >= 0:
+            partition_str = f"part_{self.partition_number}_"
+        for neighbor in self.neighbor_node_list:
+            if recieve:
+                shm_names.append(f"pdes_{neighbor}_to_{self.node_number}"+partition_str)
+            else:
+                shm_names.append(f"pdes_{self.node_number}_to_{neighbor}"+partition_str)
+        return shm_names
 
     def get_mounting_folder(self) -> str:
         return self.mounting_folder
@@ -133,13 +174,32 @@ class ExperimentContext(BaseModel):
     def get_pflex_qemu_build_folder(self) -> str:
         return f'{self.get_experiment_folder_address()}/parallel-qemu-saved'
     
+
+    def copy_image_for_node(self, image_folder: str, parent_file_name: str):
+
+        file_name_parts = parent_file_name.split('.')
+
+        old_address = f"{image_folder}/{parent_file_name}"
+
+        new_file_name = '.'.join(file_name_parts[:-1]) + f'-node{self.node_number}.' + file_name_parts[-1]
+        new_address = f"{image_folder}/{new_file_name}"
+
+        if not os.path.exists(new_address):
+            print(f"Creating node specific file for node {self.node_number} at {new_address}...")
+            os.system(f"cp -u {old_address} {new_address}")
+
+        return new_address, new_file_name
+
     def set_up_image(self):
 
+        self.seed_image_address = f"{self.image_folder}/{self.seed_image_name}"
         if self.use_image_directly:
             self.image_address = f"{self.image_folder}/{self.image_name}"
         else:
             # TODO add some checks for this
             # Check if base image exists in root folder
+            # TODO remove this part, too
+            raise Exception("Deprecated")
             self.image_address = f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}"
             experiment_folder_for_images_exists = os.path.exists(self.get_experiment_folder_address())
             experimage_image_exists = os.path.exists(self.get_local_image_address())
@@ -163,9 +223,15 @@ class ExperimentContext(BaseModel):
                 print(f"cp {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
                 os.system(f"cp -u {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
                 print("copied image, creating symlink...")
+                
                 # Create a symlink to the new image in the experiment folder
                 os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
                 print(f"Linked image to")
+            
+        if self.node_number >=0:
+            self.image_address, self.image_name = self.copy_image_for_node(self.image_folder, self.image_name)
+            if self.seed_image_name is not None and len(self.seed_image_name) > 0:
+                self.seed_image_address, self.seed_image_name = self.copy_image_for_node(self.image_folder, self.seed_image_name)
 
             
 
@@ -216,6 +282,7 @@ class ExperimentContext(BaseModel):
             "./QEMU_EFI.fd", 
             "./qemu-saved/build/qemu-system-aarch64",
             "./parallel-qemu-saved/pc-bios/efi-virtio.rom",
+            "./parallel-qemu-saved/pc-bios/efi-e1000.rom",
             "./qemu-img",
             "debug.cfg",
         ]
@@ -230,8 +297,7 @@ class ExperimentContext(BaseModel):
             else:
                 link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
 
-            if not os.path.exists(link_address):
-                os.system(f"cp -u {f} {link_address}")
+            os.system(f"cp -u {f} {link_address}")
         # TODO turn WormCacheQFlex address into a parameter
         # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
         if not os.path.exists(f"./WormCacheQFlex"):
@@ -253,6 +319,35 @@ class ExperimentContext(BaseModel):
         
 
 
+    def setup_nic_args(self):
+        # TODO move this to simulation context later
+        # nic_command = self.simulation_context.qemu_nic.strip().lower()
+        nic_command = self.simulation_context.qemu_nic.strip().lower() + " "
+        if self.is_multi_node():
+            
+            shm_recvs = self.get_shm_names(recieve=True)
+            shm_sends = self.get_shm_names(recieve=False)
+            for i in range(self.get_neighbor_count()):
+                shm_recv = shm_recvs[i]
+                shm_send = shm_sends[i]
+                sync = self.syncs_list[i]
+                latency_ns = self.latencies_ns_list[i]
+                # TODO double check that nothing is left constant here
+                nic_command = nic_command + f"""  -netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()} -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}  """
+
+
+        internet_nic = ' -netdev user,id=net1 -device e1000,netdev=net1 '
+        nic_command = nic_command + internet_nic
+
+
+        self.simulation_context.qemu_nic = nic_command.strip().lower()
+
+
+        if self.use_telnet_monitor:
+            if self.telnet_port == -1:
+                self.telnet_port = 55558 
+                if self.is_multi_node():
+                    self.telnet_port += self.node_number
 
     def get_ipns_per_core(self) -> list[IPNSInfo]:
 
@@ -354,11 +449,34 @@ def create_experiment_context(
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
     machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
-    include_affinity: bool = False
+    include_affinity: bool = False,
+    
+    # Multi-node parameters
+    node_number: int = -1,
+    neighbor_node_list: List[int] = [],
+    latencies_ns_list: List[int] = [],
+    syncs_list: List[str] = [],
+    seed_image_name: str = '',
+    telnet_port: int = -1,
+    use_telnet_monitor: bool = False,
+    partition_number: int = -1,
 ) -> ExperimentContext:
+    
+    creation_kwargs = {k: v for k, v in locals().items()}
+
     # assert False
     # TODO add how to create experiment name
 
+    neighbers_length = min([len(neighbor_node_list), len(latencies_ns_list), len(syncs_list)])
+    if neighbers_length > 0 or node_number != -1:
+
+        for value in set(syncs_list):
+            assert value in ['true', 'false'], "syncs values must be either 'true' or 'false'"
+
+        assert len(neighbor_node_list) == len(latencies_ns_list) == len(syncs_list)
+        assert node_number != -1, "node_number must be set when neighbor nodes are specified."
+        assert neighbers_length > 0, "neighbor_node_list, latencies_ns_list, and syncs_list must have at least one entry when node_number is set."
+        print(f"Node {node_number} has neighbors: {neighbor_node_list} with latencies {latencies_ns_list} and syncs {syncs_list}")
     
     # TODO check this to make sure it doesn't have edge cases
     mounting_folder = os.path.abspath(mounting_folder)
@@ -418,14 +536,38 @@ def create_experiment_context(
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
-        include_affinity=include_affinity
+        include_affinity=include_affinity,
+        node_number=node_number,
+        neighbor_node_list=neighbor_node_list,
+        latencies_ns_list=latencies_ns_list,
+        syncs_list=syncs_list,
+        seed_image_name=seed_image_name,
+        telnet_port=telnet_port,
+        use_telnet_monitor=use_telnet_monitor,
+        partition_number=partition_number,
     )
 
     e.set_up_folders()
+    e.setup_nic_args()
+    e._creation_kwargs = creation_kwargs
 
     # TODO add a print config so every one sees the final config
     return e
+
+def clone_experiment_context(
+    source: ExperimentContext,
+    **overrides
+) -> ExperimentContext:
+    """
+    Re-create an ExperimentContext from scratch via create_experiment_context,
+    using the original creation params with any overrides applied.
+    """
+    if not source._creation_kwargs:
+        raise ValueError("Source ExperimentContext has no stored creation kwargs. "
+                         "Was it created via create_experiment_context?")
     
+    kwargs = {**source._creation_kwargs, **overrides}
+    return create_experiment_context(**kwargs)
 
 
 def get_capital_dict(variable: BaseModel):

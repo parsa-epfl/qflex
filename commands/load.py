@@ -1,22 +1,32 @@
 from commands import Executor
 from .config import ExperimentContext
 from commands.qemu import QemuCommonArgParser   
+# TODO IMPORTANT, remove vanilla option
 
 
 class Load(Executor):
 
     def __init__(self,
-                 experiment_context: ExperimentContext,):
+                 experiment_context: ExperimentContext,
+                 vanilla: bool = False):
         self.experiment_context = experiment_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
+        self.vanilla = vanilla
 
     def cmd(self) -> str:
         
-        load_cmd = f"""
-        ./qemu-system-aarch64 \
-        {self.qemu_common_parser.get_qemu_base_args()} \
-        {self.qemu_common_parser.quantum_args()}
-        """
+        if not self.vanilla:
+            load_cmd = f"""
+            gdb -ex run --args ./qemu-system-aarch64 \
+            {self.qemu_common_parser.get_qemu_base_args()} \
+            -icount shift=0,align=off,sleep=off
+            """
+        else:
+            load_cmd = f"""
+            ./vanilla-qemu-system-aarch64 \
+            {self.qemu_common_parser.get_qemu_base_args()} \
+            -icount shift=0,align=off,sleep=off
+            """
     
         # WormCacheQFlex/src/parameter.rss
         return [
