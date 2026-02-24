@@ -47,9 +47,10 @@ RUN apt install -y --no-install-recommends htop
 RUN pip install conan && pip cache purge
 
 # TODO everything before this, should be in another base image 
-# Copy local dir to container
 WORKDIR /home/dev/qflex
-COPY --link --exclude=parallel-qemu --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCacheQFlex --exclude=QPoints --exclude=.venv . /home/dev/qflex
+# Copy only build inputs to keep cache stable
+COPY --link flexus /home/dev/qflex/flexus
+COPY --link build build-multiple-kraken_vanilla.py /home/dev/qflex/
 
 # Build QFlex
 
@@ -95,13 +96,12 @@ WORKDIR /home/dev/qflex
 RUN ln -s /home/dev/qflex/parallel-qemu-saved/build/aarch64-softmmu/qemu-system-aarch64 /home/dev/qflex/qemu-aarch64
 RUN ln -s /home/dev/qflex/parallel-qemu-saved/build/qemu-img /home/dev/qflex/qemu-img
 
+COPY --link requirements.txt /home/dev/qflex/requirements.txt
 RUN pip install -r requirements.txt
-COPY  ./commands /home/dev/qflex/commands
-COPY ./typer_inputs /home/dev/qflex/typer_inputs
-COPY ./qflex /home/dev/qflex
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-COPY ./QEMU_EFI.fd /home/dev/qflex/QEMU_EFI.fd
+# Copy the runtime files after builds to avoid invalidating build cache
+COPY --link --exclude=parallel-qemu --exclude=qemu --exclude=WormCacheQFlex --exclude=QPoints --exclude=.venv . /home/dev/qflex
 
 # TODO this is hardcoded as typer doesn't have a way to generate completions from within docker build, as long as tool is called qflex this is ok
 RUN cat /home/dev/qflex/completion_docker.txt >> /root/.bashrc
