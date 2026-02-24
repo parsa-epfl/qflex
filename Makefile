@@ -13,17 +13,39 @@ install-dev-requirements:
 	pip install uv && \
 	uv tool install bump-my-version
 
-qemu-config:
+flexus-config:
+	conan profile detect --force
+
+
+build-kraken:
+	python3 build-multiple-kraken_vanilla.py && \
+	rm -rf ./kraken_out&& \
+	mkdir -p ./kraken_out && \
+	cp -r out/lib/Release/* ./kraken_out && \
+	rm -rf out
+
+flexus-build:
 ifndef MODE
-	$(error MODE is not set. Usage: make qemu-build MODE=debug|release)
+	$(error MODE is not set. Usage: make flexus-config MODE=debug|release)
 endif
-	conan profile detect --force && \
 	conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of ./out -b missing && \
 	conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of ./out -b missing && \
 	conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of ./out && \
 	conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of ./out && \
+	make build-kraken
+
+flexus-clean-build:
+ifndef MODE
+	$(error MODE is not set. Usage: make flexus-config MODE=debug|release)
+endif
+	make flexus-build MODE=$(MODE) && \
 	conan cache clean -v && \
-	conan remove -c "*" && \
+	conan remove -c "*"
+
+qemu-config:
+ifndef MODE
+	$(error MODE is not set. Usage: make qemu-build MODE=debug|release)
+endif
 	cd qemu && \
 	./configure --target-list=aarch64-softmmu       \
 	--disable-docs                      \
@@ -44,12 +66,6 @@ qemu-move-files:
 	cp -r ./qemu/pc-bios ./qemu-saved/pc-bios && \
 	cp -r ./qemu/build ./qemu-saved/build
 
-build-kraken:
-	python3 build-multiple-kraken_vanilla.py && \
-	rm -rf ./kraken_out&& \
-	mkdir -p ./kraken_out && \
-	cp -r out/lib/Release/* ./kraken_out && \
-	rm -rf out
 
 
 qemu-ninja:
