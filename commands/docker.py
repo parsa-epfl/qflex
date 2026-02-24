@@ -123,6 +123,8 @@ class DockerBuild(Executor):
         
         local_qflex_name = f"{self.docker_base_image_name}:{self.version}"
         ghcr_qflex_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-{self.version}"
+        local_qflex_build_name = f"{self.docker_base_image_name}-build:{self.version}"
+        ghcr_qflex_build_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-build-{self.version}"
 
         local_worm_name = f"{self.docker_image_name_with_worm}:{self.version}"
         ghcr_worm_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
@@ -137,11 +139,16 @@ class DockerBuild(Executor):
         if not self.worm_only:
             base_image_build_cmd = [
                 f"""
-                docker buildx build -t {local_qflex_name} --build-arg MODE={self.build_type} .
+                docker buildx build -t {local_qflex_build_name} --build-arg MODE={self.build_type} --target base-build .
                 """,
+                f"""
+                docker buildx build -t {local_qflex_name} --build-arg MODE={self.build_type} --target base-runtime .
+                """,
+                f"docker tag {local_qflex_build_name} {ghcr_qflex_build_name}",
                 f"docker tag {local_qflex_name} {ghcr_qflex_name}"
             ]
             base_image_push_cmd = [
+                f"docker push {ghcr_qflex_build_name}",
                 f"docker push {ghcr_qflex_name}"
             ]
         else:
@@ -154,7 +161,7 @@ class DockerBuild(Executor):
 
         worm_image_cmd = [
             f"""
-            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.WormCacheQFlex .
+            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_build_name} -f Dockerfile.WormCacheQFlex .
             """,
             f"docker tag {local_worm_name} {ghcr_worm_name}"
         ]
@@ -165,7 +172,7 @@ class DockerBuild(Executor):
 
         qpoints_image_cmd = [
             f"""
-            docker buildx build -t {local_qpoints_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.QPoints .
+            docker buildx build -t {local_qpoints_name} --build-arg BASE_IMAGE={ghcr_qflex_build_name} -f Dockerfile.QPoints .
             """,
             f"docker tag {local_qpoints_name} {ghcr_qpoints_name}"
         ]
@@ -175,7 +182,7 @@ class DockerBuild(Executor):
 
         all_image_cmd = [
             f"""
-            docker buildx build -t {local_all_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.QFlexAll .
+            docker buildx build -t {local_all_name} --build-arg BASE_IMAGE={ghcr_qflex_build_name} -f Dockerfile.QFlexAll .
             """,
             f"docker tag {local_all_name} {ghcr_all_name}"
         ]

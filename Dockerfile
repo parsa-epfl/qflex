@@ -2,7 +2,7 @@
 
 # TODO changed docker version due to mirrors being down, change back to latest when possible
 # First Stage - Build environement
-FROM ubuntu:22.04 AS build
+FROM ubuntu:22.04 AS base-build
 
 ENV DEBIAN_FRONTEND=noninteractive
 # TODO once mirrors are back change back to gcc-14
@@ -99,6 +99,10 @@ RUN ln -s /home/dev/qflex/parallel-qemu-saved/build/qemu-img /home/dev/qflex/qem
 COPY --link requirements.txt /home/dev/qflex/requirements.txt
 RUN pip install -r requirements.txt
 RUN ln -s /usr/bin/python3 /usr/bin/python
+
+FROM base-build AS base-runtime
+
+WORKDIR /home/dev/qflex
 
 # Copy the runtime files after builds to avoid invalidating build cache
 COPY --link --exclude=parallel-qemu --exclude=qemu --exclude=WormCacheQFlex --exclude=QPoints --exclude=.venv . /home/dev/qflex
