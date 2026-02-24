@@ -1,6 +1,6 @@
 from typing import List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 import os
 import pandas
 
@@ -123,9 +123,17 @@ class ExperimentContext(BaseModel):
     neighbor_node_list: List[int] = Field(default=[], description="List of neighbor node numbers in multi-node setup.")
     latencies_ns_list: List[int] = Field(default=[], description="List of latencies to neighbor nodes in nanoseconds.")
     syncs_list: List[str] = Field(default=[], description="List of sync settings ('true' or 'false') for neighbor nodes.")
+    partition_number: int = Field(default=-1, description="Partition number for this node, used for some qemu options.")
     seed_image_name: str = Field(default='', description="Name of the seed image file to use in multi-node setup.")
     telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
     use_telnet_monitor: bool = Field(default=False, description="Whether to use telnet monitor for QEMU instead of stdio.")
+    _creation_kwargs: dict = PrivateAttr(default_factory=dict)
+
+
+    def get_partition_folder(self) -> str:
+        if self.partition_number < 0:
+            raise ValueError("Partition number is not set for this experiment context.")
+        return self.get_experiment_folder_address() + f"/run/partition_{self.partition_number}"
 
     def is_multi_node(self) -> bool:
         return self.node_number >= 0
@@ -138,11 +146,14 @@ class ExperimentContext(BaseModel):
 
     def get_shm_names(self, recieve: bool) -> List[str]:
         shm_names = []
+        partition_str = ""
+        if self.partition_number >= 0:
+            partition_str = f"part_{self.partition_number}_"
         for neighbor in self.neighbor_node_list:
             if recieve:
-                shm_names.append(f"pdes_{neighbor}_to_{self.node_number}")
+                shm_names.append(f"pdes_{neighbor}_to_{self.node_number}"+partition_str)
             else:
-                shm_names.append(f"pdes_{self.node_number}_to_{neighbor}")
+                shm_names.append(f"pdes_{self.node_number}_to_{neighbor}"+partition_str)
         return shm_names
 
     def get_mounting_folder(self) -> str:
@@ -448,8 +459,11 @@ def create_experiment_context(
     seed_image_name: str = '',
     telnet_port: int = -1,
     use_telnet_monitor: bool = False,
-
+    partition_number: int = -1,
 ) -> ExperimentContext:
+    
+    creation_kwargs = {k: v for k, v in locals().items()}
+
     # assert False
     # TODO add how to create experiment name
 
@@ -529,15 +543,31 @@ def create_experiment_context(
         syncs_list=syncs_list,
         seed_image_name=seed_image_name,
         telnet_port=telnet_port,
-        use_telnet_monitor=use_telnet_monitor
+        use_telnet_monitor=use_telnet_monitor,
+        partition_number=partition_number,
     )
 
     e.set_up_folders()
     e.setup_nic_args()
+    e._creation_kwargs = creation_kwargs
 
     # TODO add a print config so every one sees the final config
     return e
+
+def clone_experiment_context(
+    source: ExperimentContext,
+    **overrides
+) -> ExperimentContext:
+    """
+    Re-create an ExperimentContext from scratch via create_experiment_context,
+    using the original creation params with any overrides applied.
+    """
+    if not source._creation_kwargs:
+        raise ValueError("Source ExperimentContext has no stored creation kwargs. "
+                         "Was it created via create_experiment_context?")
     
+    kwargs = {**source._creation_kwargs, **overrides}
+    return create_experiment_context(**kwargs)
 
 
 def get_capital_dict(variable: BaseModel):

@@ -89,6 +89,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         syncs: Annotated[str, typer.Option(
             help="Comma separated list of sync options to neighbor nodes, only used if node_number is not -1. The order should be the same as neighbor_nodes. The value should be either true or false."
         )]="",
+        partition_number: Annotated[int, typer.Option(
+            help="Partition number for the nodes to run things in parallel",
+        )]=-1,
 
 
         # Seed image settings
@@ -160,6 +163,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
             syncs_list=syncs_list,
             seed_image_name=seed_image_name,
             telnet_port=telnet_port,
-            use_telnet_monitor=use_telnet_monitor
+            use_telnet_monitor=use_telnet_monitor,
+            partition_number=partition_number,
         )
         return experiment_context
