@@ -188,3 +188,58 @@ def convert_single(
         _terminate_qemu()
         elapsed = int(time.time() - start_time)
         print(f"[{snapshot}] convert-single completed in {elapsed}s")
+
+
+def convert_multi(
+    first: str,
+    last: str,
+    parallel: int,
+    qflex_ckp_dir: str,
+    gem5_ckp_dir: str,
+    core_count: int,
+    memory_gb: int,
+    base: str,
+    ssh_host: str = "127.0.0.1",
+    ssh_user: str = "qflex",
+    monitor_base: int = 45454,
+    qmp_base: int = 4444,
+    ssh_base: int = 2222,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    qpoints_root = repo_root / "QPoints"
+    run_all_multi = qpoints_root / "run_all_multi_snapshot.sh"
+    subprocess.run(
+        [
+            "bash",
+            str(run_all_multi),
+            "--first",
+            first,
+            "--last",
+            last,
+            "--parallel",
+            str(parallel),
+            "--qflex-ckp-dir",
+            qflex_ckp_dir,
+            "--gem5-ckp-dir",
+            gem5_ckp_dir,
+            "--core-count",
+            str(core_count),
+            "--memory-gb",
+            str(memory_gb),
+            "--base",
+            base,
+            "--ssh-host",
+            ssh_host,
+            "--ssh-user",
+            ssh_user,
+            "--monitor-base",
+            str(monitor_base),
+            "--qmp-base",
+            str(qmp_base),
+            "--ssh-base",
+            str(ssh_base),
+        ],
+        cwd=str(qpoints_root),
+        text=True,
+        check=True,
+    )

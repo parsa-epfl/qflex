@@ -13,6 +13,7 @@ from commands.partition import PartitionCommand, CleanPartitionCommand
 from commands.run_partition import RunPartitionCommand
 from commands.result import RunResultCommand
 from commands.qpoints import convert_single as qpoints_convert_single
+from commands.qpoints import convert_multi as qpoints_convert_multi
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -230,6 +231,42 @@ def qpoints_convert_single_cmd(
         qmp_base=qmp_base,
         ssh_base=ssh_base,
         overwrite=overwrite,
+    )
+
+
+@qpoints_app.command("convert-multi")
+def qpoints_convert_multi_cmd(
+    first: Annotated[str, typer.Option(help="First snapshot name, e.g. snapshot_0.")],
+    last: Annotated[str, typer.Option(help="Last snapshot name, e.g. snapshot_99.")],
+    parallel: Annotated[int, typer.Option(help="Number of parallel conversions.")],
+    qflex_ckp_dir: Annotated[str, typer.Option(help="QFlex checkpoint directory.")],
+    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")],
+    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
+    memory_gb: Annotated[int, typer.Option(help="Memory size in GB.")],
+    base: Annotated[str, typer.Option(help="Base disk image (qcow2).")],
+    ssh_host: Annotated[str, typer.Option(help="SSH host for the VM.")] = "127.0.0.1",
+    ssh_user: Annotated[str, typer.Option(help="SSH user for the VM.")] = "qflex",
+    monitor_base: Annotated[int, typer.Option(help="Base port for QEMU monitor.")] = 45454,
+    qmp_base: Annotated[int, typer.Option(help="Base port for QMP.")] = 4444,
+    ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
+):
+    """
+    Convert a range of QPoints snapshots using run_all_multi_snapshot.sh.
+    """
+    qpoints_convert_multi(
+        first=first,
+        last=last,
+        parallel=parallel,
+        qflex_ckp_dir=qflex_ckp_dir,
+        gem5_ckp_dir=gem5_ckp_dir,
+        core_count=core_count,
+        memory_gb=memory_gb,
+        base=base,
+        ssh_host=ssh_host,
+        ssh_user=ssh_user,
+        monitor_base=monitor_base,
+        qmp_base=qmp_base,
+        ssh_base=ssh_base,
     )
 
 
