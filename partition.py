@@ -83,6 +83,7 @@ NECESSARY_BINARY_FILES = [
     "../cfg/flexus_configuration.json",
     "../cfg/timing.cfg",
     "../bin/checkpoint_conversion",
+    "efi-e1000.rom",
     mem_folder_name,
 ]
 
