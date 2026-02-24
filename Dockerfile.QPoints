@@ -4,8 +4,13 @@ FROM ${BASE_IMAGE}
 
 WORKDIR /home/dev/qflex
 
-COPY ./QPoints /home/dev/qflex/QPoints
+# Copy only what setup.sh needs to keep cache stable
+COPY --link ./QPoints/setup.sh /home/dev/qflex/QPoints/setup.sh
+COPY --link ./QPoints/bin /home/dev/qflex/QPoints/bin
+COPY --link ./QPoints/gem5 /home/dev/qflex/QPoints/gem5
 
 RUN bash /home/dev/qflex/QPoints/setup.sh
+
+COPY --link ./QPoints /home/dev/qflex/QPoints
 
 CMD ["bash"]
