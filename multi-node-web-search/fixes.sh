@@ -85,8 +85,8 @@ cargo install inferno
 su
 ip link set eth1 up 
 udhcpc -i eth1
-ping google.com -c 2
 apk add iproute2
+ping google.com -c 2
 
 # Server NIC fixes
 su
@@ -117,5 +117,5 @@ echo 'Hello from VM2!' | nc 192.168.100.1 5555
 
 
 # New test for server too:
-echo 'Hello from VM2!' | nc 192.168.100.1 5555
 ping 192.168.100.2 -i 0.05 -c 10
+echo 'Hello from VM2!' | nc 192.168.100.1 5555
