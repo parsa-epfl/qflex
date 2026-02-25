@@ -61,7 +61,7 @@ class ParallelExecutor(Executor):
     def execute(self, to_stdio: bool = False, run_in_background: bool = False):
         processes: List[Tuple[Executor, subprocess.Popen]] = []
         for child in self.children:
-            proc = child.execute(to_stdio=to_stdio, run_in_background=run_in_background)
+            proc = child.execute(to_stdio=to_stdio, run_in_background=True)
             processes.append((child, proc))
 
         if run_in_background:

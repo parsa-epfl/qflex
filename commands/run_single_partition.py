@@ -3,7 +3,7 @@ import os
 import glob
 
 from commands import Executor
-from .config import ExperimentContext
+from .config import ExperimentContext, clone_experiment_context
 from .run_idx import RunIdxCommand
 
 
@@ -29,7 +29,8 @@ class RunSinglePartitionCommand(Executor):
     def cmd(self) -> str:
         commands = []
         for idx in self.idxs:
-            run_idx = RunIdxCommand(self.experiment_context, self.detailed_warming_ratio, self.measurement_ratio, idx)
+            cloned_experiment_context = clone_experiment_context(self.experiment_context, idx=idx)
+            run_idx = RunIdxCommand(cloned_experiment_context, self.detailed_warming_ratio, self.measurement_ratio)
             commands += run_idx.cmd()
         print(f"Commands to run for partition {self.experiment_context.get_partition_folder()}:\n" + "\n".join(commands))
         return commands

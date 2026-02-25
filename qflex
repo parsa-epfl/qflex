@@ -153,13 +153,11 @@ def partition_cleanup(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def run_idx(
     experiment_context: ExperimentContext,
-    idx: Annotated[int, typer.Option(help="Partition index to run.")] = 0,
     warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
     measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
 ):
     run_idx_executor = RunIdxCommand(
         experiment_context=experiment_context,
-        idx=idx,
         warming_ratio=warming_ratio,
         measurement_ratio=measurement_ratio
     )
