@@ -75,11 +75,13 @@ class DockerStarter(Executor):
         -v {cwd}/qemu/:/home/dev/qflex/qemu \
         -v {cwd}/multi-node-web-search/:/home/dev/qflex/multi-node-web-search \
         -v {cwd}/WormCacheQFlex:/home/dev/qflex/WormCacheQFlex \
+        -v {cwd}/clean_up.sh:/home/dev/qflex/clean_up.sh\
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE --cap-add SYS_ADMIN \
         --pid=host \
         --cap-add=NET_ADMIN --device=/dev/net/tun  \
+        --shm-size=512m \
         {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """

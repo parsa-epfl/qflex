@@ -107,6 +107,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         telnet_port: Annotated[int, typer.Option(
             help="Telnet port for QEMU monitor instead of stdio."
         )]=-1,
+        idx: Annotated[int, typer.Option(
+            help="Index of the partition to run, used for some qemu options."
+        )]=-1,
     ):        
         has_neighbors = len(neighbor_nodes) > 0
         neighbor_node_list: List[int] = []
@@ -165,5 +168,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
             telnet_port=telnet_port,
             use_telnet_monitor=use_telnet_monitor,
             partition_number=partition_number,
+            idx=idx,
         )
         return experiment_context

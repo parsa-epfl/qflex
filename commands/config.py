@@ -123,7 +123,9 @@ class ExperimentContext(BaseModel):
     neighbor_node_list: List[int] = Field(default=[], description="List of neighbor node numbers in multi-node setup.")
     latencies_ns_list: List[int] = Field(default=[], description="List of latencies to neighbor nodes in nanoseconds.")
     syncs_list: List[str] = Field(default=[], description="List of sync settings ('true' or 'false') for neighbor nodes.")
+    # TODO later we need to revisit if partition and idx are well suited to be part of the exp object
     partition_number: int = Field(default=-1, description="Partition number for this node, used for some qemu options.")
+    idx: int = Field(default=-1, description="Index of the partition to run, used for some qemu options.")
     seed_image_name: str = Field(default='', description="Name of the seed image file to use in multi-node setup.")
     telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
     use_telnet_monitor: bool = Field(default=False, description="Whether to use telnet monitor for QEMU instead of stdio.")
@@ -149,11 +151,15 @@ class ExperimentContext(BaseModel):
         partition_str = ""
         if self.partition_number >= 0:
             partition_str = f"part_{self.partition_number}_"
+        
+        idx_str = ""
+        if self.idx >= 0:
+            idx_str = f"idx_{self.idx}_"
         for neighbor in self.neighbor_node_list:
             if recieve:
-                shm_names.append(f"pdes_{neighbor}_to_{self.node_number}"+partition_str)
+                shm_names.append(f"pdes_{neighbor}_to_{self.node_number}"+partition_str+idx_str)
             else:
-                shm_names.append(f"pdes_{self.node_number}_to_{neighbor}"+partition_str)
+                shm_names.append(f"pdes_{self.node_number}_to_{neighbor}"+partition_str+idx_str)
         return shm_names
 
     def get_mounting_folder(self) -> str:
@@ -330,6 +336,14 @@ class ExperimentContext(BaseModel):
             for i in range(self.get_neighbor_count()):
                 shm_recv = shm_recvs[i]
                 shm_send = shm_sends[i]
+                # Make sure no file exists for this shm name
+                # rm -f /dev/shm/{shm_recv} /dev/shm/{shm_send}
+                # IMPORTANT TODO: this will rely on master being started first, need to automate nodes starting to prevent other things from happening
+                if (self.is_master_node()):
+                    print(f"Cleaning up shared memory files for neighbor {self.neighbor_node_list[i]}: {shm_recv} and {shm_send}")
+                    os.system(f"rm -f /dev/shm/{shm_recv}")
+                    os.system(f"rm -f /dev/shm/{shm_send}")
+
                 sync = self.syncs_list[i]
                 latency_ns = self.latencies_ns_list[i]
                 # TODO double check that nothing is left constant here
@@ -460,6 +474,7 @@ def create_experiment_context(
     telnet_port: int = -1,
     use_telnet_monitor: bool = False,
     partition_number: int = -1,
+    idx: int = -1,
 ) -> ExperimentContext:
     
     creation_kwargs = {k: v for k, v in locals().items()}
@@ -545,6 +560,7 @@ def create_experiment_context(
         telnet_port=telnet_port,
         use_telnet_monitor=use_telnet_monitor,
         partition_number=partition_number,
+        idx=idx,
     )
 
     e.set_up_folders()

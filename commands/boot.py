@@ -17,7 +17,7 @@ class Boot(Executor):
         
         if not self.vanilla:
             boot_cmd = f"""
-            ./qemu-system-aarch64 \
+            gdb -ex run --args ./qemu-system-aarch64 \
             {self.qemu_common_parser.get_qemu_base_args()}
             """
         else:
