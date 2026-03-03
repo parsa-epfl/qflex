@@ -1,0 +1,61 @@
+#!/usr/bin/expect -f
+
+# ---------- config ----------
+set timeout -1
+set trigger_phrase "{{ TRIGGER_PHASE }}"
+set monitor_host "127.0.0.1"
+set monitor_port {{ MONITOR_PORT }}
+# ----------------------------
+
+# Absolutely no output from expect itself
+log_user 0
+
+# Save terminal state
+set saved_tty [stty -g]
+
+proc restore_tty {} {
+    global saved_tty
+    catch {stty $saved_tty}
+}
+
+# Wrap exit to always restore terminal
+rename exit __orig_exit
+proc exit {% raw %}{{status 0}}{% endraw %} {
+    restore_tty
+    __orig_exit $status
+}
+
+# Always restore terminal on SIGINT and SIGTERM 
+# (When it occurs outside QEMU but inside expect)
+trap {exit 130} SIGINT
+trap {exit 143} SIGTERM
+
+# Enter raw mode
+stty raw -echo
+
+# Start QEMU directly
+spawn {{ SPAWN_COMMAND }}
+
+# Hand over full control to the user,
+# but observe output for the trigger phrase
+interact -o -nobuffer -re $trigger_phrase {
+
+    # Talk to monitor via telnet
+    spawn telnet $monitor_host $monitor_port
+    set timeout 5
+    expect {
+        -re "Connected|Escape character" {}
+        timeout { 
+            exit 1 
+        }
+    }
+
+    # Save VM and Quit
+    send "savevm {{ SAVE_VM_NAME }}\r"
+    expect -re "(qemu)"
+    send "quit\r"
+    expect eof
+    send_user "\nVM snapshot '{{ SAVE_VM_NAME }}' saved successfully\n\n"
+
+    exit 0
+} 

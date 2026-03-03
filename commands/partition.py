@@ -38,7 +38,7 @@ class PartitionCommand(Executor):
             raise FileExistsError("Partitions already exist.")
         return [
             f"cd {self.experiment_folder}",
-            f"{self.experiment_folder}/partition.py {self.partition_count}",
+            f"{self.experiment_folder}/partition.py --partition-count {self.partition_count} --image-name {self.experiment_context.image_name}",
         ]
 
 

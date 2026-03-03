@@ -72,7 +72,7 @@ pub const USE_HIGHLY_ASSOCIATIVE_L1TLB: bool = false;
 
 // ITLB
 
-pub const ITLB_ASSO: usize = 64;
+pub const ITLB_ASSO: usize = 48;
 
 pub const ITLB_SET: usize = 1;
 static_assertions::const_assert!(!(ITLB_SET != 1 && USE_HIGHLY_ASSOCIATIVE_L1TLB));
@@ -80,7 +80,7 @@ static_assertions::const_assert!(ITLB_SET.is_power_of_two());
 
 // DTLB
 
-pub const DTLB_ASSO: usize = 64;
+pub const DTLB_ASSO: usize = 48;
 
 pub const DTLB_SET: usize = 1;
 static_assertions::const_assert!(!(DTLB_SET != 1 && USE_HIGHLY_ASSOCIATIVE_L1TLB));

@@ -12,9 +12,9 @@ class QemuCommonArgParser:
         self.core_coeff = 1
         if self.double_cores:
             self.core_coeff = 2
+        self.monitor_port = 55555
+        
 
-        
-        
         self.nic_command = self.experiment_context.simulation_context.qemu_nic.strip().lower()
 
         self.loadvm = ''
@@ -63,8 +63,16 @@ class QemuCommonArgParser:
         print("="*50+"Quantum command arguments:"+"="*50)
         print(self.quantum_command)
         return self.quantum_command
- 
 
+    def get_qemu_telnet_args(self) -> str:
+
+        qemu_monitor_args = f""" -chardev stdio,id=char_stdio,mux=on,signal=off \
+        -mon chardev=char_stdio,mode=readline \
+        -serial chardev:char_stdio \
+        -monitor telnet:127.0.0.1:{self.monitor_port},server,nowait"""
+        print("="*50+"QEMU monitor - telnet arguments:"+"="*50)
+        print(qemu_monitor_args)
+        return qemu_monitor_args
     
 
 
