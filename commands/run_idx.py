@@ -36,7 +36,12 @@ class RunIdxCommand(Executor):
             ../vanilla-qemu-system-aarch64 \
             {self.vanilla_qemu_arg_parser.get_qemu_base_args()} \
         """
-        return setup_commands + [
-            f"cd {self.experiment_context.get_partition_folder()}",
-            timing_command
+
+        backup_commands = [
+            f'rm -rf "result_{idx}"',
+            f'mkdir "result_{idx}"',
+            f'mv *.log "result_{idx}/"',
         ]
+        return setup_commands + [
+            timing_command
+        ] + backup_commands

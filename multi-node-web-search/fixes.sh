@@ -92,13 +92,11 @@ ping google.com -c 2
 su
 ip link show
 ip link set eth0 down
-ip link set eth0 address 52:54:00:12:34:56
+ip link set eth0 address 52:54:00:aa:bb:00
 ip link set eth0 up
 ip addr add 192.168.100.1/24 dev eth0
 ip addr show eth0
-su qflex
 
-# Test server:
 nc -l -p 5555
 
 
@@ -106,7 +104,7 @@ nc -l -p 5555
 su
 ip link show
 ip link set eth0 down
-ip link set eth0 address 52:54:00:12:34:57
+ip link set eth0 address 52:54:00:aa:bb:01
 ip link set eth0 up
 ip addr add 192.168.100.2/24 dev eth0
 su qflex

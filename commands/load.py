@@ -16,10 +16,12 @@ class Load(Executor):
     def cmd(self) -> str:
         
         if not self.vanilla:
-            load_cmd = f"""
-            gdb -ex run --args ./qemu-system-aarch64 \
+            perf = ""
+            # if self.experiment_context.node_number == 1:
+            #     perf = f"perf record -F 999 -g --call-graph dwarf -- "
+            load_cmd = perf + f""" gdb -ex run --args ./qemu-system-aarch64 \
             {self.qemu_common_parser.get_qemu_base_args()} \
-            -icount shift=0,align=off,sleep=off
+            {self.qemu_common_parser.quantum_args()}
             """
         else:
             load_cmd = f"""

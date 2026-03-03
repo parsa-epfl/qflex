@@ -1,8 +1,8 @@
---core-count 1
+--core-count 8
 --no-double-cores
---quantum-size-ns 1000
+--quantum-size-ns 10000
 --llc-size-per-tile-mb 2
---parallel
+--no-parallel
 --network none
 --memory-gb 32
 --host-name ZEN3
@@ -11,9 +11,8 @@
 --no-consolidated
 --primary-ipc 2.0
 --primary-core-start 0
---phantom-cpu-ipc 4
 --image-name root.qcow2
 --image-folder /mnt/sdb/pooria-multi-web/
 --mounting-folder /mnt/sdb/pooria-multi-web/
---check-period-quantum-coeff 10
+--check-period-quantum-coeff 5
 --no-unique --use-image-directly

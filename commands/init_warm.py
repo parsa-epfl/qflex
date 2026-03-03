@@ -72,13 +72,7 @@ class InitWarm(Executor):
         """
 
 
-        # return self.build_worm_cache() + [
-        #     f"cd {self.experiment_context.get_experiment_folder_address()}/run",
-        #     "ls",
-        #     init_cmd
-        # ]
-        
-        return [
+        return self.build_worm_cache() + [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             "ls",
             init_cmd

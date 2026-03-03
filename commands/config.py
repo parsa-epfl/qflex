@@ -346,11 +346,11 @@ class ExperimentContext(BaseModel):
 
                 sync = self.syncs_list[i]
                 latency_ns = self.latencies_ns_list[i]
-                # TODO double check that nothing is left constant here
-                nic_command = nic_command + f"""  -netdev pdes,id=net0,shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()} -device e1000,netdev=net0,mac=52:54:00:12:34:{56+self.node_number}  """
+                pci_addr = 0x10 + i
+                nic_command = nic_command + f"""  -netdev pdes,id=net{i},shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()} -device e1000,netdev=net{i},mac=52:54:00:aa:bb:{self.node_number * 10 + i:02x}  """
 
-
-        internet_nic = ' -netdev user,id=net1 -device e1000,netdev=net1 '
+        internet_pci_addr = 0x10 + self.get_neighbor_count()
+        internet_nic = f' -netdev user,id=net_user -device e1000,netdev=net_user,bus=pcie.0,addr=0x{internet_pci_addr:02x} '
         nic_command = nic_command + internet_nic
 
 

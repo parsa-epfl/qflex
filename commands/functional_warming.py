@@ -26,7 +26,7 @@ class FunctionalWarming(Executor):
 
     def cmd(self) -> str:
         fw_cmd = f"""
-            ./qemu-system-aarch64 \
+            gdb -ex run --args ./qemu-system-aarch64 \
             {self.qemu_common_parser.get_qemu_base_args()} \
             {self.qemu_common_parser.quantum_args()} \
             -plugin ../lib/libworm_cache.so,mode=warm,init_threshold={self.sampling_interval},interval={self.sampling_interval},count={self.sample_size} \
