@@ -1,3 +1,6 @@
+--core-count 8
+--double-cores
 --node-number 1 
---experiment-name multi_web_full_experiment_8_1
+--phantom-cpu-ipc 4
+--experiment-name multi_web_full_experiment_9_1
 --neighbor-nodes "0" 

@@ -1,3 +1,5 @@
+--core-count 8
+--no-double-cores
 --node-number 0 
---experiment-name multi_web_full_experiment_8_0
+--experiment-name multi_web_full_experiment_9_0
 --neighbor-nodes "1" 
