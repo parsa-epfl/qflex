@@ -104,7 +104,7 @@ nc -l -p 5555
 su
 ip link show
 ip link set eth0 down
-ip link set eth0 address 52:54:00:aa:bb:01
+ip link set eth0 address 52:54:00:aa:bb:0a
 ip link set eth0 up
 ip addr add 192.168.100.2/24 dev eth0
 su qflex
@@ -117,3 +117,22 @@ echo 'Hello from VM2!' | nc 192.168.100.1 5555
 # New test for server too:
 ping 192.168.100.2 -i 0.05 -c 10
 echo 'Hello from VM2!' | nc 192.168.100.1 5555
+
+
+
+# Server
+ip addr flush dev eth0
+ip link set eth0 up
+ip addr add 192.168.100.1/24 dev eth0
+
+nc -l -p 5555
+
+# Client
+ip addr flush dev eth0
+ip link set eth0 up
+ip addr add 192.168.100.2/24 dev eth0
+
+
+ping 192.168.100.1 -c 10 -W 20 -i 0.0001
+echo 'Hello from VM2!' | nc 192.168.100.1 5555
+ping 192.168.100.1 -c 10 -W 20 -i 0.01

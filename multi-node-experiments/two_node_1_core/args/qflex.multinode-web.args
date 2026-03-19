@@ -1,5 +1,7 @@
 --llc-size-per-tile-mb 2
 --parallel
+--quantum-size-ns 200000
+--latancies-ns "1000000"
 --network none
 --memory-gb 32
 --host-name ZEN3

@@ -1,6 +1,7 @@
+--quantum-size-ns 200000
 --core-count 8
---double-cores
+--no-double-cores
 --node-number 1 
 --phantom-cpu-ipc 4
---experiment-name multi_web_full_experiment_9_1
+--experiment-name multi_web_full_experiment_12_1
 --neighbor-nodes "0" 

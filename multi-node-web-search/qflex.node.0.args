@@ -1,5 +1,6 @@
+--quantum-size-ns 200000
 --core-count 8
 --no-double-cores
 --node-number 0 
---experiment-name multi_web_full_experiment_9_0
+--experiment-name multi_web_full_experiment_12_0
 --neighbor-nodes "1" 

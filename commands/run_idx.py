@@ -33,7 +33,7 @@ class RunIdxCommand(Executor):
             "rm -rf output_state",
         ]
         timing_command = f"""
-            ../vanilla-qemu-system-aarch64 \
+            gdb -ex run --args ../vanilla-qemu-system-aarch64 \
             {self.vanilla_qemu_arg_parser.get_qemu_base_args()} \
         """
 

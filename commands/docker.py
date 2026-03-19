@@ -76,6 +76,7 @@ class DockerStarter(Executor):
         -v {cwd}/multi-node-web-search/:/home/dev/qflex/multi-node-web-search \
         -v {cwd}/WormCacheQFlex:/home/dev/qflex/WormCacheQFlex \
         -v {cwd}/clean_up.sh:/home/dev/qflex/clean_up.sh\
+        -v {cwd}/multi-node-experiments:/home/dev/qflex/multi-node-experiments \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE --cap-add SYS_ADMIN \
