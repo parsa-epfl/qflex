@@ -11,5 +11,5 @@
 --image-name root.qcow2
 --image-folder /mnt/sdb/pooria-multi-web/
 --mounting-folder /mnt/sdb/pooria-multi-web/
---check-period-quantum-coeff 5
+--check-period-quantum-coeff 1
 --no-unique --use-image-directly

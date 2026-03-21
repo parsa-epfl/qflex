@@ -32,10 +32,15 @@ class RunIdxCommand(Executor):
             f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
             "rm -rf output_state",
         ]
+
+        # Add a command to get time in seconds and save it to variable tick, from the host
+        tick_command = " tick=$(($(date +%s%N) / 1000000)) "
         timing_command = f"""
-            gdb -ex run --args ../vanilla-qemu-system-aarch64 \
+            ../vanilla-qemu-system-aarch64 \
             {self.vanilla_qemu_arg_parser.get_qemu_base_args()} \
         """
+        tock_command = " tock=$(($(date +%s%N) / 1000000)) "
+        time_command = ' echo "Elapsed: $((tock - tick)) ms " '
 
         backup_commands = [
             f'rm -rf "result_{idx}"',
@@ -43,5 +48,8 @@ class RunIdxCommand(Executor):
             f'mv *.log "result_{idx}/"',
         ]
         return setup_commands + [
-            timing_command
+            tick_command,
+            timing_command,
+            tock_command,
+            time_command,
         ] + backup_commands
