@@ -425,7 +425,8 @@ class ExperimentContext(BaseModel):
         except FileNotFoundError:
             # As faulty symlink won't show
             pass
-        os.symlink(target, sym_target)
+        # Copy file and override if you need to
+        os.system(f"cp -u {target} {sym_target}")
 
 
         

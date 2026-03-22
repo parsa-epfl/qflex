@@ -30,7 +30,6 @@ class RunIdxCommand(Executor):
             f'rm -rf "snapshot_{idx}-flexus"',
             f"mkdir snapshot_{idx}-flexus",
             f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
-            "rm -rf output_state",
         ]
 
         # Add a command to get time in seconds and save it to variable tick, from the host

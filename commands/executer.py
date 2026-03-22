@@ -1,7 +1,9 @@
 import abc
 import subprocess
 import os
+import time
 from typing import List, Tuple
+from multiprocessing import Pool, pool, pool
 
 
 class Executor(abc.ABC):
@@ -50,6 +52,7 @@ class Executor(abc.ABC):
             )
             return r
         
+
 class ParallelExecutor(Executor):
 
     def cmd(self) -> str:
@@ -58,23 +61,37 @@ class ParallelExecutor(Executor):
     def __init__(self, children: list[Executor]):
         self.children = children
 
+    @staticmethod
+    def _execute_child(args):
+        child: Executor = args[0]
+        to_stdio: bool = args[1]
+        return child.execute(to_stdio=to_stdio, run_in_background=False)
+
     def execute(self, to_stdio: bool = False, run_in_background: bool = False):
         assert not run_in_background, "run_in_background is not supported for ParallelExecutor."
-        processes: List[Tuple[Executor, subprocess.Popen]] = []
-        for child in self.children:
-            proc = child.execute(to_stdio=to_stdio, run_in_background=True)
-            processes.append((child, proc))
+
+        results: list[subprocess.CompletedProcess] = []
+        with Pool(processes=len(self.children)) as pool:
+            async_results = [
+                pool.apply_async(ParallelExecutor._execute_child, ((child, to_stdio),))
+                for child in self.children
+            ]
+
+            while True:
+                time.sleep(0.1)
+                for i, r in enumerate(async_results):
+                    if r.ready():
+                        result: subprocess.CompletedProcess = r.get()
+                        if result.returncode != 0:
+                            pool.terminate()
+                            raise RuntimeError(
+                                f"{self.children[i].__class__.__name__} failed with rc={result.returncode}\n{result.stderr}"
+                            )
+                if all(r.ready() for r in async_results):
+                    break
+
+            results: list[subprocess.CompletedProcess] = [r.get() for r in async_results]
+
+        return list(zip(self.children, results))
 
 
-        for _, proc in processes:
-            proc.wait()
-            print(f"Process for {proc.args} finished with return code {proc.returncode}.")
-
-        failed = [(child, proc) for child, proc in processes if proc.returncode != 0]
-        if failed:
-            descriptions = [f"  {child.__class__.__name__} (rc={proc.returncode})" for child, proc in failed]
-            raise RuntimeError(
-                f"{len(failed)}/{len(processes)} parallel tasks failed:\n" + "\n".join(descriptions)
-            )
-
-        return processes

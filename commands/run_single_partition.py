@@ -28,7 +28,9 @@ class RunSinglePartitionCommand(Executor):
 
 
     def cmd(self) -> str:
-        commands = []
+        commands = [
+            "rm -rf output_state",
+        ]
         for idx in self.idxs:
             cloned_experiment_context = clone_experiment_context(self.experiment_context, idx=idx)
             run_idx = RunIdxCommand(cloned_experiment_context, self.detailed_warming_ratio, self.measurement_ratio)
