@@ -59,13 +59,12 @@ class ParallelExecutor(Executor):
         self.children = children
 
     def execute(self, to_stdio: bool = False, run_in_background: bool = False):
+        assert not run_in_background, "run_in_background is not supported for ParallelExecutor."
         processes: List[Tuple[Executor, subprocess.Popen]] = []
         for child in self.children:
             proc = child.execute(to_stdio=to_stdio, run_in_background=True)
             processes.append((child, proc))
 
-        if run_in_background:
-            return processes
 
         for _, proc in processes:
             proc.wait()

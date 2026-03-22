@@ -115,7 +115,7 @@ class VanillaQemuArgParser(QemuCommonArgParser):
     def get_load_vm(self):
         return f"""-loadvm snapshot_{self.idx},on-demand"""
     
-    def get_seed_image_arg(self) -> str:
+    def get_base_image_arg(self) -> str:
         return f"""-drive if=virtio,file={self.image_address},format=qcow2,snapshot=on,tmp-snapshot-name=snapshot_{self.idx} """
     
     def quantum_args(self) -> str:
