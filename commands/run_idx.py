@@ -9,7 +9,8 @@ class RunIdxCommand(Executor):
     def __init__(self,
                  experiment_context: ExperimentContext,
                  warming_ratio: int, 
-                 measurement_ratio: int):
+                 measurement_ratio: int,
+                 use_stdio: bool = True):
         idx = experiment_context.idx
         self.experiment_context = experiment_context
         self.detailed_warming_ratio = warming_ratio
@@ -17,8 +18,15 @@ class RunIdxCommand(Executor):
         # TODO turn this into a param, for now each ratio represents 100000 cycles
         ratio_coefficient = 100000
         self.total_cycles = ((self.detailed_warming_ratio * ratio_coefficient) + (self.measurement_ratio * ratio_coefficient))  + 1
-        self.vanilla_qemu_arg_parser = VanillaQemuArgParser(experiment_context, idx, self.total_cycles)
+        self.vanilla_qemu_arg_parser = VanillaQemuArgParser(experiment_context, idx, self.total_cycles, use_stdio=use_stdio)
+        # TODO add this to configs
+        self.use_stdio = use_stdio
 
+    def get_err_file_address(self):
+        return f"{self.experiment_context.get_partition_folder()}/err"
+
+    def get_log_file_address(self):
+        return f"{self.experiment_context.get_partition_folder()}/log"
 
 
     def cmd(self) -> str:
@@ -27,6 +35,7 @@ class RunIdxCommand(Executor):
         partition_folder = self.experiment_context.get_partition_folder()
         setup_commands = [
             f"cd {partition_folder}",
+            f"echo running in partition folder {partition_folder}",
             f'rm -rf "snapshot_{idx}-flexus"',
             f"mkdir snapshot_{idx}-flexus",
             f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
@@ -34,10 +43,21 @@ class RunIdxCommand(Executor):
 
         # Add a command to get time in seconds and save it to variable tick, from the host
         tick_command = " tick=$(($(date +%s%N) / 1000000)) "
+        output = ""
+        if not self.use_stdio:
+            output = f"> {self.get_log_file_address()} 2> {self.get_err_file_address()}"
         timing_command = f"""
-            ../vanilla-qemu-system-aarch64 \
-            {self.vanilla_qemu_arg_parser.get_qemu_base_args()} \
+            gdb -batch -ex run -ex "python try: gdb.execute('bt')\nexcept: pass" -return-child-result --args ../vanilla-qemu-system-aarch64 \
+            {self.vanilla_qemu_arg_parser.get_qemu_base_args()} {output}
         """
+        prints = []
+        if not self.use_stdio:
+            prints = [
+                f"""echo "log is:""",
+                f"""cat {self.get_log_file_address()}""",
+                f"""echo "err is:""",
+                f"""cat {self.get_err_file_address()}"""
+            ]
         tock_command = " tock=$(($(date +%s%N) / 1000000)) "
         time_command = ' echo "Elapsed: $((tock - tick)) ms " '
 
@@ -51,4 +71,5 @@ class RunIdxCommand(Executor):
             timing_command,
             tock_command,
             time_command,
-        ] + backup_commands
+        ] + prints + backup_commands
+    

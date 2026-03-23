@@ -16,6 +16,7 @@ class RunPartitionCommand(ParallelExecutor):
         self.experiment_context = experiment_context
         self.detailed_warming_ratio = warming_ratio
         self.measurement_ratio = measurement_ratio
+        self.use_stdio = False
         # glob all folders with partition_idx
         self.partition_folders = glob.glob(f"partition_*", root_dir=self.experiment_context.get_experiment_folder_address()+"/run")
         self.partition_folders.sort()
@@ -32,7 +33,7 @@ class RunPartitionCommand(ParallelExecutor):
         executors = []
         for idx in self.idxs:
             new_experiment_context = clone_experiment_context(self.experiment_context, partition_number=idx)
-            single_partition_cmd = RunSinglePartitionCommand(new_experiment_context, self.detailed_warming_ratio, self.measurement_ratio)
+            single_partition_cmd = RunSinglePartitionCommand(new_experiment_context, self.detailed_warming_ratio, self.measurement_ratio, use_stdio=self.use_stdio)
             executors.append(single_partition_cmd)
 
         print(f"Created RunSinglePartitionCommand executors for partition indices {self.idxs}.")

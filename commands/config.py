@@ -302,7 +302,9 @@ class ExperimentContext(BaseModel):
                 link_address = f"{self.get_experiment_folder_address()}/run/vanilla-{f.split('/')[-1]}"
             else:
                 link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-
+            
+            print(f"copying {f} to {link_address}...")
+            # TODO add checks for when cp fails
             os.system(f"cp -u {f} {link_address}")
         # TODO turn WormCacheQFlex address into a parameter
         # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error

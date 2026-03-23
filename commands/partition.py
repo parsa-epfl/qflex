@@ -55,3 +55,18 @@ class CleanPartitionCommand(PartitionCommand):
             "echo removed partitions successfully",
         ]
 
+
+class UnPartitionCommand(PartitionCommand):
+
+    def __init__(self, experiment_context: ExperimentContext):
+        self.experiment_context = experiment_context
+        self.experiment_folder = self.experiment_context.get_experiment_folder_address()
+
+    def cmd(self):
+        return [
+            f"echo running 'mv {self.experiment_folder}/run/partition_*/snapshot_* {self.experiment_folder}/run'",
+            f"mv {self.experiment_folder}/run/partition_*/snapshot_* {self.experiment_folder}/run",
+            f"echo running 'rm -rf {self.experiment_folder}/run/partition_*'",
+            f"rm -rf {self.experiment_folder}/run/partition_*",
+            "echo unpartitioned successfully",
+        ]

@@ -3,7 +3,8 @@ from commands.config import ExperimentContext
 
 class QemuCommonArgParser:
     def __init__(self, 
-                 experiment_context: ExperimentContext):
+                 experiment_context: ExperimentContext,
+                 use_stdio: bool = True):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.image_address = self.experiment_context.get_local_image_address()
@@ -14,7 +15,7 @@ class QemuCommonArgParser:
         if self.double_cores:
             self.core_coeff = 2
 
-        
+        self.use_stdio = use_stdio
         self.node_number = self.experiment_context.node_number
 
 
@@ -50,6 +51,12 @@ class QemuCommonArgParser:
             print(f"Using seed image {self.experiment_context.seed_image_name} at address {self.experiment_context.seed_image_address}")
             image_arg += self.get_seed_image_arg()
         return image_arg
+    
+    def get_stdio(self):
+        if self.use_stdio:
+            return " -serial mon:stdio "
+        else:
+            return f" -serial file:serial.log -monitor none "
 
     def get_qemu_base_args(self) -> str:
 
@@ -78,7 +85,7 @@ class QemuCommonArgParser:
         {self.cd_rom} \
         {self.simulation_context.qemu_nic} \
         {telnet_monitor_arg} \
-        -serial mon:stdio -nographic -no-reboot """
+        {self.get_stdio()} -nographic -no-reboot """
         
         
         print("="*50+"QEMU command arguments:"+"="*50)
@@ -105,8 +112,9 @@ class VanillaQemuArgParser(QemuCommonArgParser):
     def __init__(self,
                  experiment_context: ExperimentContext,
                  idx: int,
-                 total_cycles: int):
-        super().__init__(experiment_context)
+                 total_cycles: int,
+                 use_stdio: bool = True):
+        super().__init__(experiment_context, use_stdio)
         self.idx = idx
         self.total_cycles = total_cycles
 

@@ -51,7 +51,46 @@ class Executor(abc.ABC):
                 cwd=cwd,
             )
             return r
+    
+    def get_log_file_address(self):
+        raise NotImplementedError("log_file_address is not implemented for this executor.")
+    def get_err_file_address(self):
+        raise NotImplementedError("err_file_address is not implemented for this executor.")
+    
+class SimpleCMDExecutor(Executor):
+    
+    def __init__(self, command: str):
+        self.command = command
+
+    def cmd(self) -> str:
+        return self.command
         
+class SequentialGroupExecutor(Executor):
+
+    def __init__(self, children: list[Executor]):
+        self.children = children
+
+    def execute(self, to_stdio = True, run_in_background = False):
+        # One by one execute the children and stop if any of them fails
+        results = []
+        for child in self.children:
+            result = child.execute(to_stdio=to_stdio, run_in_background=run_in_background)
+            results.append((child, result))
+            if result.returncode != 0:
+                # read ouptut and error for debugging
+                err_f = child.get_err_file_address()
+                log_f = child.get_log_file_address()
+                err = ""
+                log = ""
+                if err_f is not None and os.path.exists(err_f):
+                    with open(err_f, "r") as f:
+                        err = f.read()
+                if log_f is not None and os.path.exists(log_f):
+                    with open(log_f, "r") as f:
+                        log = f.read()
+                raise RuntimeError(f"{child.__class__.__name__} failed with rc={result.returncode}\nstdout:\n{log}\nstderr:\n{err}")
+        
+        return results
 
 class ParallelExecutor(Executor):
 
