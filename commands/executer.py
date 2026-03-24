@@ -2,8 +2,7 @@ import abc
 import subprocess
 import os
 import time
-from typing import List, Tuple
-from multiprocessing import Pool, pool, pool
+from multiprocessing import Pool
 
 
 class Executor(abc.ABC):
@@ -12,7 +11,7 @@ class Executor(abc.ABC):
     def cmd(self) -> str:
         pass
 
-    def execute(self, to_stdio: bool = True, run_in_background: bool = False):
+    def execute(self, to_stdio: bool = True, run_in_background: bool = False) -> bool:
         args = self.cmd()
         cwd = os.getcwd()
         if isinstance(args, str):
@@ -24,7 +23,7 @@ class Executor(abc.ABC):
         # TODO look into if shell needs to be turned False
         if run_in_background:
             # Background: optionally inherit stdio or capture, but you manage the pipes.
-            return subprocess.Popen(
+            subprocess.Popen(
                 arg,
                 shell=True,
                 stdout=None if to_stdio else subprocess.PIPE,
@@ -32,6 +31,8 @@ class Executor(abc.ABC):
                 text=True,
                 cwd=cwd,
             )
+            return True
+
 
         # Foreground: safer to use subprocess.run (no deadlock). 
         if to_stdio:
@@ -41,7 +42,7 @@ class Executor(abc.ABC):
                 text=True,
                 cwd=cwd,
             )
-            return r
+            return r.returncode == 0
         else:
             r = subprocess.run(
                 arg,
@@ -50,7 +51,7 @@ class Executor(abc.ABC):
                 capture_output=True,
                 cwd=cwd,
             )
-            return r
+            return r.returncode == 0
     
     def get_log_file_address(self):
         raise NotImplementedError("log_file_address is not implemented for this executor.")
@@ -76,7 +77,7 @@ class SequentialGroupExecutor(Executor):
         for child in self.children:
             result = child.execute(to_stdio=to_stdio, run_in_background=run_in_background)
             results.append((child, result))
-            if result.returncode != 0:
+            if not result:
                 # read ouptut and error for debugging
                 err_f = child.get_err_file_address()
                 log_f = child.get_log_file_address()
@@ -88,9 +89,9 @@ class SequentialGroupExecutor(Executor):
                 if log_f is not None and os.path.exists(log_f):
                     with open(log_f, "r") as f:
                         log = f.read()
-                raise RuntimeError(f"{child.__class__.__name__} failed with rc={result.returncode}\nstdout:\n{log}\nstderr:\n{err}")
+                raise RuntimeError(f"{child.__class__.__name__} failed \nstdout:\n{log}\nstderr:\n{err}")
         
-        return results
+        return True
 
 class ParallelExecutor(Executor):
 
@@ -109,7 +110,7 @@ class ParallelExecutor(Executor):
     def execute(self, to_stdio: bool = False, run_in_background: bool = False):
         assert not run_in_background, "run_in_background is not supported for ParallelExecutor."
 
-        results: list[subprocess.CompletedProcess] = []
+        results: list[bool] = []
         with Pool(processes=len(self.children)) as pool:
             async_results = [
                 pool.apply_async(ParallelExecutor._execute_child, ((child, to_stdio),))
@@ -120,17 +121,16 @@ class ParallelExecutor(Executor):
                 time.sleep(0.1)
                 for i, r in enumerate(async_results):
                     if r.ready():
-                        result: subprocess.CompletedProcess = r.get()
-                        if result.returncode != 0:
+                        result: bool = r.get()
+                        if not result:
                             pool.terminate()
                             raise RuntimeError(
-                                f"{self.children[i].__class__.__name__} failed with rc={result.returncode}\n{result.stderr}"
+                                f"{self.children[i].__class__.__name__} failed."
                             )
                 if all(r.ready() for r in async_results):
                     break
 
-            results: list[subprocess.CompletedProcess] = [r.get() for r in async_results]
 
-        return list(zip(self.children, results))
+        return True
 
 

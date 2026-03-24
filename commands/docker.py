@@ -58,6 +58,7 @@ class DockerStarter(Executor):
 
         
         # TODO remove unecessary mounts including .sh ones and micro_scripts
+        # TODO make shared memory size equal to 512 * number of partitions
         return f"""
         docker run -it --entrypoint /bin/bash \
         -v {self.mounting_folder}:{self.mounting_folder} \
@@ -82,7 +83,7 @@ class DockerStarter(Executor):
         --cap-add SYS_PTRACE --cap-add SYS_ADMIN \
         --pid=host \
         --cap-add=NET_ADMIN --device=/dev/net/tun  \
-        --shm-size=512m \
+        --shm-size=8g \
         {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """
