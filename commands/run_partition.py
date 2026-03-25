@@ -24,6 +24,9 @@ class RunPartitionCommand(ParallelExecutor):
             raise ValueError(f"No partition folders found in {self.experiment_context.get_experiment_folder_address()}/run. Expected folders with prefix 'partition_'.")
         self.idxs = [int(f.removeprefix(f"partition_")) for f in self.partition_folders]
         self.idxs.sort()
+        if len(self.idxs) == 0:
+            super().__init__([])
+            return
         print("partition idx are " + str(self.idxs))
         for i in range(min(self.idxs), max(self.idxs)+1):
             if i not in self.idxs:

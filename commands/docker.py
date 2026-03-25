@@ -83,7 +83,7 @@ class DockerStarter(Executor):
         --cap-add SYS_PTRACE --cap-add SYS_ADMIN \
         --pid=host \
         --cap-add=NET_ADMIN --device=/dev/net/tun  \
-        --shm-size=8g \
+        --shm-size=32g \
         {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """

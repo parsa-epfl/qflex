@@ -21,6 +21,10 @@ class RunSinglePartitionCommand(SequentialGroupExecutor):
         self.snapshots = glob.glob("snapshot_*.loc", root_dir=self.experiment_context.get_partition_folder())
         self.idxs = [int(f.removeprefix("snapshot_").removesuffix(".loc")) for f in self.snapshots]
         self.idxs.sort()
+        
+        if len(self.idxs) == 0:
+            super().__init__([])
+            return
         print("snapshot idx are " + str(self.idxs))
         for i in range(min(self.idxs), max(self.idxs)+1):
             if i not in self.idxs:
