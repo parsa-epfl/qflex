@@ -110,6 +110,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         idx: Annotated[int, typer.Option(
             help="Index of the partition to run, used for some qemu options."
         )]=-1,
+        pdes_net_devs: Annotated[str, typer.Option(
+            help="Comma separated list of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup."
+        )]="",
     ):        
         has_neighbors = len(neighbor_nodes) > 0
         neighbor_node_list: List[int] = []
@@ -119,10 +122,12 @@ class ExperimentContextTyper(TyperDataClassMeta):
             neighbor_node_list = [int(x) for x in neighbor_nodes.split(",")]
             latencies_ns_list = [int(x) for x in latancies_ns.split(",")]
             syncs_list = [x.strip() for x in syncs.split(",")]
+            pdes_net_devs = [x.strip() for x in pdes_net_devs.split(",")]
         else:
             neighbor_node_list = []
             latencies_ns_list = []
             syncs_list = []
+            pdes_net_devs = []
 
 
 
@@ -169,5 +174,6 @@ class ExperimentContextTyper(TyperDataClassMeta):
             use_telnet_monitor=use_telnet_monitor,
             partition_number=partition_number,
             idx=idx,
+            pdes_net_devs=pdes_net_devs,
         )
         return experiment_context

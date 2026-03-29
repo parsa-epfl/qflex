@@ -129,6 +129,7 @@ class ExperimentContext(BaseModel):
     seed_image_name: str = Field(default='', description="Name of the seed image file to use in multi-node setup.")
     telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
     use_telnet_monitor: bool = Field(default=False, description="Whether to use telnet monitor for QEMU instead of stdio.")
+    pdes_net_devs: List[str] = Field(default=[], description="List of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup.")
     _creation_kwargs: dict = PrivateAttr(default_factory=dict)
 
 
@@ -338,6 +339,7 @@ class ExperimentContext(BaseModel):
             for i in range(self.get_neighbor_count()):
                 shm_recv = shm_recvs[i]
                 shm_send = shm_sends[i]
+                net_dev = self.pdes_net_devs[i]
                 # Make sure no file exists for this shm name
                 # rm -f /dev/shm/{shm_recv} /dev/shm/{shm_send}
                 # IMPORTANT TODO: this will rely on master being started first, need to automate nodes starting to prevent other things from happening
@@ -348,8 +350,15 @@ class ExperimentContext(BaseModel):
 
                 sync = self.syncs_list[i]
                 latency_ns = self.latencies_ns_list[i]
-                pci_addr = 0x10 + i
-                nic_command = nic_command + f"""  -netdev pdes,id=net{i},shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()} -device e1000,netdev=net{i},mac=52:54:00:aa:bb:{self.node_number * 10 + i:02x}  """
+                mac_address = f"mac=52:54:00:aa:bb:{self.node_number * 10 + i:02x}"
+                if net_dev == 'e1000':
+                    dev = f" -device e1000,netdev=net{i},{mac_address} "
+                elif net_dev == 'virtio-net-pci':
+                    pci_addr = 0x10 + i
+                    dev = f" -device virtio-net-pci,netdev=net{i},bus=pcie.0,addr=0x{pci_addr:02x},{mac_address} "
+                else:
+                    raise ValueError(f"Unsupported network device {net_dev} for neighbor {self.neighbor_node_list[i]}. Supported devices are 'e1000' and 'virtio-net-pci'.")
+                nic_command = nic_command + f"""  -netdev pdes,id=net{i},shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()} {dev} """
 
         internet_pci_addr = 0x10 + self.get_neighbor_count()
         internet_nic = f' -netdev user,id=net_user -device e1000,netdev=net_user,bus=pcie.0,addr=0x{internet_pci_addr:02x} '
@@ -478,6 +487,7 @@ def create_experiment_context(
     use_telnet_monitor: bool = False,
     partition_number: int = -1,
     idx: int = -1,
+    pdes_net_devs: List[str] = [],
 ) -> ExperimentContext:
     
     creation_kwargs = {k: v for k, v in locals().items()}
@@ -491,10 +501,14 @@ def create_experiment_context(
         for value in set(syncs_list):
             assert value in ['true', 'false'], "syncs values must be either 'true' or 'false'"
 
-        assert len(neighbor_node_list) == len(latencies_ns_list) == len(syncs_list)
+        assert len(neighbor_node_list) == len(latencies_ns_list) == len(syncs_list) == len(pdes_net_devs)
         assert node_number != -1, "node_number must be set when neighbor nodes are specified."
         assert neighbers_length > 0, "neighbor_node_list, latencies_ns_list, and syncs_list must have at least one entry when node_number is set."
         print(f"Node {node_number} has neighbors: {neighbor_node_list} with latencies {latencies_ns_list} and syncs {syncs_list}")
+        pdes_net_devs_set = set(pdes_net_devs)
+        for net_devs in pdes_net_devs_set:
+            print(f"Net {net_devs} is being used for neighbors.")
+            assert net_devs in ['e1000', 'virtio-net-pci'], "pdes_net_devs values must be either 'e1000' or 'virtio-net-pci'"
     
     # TODO check this to make sure it doesn't have edge cases
     mounting_folder = os.path.abspath(mounting_folder)
@@ -564,6 +578,7 @@ def create_experiment_context(
         use_telnet_monitor=use_telnet_monitor,
         partition_number=partition_number,
         idx=idx,
+        pdes_net_devs=pdes_net_devs,
     )
 
     e.set_up_folders()

@@ -84,6 +84,7 @@ NECESSARY_BINARY_FILES = [
     "../cfg/timing.cfg",
     "../bin/checkpoint_conversion",
     "efi-e1000.rom",
+    "efi-virtio.rom",
     mem_folder_name,
 ]
 

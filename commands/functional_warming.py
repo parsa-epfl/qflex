@@ -33,9 +33,13 @@ class FunctionalWarming(Executor):
         """
         print("fw command:")
         print(fw_cmd)
+        tock_command = " tock=$(($(date +%s%N) / 1000000)) "
+        time_command = ' echo "Elapsed: $((tock - tick)) ms " '
         return [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
+            tock_command,
             fw_cmd,
+            time_command,
             # TODO add the proper conditions to only create log and fp_gen_speed at the right time
             "rm -rf fp_gen_speed",
             "mkdir fp_gen_speed",
