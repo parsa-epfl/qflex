@@ -1,0 +1,7 @@
+--quantum-size-ns 20000
+--core-count 2
+--no-double-cores
+--node-number 1
+--experiment-name multi_web_full_experiment_15_virtio_1
+--neighbor-nodes "0" 
+--pdes-net-devs "virtio-net-pci"
