@@ -10,6 +10,11 @@ TARGETS = [
     "semikraken"
 ]
 
+NOCOUT_TARGETS = [
+    "nocout-knottykraken",
+    "nocout-semikraken"
+]
+
 
 for (core_count, mem_count) in zip(CORE_COUNT, MEMORY_CONTROLLER):
     for target in TARGETS:
@@ -30,5 +35,8 @@ for (core_count, mem_count) in zip(CORE_COUNT, MEMORY_CONTROLLER):
         # finally, move the build output to a specific directory.
         os.system(f"rm -rf flexus/build-{target}-{core_count}c")
         os.system(f"mv flexus/build-{target} flexus/build-{target}-{core_count}c")
+
+for target in NOCOUT_TARGETS:
+    assert os.system(f"nix develop -i -c ./build {target}") == 0
 
 
