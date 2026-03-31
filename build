@@ -73,7 +73,7 @@ case $SIM in
         if [[ $NIX -gt 0 ]]; then
             BUILD_DIRECTORY=build-${SIM}
 
-            if [ -d $FLEXUS_ROOT/$BUILD_DIRECTORY]; then
+            if [ -d "$FLEXUS_ROOT/$BUILD_DIRECTORY" ]; then
                 rm -rf $FLEXUS_ROOT/$BUILD_DIRECTORY
             fi
 
