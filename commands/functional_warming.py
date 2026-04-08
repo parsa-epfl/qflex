@@ -11,11 +11,13 @@ class FunctionalWarming(Executor):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 sample_size: int):
+                 sample_size: int,
+                 gen_gem5_ckp: bool = False):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
         self.sample_size = sample_size
+        self.gen_gem5_ckp = gen_gem5_ckp
         self.sampling_interval = math.ceil(
             (self.experiment_context.workload.population + self.sample_size - 1) / self.sample_size
         )
@@ -25,11 +27,17 @@ class FunctionalWarming(Executor):
     
 
     def cmd(self) -> str:
+
+        plugin_args = f"mode=warm,init_threshold={self.sampling_interval},interval={self.sampling_interval},count={self.sample_size}"
+
+        if self.gen_gem5_ckp:
+            plugin_args += ",generate_gem5_chkpt=true"
+
         fw_cmd = f"""
             ./qemu-system-aarch64 \
             {self.qemu_common_parser.get_qemu_base_args()} \
             {self.qemu_common_parser.quantum_args()} \
-            -plugin ../lib/libworm_cache.so,mode=warm,init_threshold={self.sampling_interval},interval={self.sampling_interval},count={self.sample_size} \
+            -plugin ../lib/libworm_cache.so,{plugin_args} \
         """
         print("fw command:")
         print(fw_cmd)

@@ -127,6 +127,9 @@ def fw(
     sample_size: Annotated[int, typer.Option(
         help="Sample size for the workload."
     )]=30,
+    gen_gem5_ckp: Annotated[bool, typer.Option(
+        help="Generate gem5-compatible checkpoint files alongside QEMU snapshots."
+    )]=False,
 ):
     """
     This command performs functional warming of the simulator.
@@ -135,6 +138,7 @@ def fw(
     functional_warm_executor = FunctionalWarming(
         experiment_context=experiment_context,
         sample_size=sample_size,
+        gen_gem5_ckp=gen_gem5_ckp,
     )
     functional_warm_executor.execute(to_stdio=True, run_in_background=False)
 
