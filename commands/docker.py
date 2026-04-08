@@ -182,7 +182,10 @@ class DockerBuild(Executor):
 
         all_image_cmd = [
             f"""
-            docker buildx build -t {local_all_name} --build-arg BASE_IMAGE={ghcr_qflex_build_name} -f Dockerfile.QFlexAll .
+            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_build_name} -f Dockerfile.WormCacheQFlex .
+            """,
+            f"""
+            docker buildx build --load -t {local_all_name} --build-arg BASE_IMAGE={local_worm_name} -f Dockerfile.QFlexAll .
             """,
             f"docker tag {local_all_name} {ghcr_all_name}"
         ]
