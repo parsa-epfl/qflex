@@ -200,7 +200,9 @@ class ExperimentContext(BaseModel):
 
         root_sls = [
            "partition.py",
-           "result.py"
+           "result.py",
+           "create_gem5_checkpoint.py",
+           "gem5_misc_regs",
         ]
         for file in root_sls:
             os.system(f"cp -u ./{file} {self.get_experiment_folder_address()}/{file}")
@@ -220,6 +222,7 @@ class ExperimentContext(BaseModel):
             "./parallel-qemu-saved/pc-bios/efi-virtio.rom",
             "./qemu-img",
             "debug.cfg",
+            "system.physmem.store0.pmem",
         ]
         for f in run_files:
 

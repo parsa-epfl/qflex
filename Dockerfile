@@ -104,6 +104,10 @@ FROM base-build AS base-runtime
 
 WORKDIR /home/dev/qflex
 
+COPY --link gem5_misc_regs /home/dev/qflex/gem5_misc_regs
+COPY --link create_gem5_checkpoint.py /home/dev/qflex/create_gem5_checkpoint.py
+COPY --link system.physmem.store0.pmem /home/dev/qflex/system.physmem.store0.pmem
+
 # Copy the runtime files after builds to avoid invalidating build cache
 COPY --link --exclude=parallel-qemu --exclude=qemu --exclude=WormCacheQFlex --exclude=QPoints --exclude=.venv . /home/dev/qflex
 

@@ -29,9 +29,24 @@ class FunctionalWarming(Executor):
     def cmd(self) -> str:
 
         plugin_args = f"mode=warm,init_threshold={self.sampling_interval},interval={self.sampling_interval},count={self.sample_size}"
+        create_gem5_ckp_cmd = []
 
         if self.gen_gem5_ckp:
             plugin_args += ",generate_gem5_chkpt=true"
+            base_image_address = self.qemu_common_parser.image_address
+            for i in range(self.sample_size):
+                create_gem5_ckp_cmd.append(
+                    f"python3 ../create_gem5_checkpoint.py snapshot_{i}.gem --num-cores {self.simulation_context.core_count}"
+                )
+                # Then convert qcow2 to raw
+                image_name = f"snapshot_{i}.img"
+                create_gem5_ckp_cmd.append(
+                    f"./qemu-img convert -f qcow2 -O raw -l snapshot_{i} {base_image_address} snapshot_{i}.gem/{image_name}"
+                )
+                create_gem5_ckp_cmd.append(
+                    f"cp ./system.physmem.store0.pmem snapshot_{i}.gem/"
+                )
+
 
         fw_cmd = f"""
             ./qemu-system-aarch64 \
@@ -41,11 +56,15 @@ class FunctionalWarming(Executor):
         """
         print("fw command:")
         print(fw_cmd)
-        return [
+
+        commands = [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             fw_cmd,
             # TODO add the proper conditions to only create log and fp_gen_speed at the right time
-            "rm -rf fp_gen_speed",
-            "mkdir fp_gen_speed",
-            "mv *.log ./fp_gen_speed",
+            # "rm -rf fp_gen_speed",
+            # "mkdir fp_gen_speed",
+            # "mv *.log ./fp_gen_speed",
         ]
+
+        commands.extend(create_gem5_ckp_cmd)
+        return commands
