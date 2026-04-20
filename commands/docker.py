@@ -134,6 +134,7 @@ class DockerBuild(Executor):
 
         local_all_name = f"{self.docker_image_name_with_all}:{self.version}"
         ghcr_all_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_all}-{self.version}"
+        extension_base_image = ghcr_qflex_name if self.worm_only else local_qflex_name
 
         # TODO centeralize the ghcr.io/parsa-epfl/qflex part
         if not self.worm_only:
@@ -161,7 +162,7 @@ class DockerBuild(Executor):
 
         worm_image_cmd = [
             f"""
-            docker buildx build --load -t {local_worm_name} --build-arg BASE_IMAGE={local_qflex_name} -f Dockerfile.WormCacheQFlex .
+            docker buildx build --load -t {local_worm_name} --build-arg BASE_IMAGE={extension_base_image} -f Dockerfile.WormCacheQFlex .
             """,
             f"docker tag {local_worm_name} {ghcr_worm_name}"
         ]
@@ -172,7 +173,7 @@ class DockerBuild(Executor):
 
         qpoints_image_cmd = [
             f"""
-            docker buildx build --load -t {local_qpoints_name} --build-arg BASE_IMAGE={local_qflex_name} -f Dockerfile.QPoints .
+            docker buildx build --load -t {local_qpoints_name} --build-arg BASE_IMAGE={extension_base_image} -f Dockerfile.QPoints .
             """,
             f"docker tag {local_qpoints_name} {ghcr_qpoints_name}"
         ]
@@ -182,7 +183,7 @@ class DockerBuild(Executor):
 
         all_image_cmd = [
             f"""
-            docker buildx build --load -t {local_worm_name} --build-arg BASE_IMAGE={local_qflex_name} -f Dockerfile.WormCacheQFlex .
+            docker buildx build --load -t {local_worm_name} --build-arg BASE_IMAGE={extension_base_image} -f Dockerfile.WormCacheQFlex .
             """,
             f"""
             docker buildx build --load -t {local_all_name} --build-arg BASE_IMAGE={local_worm_name} -f Dockerfile.QPoints .

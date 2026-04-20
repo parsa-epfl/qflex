@@ -30,31 +30,31 @@ def _require_qpoints_file(qpoints_root: Path, relative_path: str) -> Path:
     if not path.is_file():
         raise RuntimeError(
             f"Required QPoints file not found: {path}. "
-            "Initialize/update the QPoints submodule or use the qpoints/all Docker image."
+            "Initialize/update the QPoints submodule or use a qflex image "
+            "built with ./dep build-docker --qpoints or --all-ext."
         )
     return path
 
 
-def _prepare_qpoints_root(qpoints_root: Path) -> None:
+def _prepare_qpoints_root(qpoints_root: Path, required_paths) -> None:
     if not qpoints_root.is_dir():
         raise RuntimeError(
             f"QPoints directory not found: {qpoints_root}. "
-            "Initialize/update the QPoints submodule or use the qpoints/all Docker image."
+            "Initialize/update the QPoints submodule or use a qflex image "
+            "built with ./dep build-docker --qpoints or --all-ext."
         )
-    for relative_path in (
-        "gen_snapshot.sh",
-        "run_gem5.sh",
-        "scripts/qflex/run_qemu_emu.sh",
-        "scripts/qflex/convert.sh",
-    ):
+    for relative_path in required_paths:
         _require_qpoints_file(qpoints_root, relative_path)
 
 
 def _refresh_qpoints_helper(
-    qpoints_root: Path, run_dir: Path, relative_path: str
+    qpoints_root: Path,
+    run_dir: Path,
+    relative_path: str,
+    dest_name: Optional[str] = None,
 ) -> Path:
     src = _require_qpoints_file(qpoints_root, relative_path)
-    dest = run_dir / src.name
+    dest = run_dir / (dest_name or src.name)
     shutil.copy2(src, dest)
     _ensure_executable(dest)
     return dest
@@ -98,21 +98,34 @@ def convert_single(
 
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
-    _prepare_qpoints_root(qpoints_root)
+    _prepare_qpoints_root(
+        qpoints_root,
+        (
+            "gen_snapshot.sh",
+            "scripts/qflex/run_qemu_emu.sh",
+            "scripts/qflex/convert.sh",
+        ),
+    )
 
     run_dir = Path(qflex_ckp_dir) / "run"
     if not run_dir.is_dir():
         raise RuntimeError(f"run directory not found: {run_dir}")
 
     snapshot_idx = _snapshot_index(snapshot)
+    helper_suffix = f"{snapshot}.{os.getpid()}.{threading.get_ident()}.sh"
+    refreshed_helpers = []
 
     monitor_port = monitor_base + snapshot_idx
     qmp_port = qmp_base + snapshot_idx
     ssh_port = ssh_base + snapshot_idx
 
     run_qemu_emu = _refresh_qpoints_helper(
-        qpoints_root, run_dir, "scripts/qflex/run_qemu_emu.sh"
+        qpoints_root,
+        run_dir,
+        "scripts/qflex/run_qemu_emu.sh",
+        dest_name=f".run_qemu_emu.{helper_suffix}",
     )
+    refreshed_helpers.append(run_qemu_emu)
 
     qemu_log = run_dir / f"qemu_emu_{snapshot}.log"
     qemu_proc = None
@@ -273,8 +286,12 @@ def convert_single(
         _check_cancelled()
         _ensure_qemu_running("disk image conversion")
         convert_sh = _refresh_qpoints_helper(
-            qpoints_root, run_dir, "scripts/qflex/convert.sh"
+            qpoints_root,
+            run_dir,
+            "scripts/qflex/convert.sh",
+            dest_name=f".convert.{helper_suffix}",
         )
+        refreshed_helpers.append(convert_sh)
 
         converted_img = img_dest_dir / f"{snapshot}.img"
         converted_img_tmp = (
@@ -305,6 +322,9 @@ def convert_single(
         if converted_img_tmp is not None and converted_img_tmp.exists():
             converted_img_tmp.unlink()
         _terminate_qemu()
+        for helper in refreshed_helpers:
+            if helper.exists():
+                helper.unlink()
         elapsed = int(time.time() - start_time)
         print(f"[{snapshot}] convert-single completed in {elapsed}s")
 
@@ -390,7 +410,7 @@ def run_gem5(
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
-    _prepare_qpoints_root(qpoints_root)
+    _prepare_qpoints_root(qpoints_root, ("run_gem5.sh",))
     run_gem5_sh = qpoints_root / "run_gem5.sh"
     args = [
         "bash",
