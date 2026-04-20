@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=qflex-base
+ARG BASE_IMAGE
 
 FROM ${BASE_IMAGE}
 
@@ -39,5 +39,4 @@ RUN ln -s /home/dev/qflex/parallel-qemu-saved /qflex/p-qemu-saved
 COPY ./micro_scripts /home/dev/qflex/micro_scripts
 
 CMD ["bash"]
-
 
