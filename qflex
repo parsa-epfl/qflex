@@ -253,7 +253,7 @@ def qpoints_convert_multi_cmd(
     overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directories.")] = False,
 ):
     """
-    Convert a range of QPoints snapshots using run_all_multi_snapshot.sh.
+    Convert a range of QPoints snapshots.
     """
     qpoints_convert_multi(
         first=first,
@@ -281,6 +281,9 @@ def qpoints_run_gem5_cmd(
     inst: Annotated[int, typer.Option(help="Instruction count.")],
     core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
     branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging.")] = False,
+    timing_ruby: Annotated[
+        bool, typer.Option(help="Run gem5 in O3 Ruby MESI_Two_Level mode.")
+    ] = False,
 ):
     """
     Run gem5 for a single snapshot using QPoints run_gem5.sh.
@@ -292,6 +295,7 @@ def qpoints_run_gem5_cmd(
         inst=inst,
         core_count=core_count,
         branch_trace=branch_trace,
+        timing_ruby=timing_ruby,
     )
 
 

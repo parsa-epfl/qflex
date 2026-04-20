@@ -8,11 +8,75 @@ import sys
 import signal
 import threading
 import concurrent.futures
+from typing import Optional
 
 
 def _ensure_executable(path: Path) -> None:
     mode = path.stat().st_mode
     path.chmod(mode | 0o111)
+
+
+def _snapshot_index(snapshot: str) -> int:
+    match = re.fullmatch(r"snapshot_(\d+)", snapshot)
+    if not match:
+        raise RuntimeError(
+            f"Snapshot must be in the form snapshot_N, got: {snapshot!r}."
+        )
+    return int(match.group(1))
+
+
+def _require_qpoints_file(qpoints_root: Path, relative_path: str) -> Path:
+    path = qpoints_root / relative_path
+    if not path.is_file():
+        raise RuntimeError(
+            f"Required QPoints file not found: {path}. "
+            "Initialize/update the QPoints submodule or use the qpoints/all Docker image."
+        )
+    return path
+
+
+def _prepare_qpoints_root(qpoints_root: Path) -> None:
+    if not qpoints_root.is_dir():
+        raise RuntimeError(
+            f"QPoints directory not found: {qpoints_root}. "
+            "Initialize/update the QPoints submodule or use the qpoints/all Docker image."
+        )
+    for relative_path in (
+        "gen_snapshot.sh",
+        "run_gem5.sh",
+        "scripts/qflex/run_qemu_emu.sh",
+        "scripts/qflex/convert.sh",
+    ):
+        _require_qpoints_file(qpoints_root, relative_path)
+
+
+def _refresh_qpoints_helper(
+    qpoints_root: Path, run_dir: Path, relative_path: str
+) -> Path:
+    src = _require_qpoints_file(qpoints_root, relative_path)
+    dest = run_dir / src.name
+    shutil.copy2(src, dest)
+    _ensure_executable(dest)
+    return dest
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    value = os.environ.get(name, str(default))
+    if not re.fullmatch(r"[1-9][0-9]*", value):
+        raise RuntimeError(
+            f"{name} must be a positive integer, got: {value!r}."
+        )
+    return int(value)
+
+
+def _tail_file(path: Path, max_lines: int = 20) -> str:
+    if not path.is_file():
+        return ""
+    lines = path.read_text(errors="replace").splitlines()
+    tail = "\n".join(lines[-max_lines:])
+    if not tail:
+        return ""
+    return f"\nLast {min(len(lines), max_lines)} lines of {path}:\n{tail}"
 
 
 def convert_single(
@@ -28,48 +92,70 @@ def convert_single(
     qmp_base: int = 4444,
     ssh_base: int = 2222,
     overwrite: bool = False,
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
     start_time = time.time()
 
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
+    _prepare_qpoints_root(qpoints_root)
+
     run_dir = Path(qflex_ckp_dir) / "run"
     if not run_dir.is_dir():
         raise RuntimeError(f"run directory not found: {run_dir}")
 
-    snapshot_idx = 0
-    match = re.search(r"_([0-9]+)$", snapshot)
-    if match:
-        snapshot_idx = int(match.group(1))
+    snapshot_idx = _snapshot_index(snapshot)
 
     monitor_port = monitor_base + snapshot_idx
     qmp_port = qmp_base + snapshot_idx
     ssh_port = ssh_base + snapshot_idx
 
-    run_qemu_emu = run_dir / "run_qemu_emu.sh"
-    if not run_qemu_emu.exists():
-        src = qpoints_root / "scripts" / "qflex" / "run_qemu_emu.sh"
-        shutil.copy2(src, run_qemu_emu)
-    _ensure_executable(run_qemu_emu)
+    run_qemu_emu = _refresh_qpoints_helper(
+        qpoints_root, run_dir, "scripts/qflex/run_qemu_emu.sh"
+    )
 
     qemu_log = run_dir / f"qemu_emu_{snapshot}.log"
     qemu_proc = None
+    converted_img_tmp = None
+
+    def _check_cancelled() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError(f"[{snapshot}] conversion cancelled")
+
+    def _ensure_qemu_running(phase: str) -> None:
+        if qemu_proc is not None and qemu_proc.poll() is not None:
+            raise RuntimeError(
+                f"[{snapshot}] qemu exited during {phase} "
+                f"(exit code {qemu_proc.returncode}).{_tail_file(qemu_log)}"
+            )
+
     def _terminate_qemu() -> None:
         if qemu_proc is None:
             return
         if qemu_proc.poll() is not None:
             return
-        qemu_proc.terminate()
+        try:
+            os.killpg(qemu_proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception:
+            qemu_proc.terminate()
         try:
             qemu_proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            qemu_proc.kill()
+            try:
+                os.killpg(qemu_proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return
+            except Exception:
+                qemu_proc.kill()
             qemu_proc.wait()
 
     def _handle_signal(_signum, _frame) -> None:
         _terminate_qemu()
         raise KeyboardInterrupt
     try:
+        _check_cancelled()
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, _handle_signal)
             signal.signal(signal.SIGTERM, _handle_signal)
@@ -90,11 +176,15 @@ def convert_single(
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 text=True,
+                start_new_session=True,
             )
 
         ssh_env = os.environ.copy()
-        ssh_env["SSHPASS"] = "qflex"
-        while True:
+        ssh_env["SSHPASS"] = os.environ.get("QPOINTS_SSH_PASSWORD", "qflex")
+        max_ssh_attempts = _positive_int_env("QPOINTS_SSH_MAX_ATTEMPTS", 120)
+        for ssh_attempt in range(1, max_ssh_attempts + 1):
+            _check_cancelled()
+            _ensure_qemu_running("SSH readiness wait")
             result = subprocess.run(
                 [
                     "sshpass",
@@ -118,10 +208,22 @@ def convert_single(
             )
             if result.returncode == 0:
                 break
-            print(f"[{snapshot}] waiting for vm ssh ({ssh_user}@{ssh_host}:{ssh_port})...")
+            print(
+                f"[{snapshot}] waiting for vm ssh "
+                f"({ssh_user}@{ssh_host}:{ssh_port})... "
+                f"({ssh_attempt}/{max_ssh_attempts})"
+            )
             time.sleep(0.5)
+        else:
+            raise RuntimeError(
+                f"[{snapshot}] timed out waiting for vm ssh "
+                f"({ssh_user}@{ssh_host}:{ssh_port}) after "
+                f"{max_ssh_attempts} attempts.{_tail_file(qemu_log)}"
+            )
 
         print(f"[{snapshot}] generating gem5 checkpoint")
+        _check_cancelled()
+        _ensure_qemu_running("gem5 checkpoint generation")
         img_dest_dir = Path(gem5_ckp_dir) / snapshot
         if img_dest_dir.exists():
             if overwrite:
@@ -163,31 +265,45 @@ def convert_single(
         if img_dest_dir.is_dir():
             shutil.move(str(tmp_log), str(img_dest_dir / tmp_log.name))
         else:
-            raise RuntimeError(f"[{snapshot}] Destination directory does not exist: {img_dest_dir}")
+            raise RuntimeError(
+                f"[{snapshot}] Destination directory does not exist: {img_dest_dir}"
+            )
 
         print(f"[{snapshot}] converting disk image")
-        convert_sh = run_dir / "convert.sh"
-        if not convert_sh.exists():
-            src = qpoints_root / "scripts" / "qflex" / "convert.sh"
-            shutil.copy2(src, convert_sh)
-        _ensure_executable(convert_sh)
+        _check_cancelled()
+        _ensure_qemu_running("disk image conversion")
+        convert_sh = _refresh_qpoints_helper(
+            qpoints_root, run_dir, "scripts/qflex/convert.sh"
+        )
+
+        converted_img = img_dest_dir / f"{snapshot}.img"
+        converted_img_tmp = (
+            img_dest_dir
+            / f".{snapshot}.img.tmp.{os.getpid()}.{threading.get_ident()}"
+        )
+        for path in (converted_img, converted_img_tmp):
+            if path.exists():
+                path.unlink()
 
         subprocess.run(
-            ["bash", str(convert_sh), base, snapshot],
+            ["bash", str(convert_sh), base, snapshot, str(converted_img_tmp)],
             cwd=str(run_dir),
             text=True,
             check=True,
         )
 
-        img_src = run_dir / f"{snapshot}.img"
-        if img_src.is_file():
-            shutil.move(str(img_src), str(img_dest_dir / img_src.name))
+        if converted_img_tmp.is_file():
+            converted_img_tmp.replace(converted_img)
         else:
-            raise RuntimeError(f"[{snapshot}] Converted image not found: {img_src}")
+            raise RuntimeError(
+                f"[{snapshot}] Converted image not found: {converted_img_tmp}"
+            )
     except KeyboardInterrupt:
         _terminate_qemu()
         raise
     finally:
+        if converted_img_tmp is not None and converted_img_tmp.exists():
+            converted_img_tmp.unlink()
         _terminate_qemu()
         elapsed = int(time.time() - start_time)
         print(f"[{snapshot}] convert-single completed in {elapsed}s")
@@ -223,6 +339,7 @@ def convert_multi(
     snapshots = [f"snapshot_{i}" for i in range(first_idx, last_idx + 1)]
     start_time = time.time()
     errors = []
+    cancel_event = threading.Event()
 
     def _run(snapshot: str) -> None:
         convert_single(
@@ -238,6 +355,7 @@ def convert_multi(
             qmp_base=qmp_base,
             ssh_base=ssh_base,
             overwrite=overwrite,
+            cancel_event=cancel_event,
         )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
@@ -248,6 +366,7 @@ def convert_multi(
                 future.result()
             except Exception as exc:
                 errors.append((snap, exc))
+                cancel_event.set()
                 for pending in future_map:
                     pending.cancel()
                 break
@@ -267,9 +386,11 @@ def run_gem5(
     inst: int,
     core_count: int,
     branch_trace: bool = False,
+    timing_ruby: bool = False,
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
+    _prepare_qpoints_root(qpoints_root)
     run_gem5_sh = qpoints_root / "run_gem5.sh"
     args = [
         "bash",
@@ -287,6 +408,8 @@ def run_gem5(
     ]
     if branch_trace:
         args.append("--branch-trace")
+    if timing_ruby:
+        args.append("--timing-ruby")
     subprocess.run(
         args,
         cwd=str(qpoints_root),
