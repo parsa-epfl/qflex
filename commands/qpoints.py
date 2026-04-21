@@ -142,6 +142,15 @@ def convert_single(
                 f"(exit code {qemu_proc.returncode}).{_tail_file(qemu_log)}"
             )
 
+    def _ensure_qemu_not_failed(phase: str) -> None:
+        if qemu_proc is None:
+            return
+        if qemu_proc.poll() not in (None, 0):
+            raise RuntimeError(
+                f"[{snapshot}] qemu failed before {phase} "
+                f"(exit code {qemu_proc.returncode}).{_tail_file(qemu_log)}"
+            )
+
     def _terminate_qemu() -> None:
         if qemu_proc is None:
             return
@@ -284,7 +293,7 @@ def convert_single(
 
         print(f"[{snapshot}] converting disk image")
         _check_cancelled()
-        _ensure_qemu_running("disk image conversion")
+        _ensure_qemu_not_failed("disk image conversion")
         convert_sh = _refresh_qpoints_helper(
             qpoints_root,
             run_dir,
