@@ -8,7 +8,7 @@ from commands.config import ExperimentContext
 from commands.load import Load
 from commands.init_warm import InitWarm
 from commands.functional_warming import FunctionalWarming
-from commands.partition import PartitionCommand, CleanPartitionCommand
+from commands.partition import PartitionCommand, CleanPartitionCommand, UnPartitionCommand
 from commands.run_partition import RunPartitionCommand
 from commands.run_idx import RunIdxCommand
 from commands.run_single_partition import RunSinglePartitionCommand
@@ -147,6 +147,17 @@ def partition_cleanup(
     """
     partition_cleaner_executor = CleanPartitionCommand(experiment_context=experiment_context)
     partition_cleaner_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def unpartition(
+    experiment_context: ExperimentContext,
+):
+    """
+    This command unpartitions the directories created by the partition command.
+    """
+    unpartition_executor = UnPartitionCommand(experiment_context=experiment_context)
+    unpartition_executor.execute(to_stdio=True, run_in_background=False)
 
 
 @app.command()
