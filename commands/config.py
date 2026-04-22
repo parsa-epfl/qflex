@@ -252,11 +252,13 @@ class ExperimentContext(BaseModel):
             "libknottykraken.so", 
             "libsemikraken.so"
         ]
+        kraken_out_dir = os.path.join(repo_root, "kraken_out")
         for f in lib_files:
-            if not os.path.exists(f"/home/dev/qflex/kraken_out/{f}"):
-                raise FileNotFoundError(f"Error: {f} not found in ./home/dev/qflex/kraken_out/")
+            kraken_lib = os.path.join(kraken_out_dir, f)
+            if not os.path.exists(kraken_lib):
+                raise FileNotFoundError(f"Error: {f} not found in {kraken_out_dir}/")
             if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/{f}"):
-                os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
+                shutil.copy2(kraken_lib, f"{self.get_experiment_folder_address()}/lib/{f}")
 
         
 
