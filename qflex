@@ -109,6 +109,9 @@ def test_worm(
     branch_trace: Annotated[bool, typer.Option(
         help="Whether to log branch PCs to per-core files."
     )]=False,
+    monitor_port: Annotated[int, typer.Option(
+        help="Optional QEMU monitor port for graceful stop / debugging."
+    )]=45454,
 ):
     """
     Run a test QEMU session with WormCache in normal mode (no snapshots).
@@ -117,6 +120,7 @@ def test_worm(
         experiment_context=experiment_context,
         skip_generate_cfg=skip_generate_cfg,
         branch_trace=branch_trace,
+        monitor_port=monitor_port,
     )
     test_worm_executor.execute(to_stdio=True, run_in_background=False)
 

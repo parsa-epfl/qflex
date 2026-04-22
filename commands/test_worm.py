@@ -12,11 +12,13 @@ class TestWorm(Executor):
     def __init__(self,
                  experiment_context: ExperimentContext,
                  skip_generate_cfg: bool = False,
-                 branch_trace: bool = False):
+                 branch_trace: bool = False,
+                 monitor_port: int | None = None):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
         self.branch_trace = branch_trace
+        self.monitor_port = monitor_port
 
         experiment_folder = self.experiment_context.get_experiment_folder_address()
         self.worm_params_address = f"{experiment_folder}/cfg/parameter.rs"
@@ -61,7 +63,7 @@ class TestWorm(Executor):
             branch_trace_opt = ",branch_trace=1"
         test_cmd = f"""
         ./qemu-system-aarch64 \
-        {self.qemu_common_parser.get_qemu_base_args()} \
+        {self.qemu_common_parser.get_qemu_base_args(monitor_port=self.monitor_port)} \
         {self.qemu_common_parser.quantum_args()} \
         -plugin ../lib/libworm_cache.so,mode=normal{branch_trace_opt}
         """
