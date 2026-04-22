@@ -285,6 +285,7 @@ def qpoints_run_gem5_cmd(
     inst: Annotated[int, typer.Option(help="Instruction count.")],
     core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
     branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging.")] = False,
+    data_trace: Annotated[bool, typer.Option(help="Enable data access trace logging.")] = False,
     timing_ruby: Annotated[
         bool, typer.Option(help="Run gem5 in O3 Ruby MESI_Two_Level mode.")
     ] = False,
@@ -299,6 +300,7 @@ def qpoints_run_gem5_cmd(
         inst=inst,
         core_count=core_count,
         branch_trace=branch_trace,
+        data_trace=data_trace,
         timing_ruby=timing_ruby,
     )
 

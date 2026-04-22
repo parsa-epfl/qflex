@@ -415,6 +415,7 @@ def run_gem5(
     inst: int,
     core_count: int,
     branch_trace: bool = False,
+    data_trace: bool = False,
     timing_ruby: bool = False,
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
@@ -437,6 +438,8 @@ def run_gem5(
     ]
     if branch_trace:
         args.append("--branch-trace")
+    if data_trace:
+        args.append("--data-trace")
     if timing_ruby:
         args.append("--timing-ruby")
     subprocess.run(
