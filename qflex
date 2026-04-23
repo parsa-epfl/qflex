@@ -109,6 +109,9 @@ def test_worm(
     branch_trace: Annotated[bool, typer.Option(
         help="Whether to log branch PCs to per-core files."
     )]=False,
+    monitor_port: Annotated[int | None, typer.Option(
+        help="Optional QEMU monitor port for graceful stop / debugging."
+    )]=None,
 ):
     """
     Run a test QEMU session with WormCache in normal mode (no snapshots).
@@ -117,6 +120,7 @@ def test_worm(
         experiment_context=experiment_context,
         skip_generate_cfg=skip_generate_cfg,
         branch_trace=branch_trace,
+        monitor_port=monitor_port,
     )
     test_worm_executor.execute(to_stdio=True, run_in_background=False)
 
@@ -281,13 +285,25 @@ def qpoints_run_gem5_cmd(
     inst: Annotated[int, typer.Option(help="Instruction count.")],
     core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
     branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging.")] = False,
+    data_trace: Annotated[bool, typer.Option(help="Enable data access trace logging.")] = False,
+    dump_cache_state: Annotated[
+        bool, typer.Option(help="Enable Ruby cache-state dumping (requires --timing-ruby).")
+    ] = False,
     timing_ruby: Annotated[
         bool, typer.Option(help="Run gem5 in O3 Ruby MESI_Two_Level mode.")
     ] = False,
+    sim_config: Annotated[
+        str | None,
+        typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
+    ] = None,
 ):
     """
     Run gem5 for a single snapshot using QPoints run_gem5.sh.
     """
+    if dump_cache_state and not timing_ruby:
+        raise typer.BadParameter(
+            "--dump-cache-state requires --timing-ruby."
+        )
     qpoints_run_gem5(
         gem5_ckp_dir=gem5_ckp_dir,
         experiment=experiment,
@@ -295,7 +311,10 @@ def qpoints_run_gem5_cmd(
         inst=inst,
         core_count=core_count,
         branch_trace=branch_trace,
+        data_trace=data_trace,
+        dump_cache_state=dump_cache_state,
         timing_ruby=timing_ruby,
+        sim_config=sim_config,
     )
 
 

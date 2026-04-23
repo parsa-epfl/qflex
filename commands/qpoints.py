@@ -415,8 +415,14 @@ def run_gem5(
     inst: int,
     core_count: int,
     branch_trace: bool = False,
+    data_trace: bool = False,
+    dump_cache_state: bool = False,
     timing_ruby: bool = False,
+    sim_config: Optional[str] = None,
 ) -> None:
+    if dump_cache_state and not timing_ruby:
+        raise RuntimeError("--dump-cache-state requires --timing-ruby.")
+
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
     _prepare_qpoints_root(qpoints_root, ("run_gem5.sh",))
@@ -437,8 +443,14 @@ def run_gem5(
     ]
     if branch_trace:
         args.append("--branch-trace")
+    if data_trace:
+        args.append("--data-trace")
+    if dump_cache_state:
+        args.append("--dump-cache-state")
     if timing_ruby:
         args.append("--timing-ruby")
+    if sim_config:
+        args.extend(["--sim-config", sim_config])
     subprocess.run(
         args,
         cwd=str(qpoints_root),
