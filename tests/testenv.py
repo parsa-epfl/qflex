@@ -67,6 +67,13 @@ def resolve_testenv_path(
     extra_candidates: Iterable[Path] = (),
 ) -> Path | None:
     root = repo_root or Path(__file__).resolve().parents[1]
+    env_override = os.environ.get("QFLEX_TEST_CONFIG")
+    if env_override:
+        override_path = Path(env_override).expanduser()
+        if not override_path.is_file():
+            raise RuntimeError(
+                f"QFLEX_TEST_CONFIG points to a missing file: {override_path}"
+            )
     for candidate in [*candidate_paths(root), *extra_candidates]:
         if candidate.is_file():
             return candidate

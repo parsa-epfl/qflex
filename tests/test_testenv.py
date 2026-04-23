@@ -20,6 +20,14 @@ def test_resolve_testenv_prefers_env_override(tmp_path, monkeypatch):
     assert found == override
 
 
+def test_resolve_testenv_rejects_missing_env_override(tmp_path, monkeypatch):
+    missing = tmp_path / "missing.json"
+    monkeypatch.setenv("QFLEX_TEST_CONFIG", str(missing))
+
+    with pytest.raises(RuntimeError, match="QFLEX_TEST_CONFIG points to a missing file"):
+        resolve_testenv_path(repo_root=tmp_path)
+
+
 def test_load_testenv_from_repo_local_file(tmp_path, monkeypatch):
     monkeypatch.delenv("QFLEX_TEST_CONFIG", raising=False)
     config = tmp_path / ".testenv.json"
