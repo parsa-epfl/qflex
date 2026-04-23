@@ -286,9 +286,16 @@ def qpoints_run_gem5_cmd(
     core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
     branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging.")] = False,
     data_trace: Annotated[bool, typer.Option(help="Enable data access trace logging.")] = False,
+    dump_cache_state: Annotated[
+        bool, typer.Option(help="Enable Ruby cache-state dumping (requires --timing-ruby).")
+    ] = False,
     timing_ruby: Annotated[
         bool, typer.Option(help="Run gem5 in O3 Ruby MESI_Two_Level mode.")
     ] = False,
+    sim_config: Annotated[
+        str | None,
+        typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
+    ] = None,
 ):
     """
     Run gem5 for a single snapshot using QPoints run_gem5.sh.
@@ -301,7 +308,9 @@ def qpoints_run_gem5_cmd(
         core_count=core_count,
         branch_trace=branch_trace,
         data_trace=data_trace,
+        dump_cache_state=dump_cache_state,
         timing_ruby=timing_ruby,
+        sim_config=sim_config,
     )
 
 
