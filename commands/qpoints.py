@@ -420,6 +420,9 @@ def run_gem5(
     timing_ruby: bool = False,
     sim_config: Optional[str] = None,
 ) -> None:
+    if dump_cache_state and not timing_ruby:
+        raise RuntimeError("--dump-cache-state requires --timing-ruby.")
+
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
     _prepare_qpoints_root(qpoints_root, ("run_gem5.sh",))

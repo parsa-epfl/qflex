@@ -12,7 +12,7 @@ So the tests here focus on the wrapper contract rather than re-testing gem5 inte
 
 ## Files
 
-- [testenv.py](/home/dev/qflex_git/tests/testenv.py)
+- [testenv.py](testenv.py)
   - shared test-environment loader for the outer repo
   - resolves config from:
     - `QFLEX_TEST_CONFIG`
@@ -25,13 +25,13 @@ So the tests here focus on the wrapper contract rather than re-testing gem5 inte
     - `keep_artifacts` in the testenv file
     - `QFLEX_TEST_KEEP_ARTIFACTS=1`
 
-- [test_testenv.py](/home/dev/qflex_git/tests/test_testenv.py)
+- [test_testenv.py](test_testenv.py)
   - verifies testenv path resolution
   - verifies required-key checking
   - verifies default snapshot / instruction settings
   - verifies artifact retention policy parsing
 
-- [test_qpoints_cli.py](/home/dev/qflex_git/tests/test_qpoints_cli.py)
+- [test_qpoints_cli.py](test_qpoints_cli.py)
   - checks that `qflex qpoints run-gem5 --help` exposes the expected tracing options
   - verifies that the outer CLI forwards those options into `commands/qpoints.py`
   - protects the wrapper contract for:
@@ -41,7 +41,7 @@ So the tests here focus on the wrapper contract rather than re-testing gem5 inte
     - `--timing-ruby`
     - `--sim-config`
 
-- [test_qpoints_integration.py](/home/dev/qflex_git/tests/test_qpoints_integration.py)
+- [test_qpoints_integration.py](test_qpoints_integration.py)
   - real integration tests for the outer `qflex` CLI
   - creates a writable qcow2 copy from the configured base image
   - converts `snapshot_1`
@@ -54,31 +54,31 @@ So the tests here focus on the wrapper contract rather than re-testing gem5 inte
 
 ## How to run
 
-Use the shared local venv:
+Use your project Python environment:
 
 ```bash
-/home/dev/qflex/.venv/bin/python -m pytest -q
+python -m pytest -q
 ```
 
 Run only outer-repo tests:
 
 ```bash
-cd /home/dev/qflex_git
-/home/dev/qflex/.venv/bin/python -m pytest -q
+cd /path/to/qflex
+python -m pytest -q
 ```
 
 Run only integration tests:
 
 ```bash
-cd /home/dev/qflex_git
-/home/dev/qflex/.venv/bin/python -m pytest -q -m integration
+cd /path/to/qflex
+python -m pytest -q -m integration
 ```
 
 Run one specific test:
 
 ```bash
-cd /home/dev/qflex_git
-/home/dev/qflex/.venv/bin/python -m pytest -q tests/test_qpoints_integration.py::test_qflex_run_gem5_ruby_data_trace_cache_dump_and_sim_config
+cd /path/to/qflex
+python -m pytest -q tests/test_qpoints_integration.py::test_qflex_run_gem5_ruby_data_trace_cache_dump_and_sim_config
 ```
 
 ## Test environment file

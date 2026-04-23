@@ -52,7 +52,7 @@ class QemuCommonArgParser:
         {self.nic_command} \
         -rtc clock=vm \
         {self.loadvm} \
-        {'-monitor telnet::%d,server,nowait' % monitor_port if monitor_port is not None else ''} \
+        {'-monitor telnet:127.0.0.1:%d,server,nowait' % monitor_port if monitor_port is not None else ''} \
         {self.cd_rom} \
         -nographic -no-reboot"""
         print("="*50+"QEMU command arguments:"+"="*50)
