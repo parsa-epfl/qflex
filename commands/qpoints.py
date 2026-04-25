@@ -81,23 +81,13 @@ def _prepare_snapshot_gem5_uarch(
         )
         return
 
-    try:
-        prepare_script = _require_qpoints_file(
-            qpoints_root, "scripts/uarch_restore/prepare_gem5_uarch.py"
-        )
-    except RuntimeError:
-        print(
-            f"[{snapshot}] prepare_gem5_uarch.py not found; skipping gem5 "
-            f"uarch preparation for {qflex_uarch_dir}",
-            file=sys.stderr,
-        )
-        return
-
-    print(f"[{snapshot}] preparing gem5 uarch artifacts")
+    prepare_script = _require_qpoints_file(
+        qpoints_root, "scripts/uarch_restore/prepare_gem5_uarch.py"
+    )
     try:
         subprocess.run(
             [
-                sys.executable,
+                "python3",
                 str(prepare_script),
                 "--qflex-run-dir",
                 str(Path(qflex_ckp_dir) / "run"),
@@ -382,6 +372,8 @@ def convert_single(
             raise RuntimeError(
                 f"[{snapshot}] Converted image not found: {converted_img_tmp}"
             )
+
+        print(f"[{snapshot}] preparing gem5 uarch artifacts")
         _check_cancelled()
         _prepare_snapshot_gem5_uarch(
             qpoints_root, qflex_ckp_dir, gem5_ckp_dir, snapshot
