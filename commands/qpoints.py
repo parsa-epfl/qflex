@@ -60,6 +60,54 @@ def _refresh_qpoints_helper(
     return dest
 
 
+def _prepare_snapshot_gem5_uarch(
+    qpoints_root: Path,
+    qflex_ckp_dir: str,
+    gem5_ckp_dir: str,
+    snapshot: str,
+) -> None:
+    qflex_uarch_dir = Path(qflex_ckp_dir) / "run" / f"{snapshot}.uarch"
+    if not qflex_uarch_dir.is_dir():
+        print(
+            f"[{snapshot}] no qflex uarch directory found at {qflex_uarch_dir}; "
+            "skipping gem5 uarch preparation"
+        )
+        return
+    if shutil.which("zstd") is None:
+        print(
+            f"[{snapshot}] zstd not found; skipping gem5 uarch preparation "
+            f"for {qflex_uarch_dir}",
+            file=sys.stderr,
+        )
+        return
+
+    prepare_script = _require_qpoints_file(
+        qpoints_root, "scripts/uarch_restore/prepare_gem5_uarch.py"
+    )
+    try:
+        subprocess.run(
+            [
+                "python3",
+                str(prepare_script),
+                "--qflex-run-dir",
+                str(Path(qflex_ckp_dir) / "run"),
+                "--gem5-workload-root",
+                gem5_ckp_dir,
+                "--snapshot",
+                snapshot,
+                "--overwrite",
+            ],
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        print(
+            f"[{snapshot}] gem5 uarch preparation failed for "
+            f"{qflex_uarch_dir}; continuing without gem5 uarch artifacts",
+            file=sys.stderr,
+        )
+
+
 def _positive_int_env(name: str, default: int) -> int:
     value = os.environ.get(name, str(default))
     if not re.fullmatch(r"[1-9][0-9]*", value):
@@ -324,6 +372,12 @@ def convert_single(
             raise RuntimeError(
                 f"[{snapshot}] Converted image not found: {converted_img_tmp}"
             )
+
+        print(f"[{snapshot}] preparing gem5 uarch artifacts")
+        _check_cancelled()
+        _prepare_snapshot_gem5_uarch(
+            qpoints_root, qflex_ckp_dir, gem5_ckp_dir, snapshot
+        )
     except KeyboardInterrupt:
         _terminate_qemu()
         raise
