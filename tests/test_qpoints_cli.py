@@ -143,7 +143,7 @@ def test_prepare_snapshot_gem5_uarch_invokes_qpoints_postprocessor(tmp_path: Pat
 
     run_mock.assert_called_once_with(
         [
-            "python3",
+            module.sys.executable,
             str(script_path),
             "--qflex-run-dir",
             str(qflex_ckp_dir / "run"),

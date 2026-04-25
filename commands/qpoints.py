@@ -97,7 +97,7 @@ def _prepare_snapshot_gem5_uarch(
     try:
         subprocess.run(
             [
-                "python3",
+                sys.executable,
                 str(prepare_script),
                 "--qflex-run-dir",
                 str(Path(qflex_ckp_dir) / "run"),
