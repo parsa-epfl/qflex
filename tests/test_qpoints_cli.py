@@ -216,3 +216,31 @@ def test_prepare_snapshot_gem5_uarch_continues_when_postprocessor_fails(
 
     run_mock.assert_called_once()
     assert "continuing without gem5 uarch artifacts" in capsys.readouterr().err
+
+
+def test_prepare_snapshot_gem5_uarch_skips_when_postprocessor_script_missing(
+    tmp_path: Path, capsys
+):
+    module = _load_qpoints_commands_module()
+
+    qpoints_root = tmp_path / "QPoints"
+    qpoints_root.mkdir()
+
+    qflex_ckp_dir = tmp_path / "qflex-ckpts"
+    (qflex_ckp_dir / "run" / "snapshot_0.uarch").mkdir(parents=True)
+    gem5_ckp_dir = tmp_path / "checkpoints"
+    gem5_ckp_dir.mkdir()
+
+    with mock.patch.object(module.shutil, "which", return_value="/usr/bin/zstd"), \
+         mock.patch.object(module.subprocess, "run") as run_mock:
+        module._prepare_snapshot_gem5_uarch(
+            qpoints_root=qpoints_root,
+            qflex_ckp_dir=str(qflex_ckp_dir),
+            gem5_ckp_dir=str(gem5_ckp_dir),
+            snapshot="snapshot_0",
+        )
+
+    run_mock.assert_not_called()
+    assert "prepare_gem5_uarch.py not found; skipping gem5 uarch preparation" in (
+        capsys.readouterr().err
+    )
