@@ -326,7 +326,27 @@ class ExperimentContext(BaseModel):
                 os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
 
         
+    def shm_clean_up(self):
+        
+        shm_recvs = self.get_shm_names(recieve=True)
+        shm_sends = self.get_shm_names(recieve=False)
+        all_shm_names = shm_recvs + shm_sends
 
+        for shm_name in all_shm_names:
+            shm_path = f"/dev/shm/{shm_name}"
+            if os.path.exists(shm_path):
+                print(f"Removing shared memory file {shm_path}...")
+                # Force femove the file
+                os.system(f"rm -f {shm_path}")
+            else:
+                print(f"Shared memory file {shm_path} does not exist, skipping removal.")
+
+
+    def clean_up(self):
+        self.shm_clean_up()
+
+
+        
 
     def setup_nic_args(self):
         # TODO move this to simulation context later

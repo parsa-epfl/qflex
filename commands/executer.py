@@ -3,6 +3,7 @@ import subprocess
 import os
 import time
 from multiprocessing import Pool
+from .config import ExperimentContext
 
 
 class Executor(abc.ABC):
@@ -10,6 +11,11 @@ class Executor(abc.ABC):
     @abc.abstractmethod
     def cmd(self) -> str:
         pass
+
+    def get_experiment(self) -> ExperimentContext:
+        if not hasattr(self, "experiment") or not isinstance(self.experiment, ExperimentContext):
+            return None
+        return self.experiment
 
     def execute(self, to_stdio: bool = True, run_in_background: bool = False) -> bool:
         args = self.cmd()
@@ -22,6 +28,8 @@ class Executor(abc.ABC):
 
         # TODO look into if shell needs to be turned False
         if run_in_background:
+            raise NotImplementedError("run_in_background is not implemented yet.")
+            # Not implemented due to cleanups not being implemented yet
             # Background: optionally inherit stdio or capture, but you manage the pipes.
             subprocess.Popen(
                 arg,
@@ -42,6 +50,7 @@ class Executor(abc.ABC):
                 text=True,
                 cwd=cwd,
             )
+            self.clean_up()
             return r.returncode == 0
         else:
             r = subprocess.run(
@@ -51,7 +60,14 @@ class Executor(abc.ABC):
                 capture_output=True,
                 cwd=cwd,
             )
+            self.clean_up()
             return r.returncode == 0
+    
+    def clean_up(self):
+        experiment = self.get_experiment()
+        if experiment is not None:
+            experiment.clean_up()
+        return
     
     def get_log_file_address(self):
         raise NotImplementedError("log_file_address is not implemented for this executor.")
@@ -90,7 +106,7 @@ class SequentialGroupExecutor(Executor):
                     with open(log_f, "r") as f:
                         log = f.read()
                 raise RuntimeError(f"{child.__class__.__name__} failed \nstdout:\n{log}\nstderr:\n{err}")
-        
+        self.clean_up()
         return True
 
 class ParallelExecutor(Executor):
@@ -130,7 +146,7 @@ class ParallelExecutor(Executor):
                 if all(r.ready() for r in async_results):
                     break
 
-
+        self.clean_up()
         return True
 
 
