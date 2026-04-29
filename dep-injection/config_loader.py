@@ -3,9 +3,7 @@ from omegaconf import OmegaConf, DictConfig
 
 
 def load_config(path: str | Path) -> DictConfig:
-    """
-    Load a YAML config with `extends:` inheritance.
-    """
+    """Load YAML with `extends:` inheritance (recursive)."""
     path = Path(path).resolve()
     cfg = OmegaConf.load(path)
 
@@ -24,6 +22,7 @@ def load_config(path: str | Path) -> DictConfig:
 
 
 def apply_cli_overrides(cfg: DictConfig, overrides: list[str]) -> DictConfig:
+    """Apply ['key.path=value', ...] dotlist overrides on top of cfg."""
     if not overrides:
         return cfg
     return OmegaConf.merge(cfg, OmegaConf.from_dotlist(overrides))

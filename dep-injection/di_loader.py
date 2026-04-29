@@ -9,25 +9,22 @@ from injector import Module, Provider, singleton
 
 PRIMITIVE_TYPES = {int, str, float, bool, bytes, list, dict, tuple, set}
 RESERVED_KEYS = {"_target_", "_scope_", "_name_", "_deps_"}
-
-# Sentinel: skip this kwarg so the constructor's default applies.
-_OMIT = object()
+_OMIT = object()  # sentinel: skip kwarg, let constructor default apply
 
 
-def import_class(path: str) -> type:
-    """Resolve 'pkg.module.Class' -> the class object."""
+def import_callable(path: str):
+    """Resolve 'pkg.module.Name' -> the class or function object."""
     if "." not in path:
         raise ValueError(f"_target_ must be fully qualified, got '{path}'")
-    module_path, class_name = path.rsplit(".", 1)
+    module_path, name = path.rsplit(".", 1)
     module = importlib.import_module(module_path)
     try:
-        return getattr(module, class_name)
+        return getattr(module, name)
     except AttributeError as e:
-        raise ImportError(f"'{class_name}' not found in '{module_path}'") from e
+        raise ImportError(f"'{name}' not found in '{module_path}'") from e
 
 
 def _unwrap_optional(hint):
-    """Strip Optional[X] / Union[X, None] / X | None. Returns (inner_hint, is_optional)."""
     origin = get_origin(hint)
     if origin is Union or origin is types.UnionType:
         args = [a for a in get_args(hint) if a is not type(None)]
@@ -38,7 +35,6 @@ def _unwrap_optional(hint):
 
 
 def _unwrap_list(hint):
-    """Detect list[X]. Returns (item_type, is_list)."""
     origin = get_origin(hint)
     if origin is list:
         args = get_args(hint)
@@ -50,15 +46,23 @@ def _unwrap_list(hint):
     return None, False
 
 
-def find_typed_deps(cls: type, scalar_param_names: set[str]):
+def _signature_for(target) -> tuple[inspect.Signature, dict]:
     """
-    Walk __init__'s signature.
-    Returns {param_name: (item_type, is_optional, is_list)} for non-primitive deps.
+    Return (signature, type_hints) for a class (its __init__) or function.
     """
-    sig = inspect.signature(cls.__init__)
-    hints = get_type_hints(cls.__init__)
+    if inspect.isclass(target):
+        return inspect.signature(target.__init__), get_type_hints(target.__init__)
+    return inspect.signature(target), get_type_hints(target)
 
-    typed_deps: dict[str, tuple[type, bool, bool]] = {}
+
+def find_typed_deps(target, scalar_param_names: set[str]):
+    """
+    Returns {param_name: (item_type, is_optional, is_list)} for non-primitive params
+    that should be resolved through the injector graph.
+    """
+    sig, hints = _signature_for(target)
+
+    typed_deps = {}
     for name in sig.parameters:
         if name == "self" or name in scalar_param_names:
             continue
@@ -75,17 +79,22 @@ def find_typed_deps(cls: type, scalar_param_names: set[str]):
     return typed_deps
 
 
-class ComponentProvider(Provider):
-    """
-    Build one component on demand:
-    - scalar params come from YAML
-    - typed deps are resolved through the injector graph
-    - list deps are resolved per-element
-    - _OMIT means "skip the kwarg, use the constructor default"
-    """
+def get_return_type(target):
+    """Class-targets return themselves; function-targets need a -> annotation."""
+    if inspect.isclass(target):
+        return target
+    hints = get_type_hints(target)
+    if "return" not in hints:
+        raise ValueError(
+            f"Factory '{target.__name__}' has no return type annotation; "
+            f"add '-> SomeType' so injector knows what type it produces."
+        )
+    return hints["return"]
 
-    def __init__(self, cls, scalar_params, resolved_deps):
-        self._cls = cls
+
+class ComponentProvider(Provider):
+    def __init__(self, target, scalar_params, resolved_deps):
+        self._target = target
         self._scalar_params = scalar_params
         self._resolved_deps = resolved_deps
 
@@ -98,55 +107,52 @@ class ComponentProvider(Provider):
                 kwargs[param_name] = [injector.get(d) for d in dep]
             else:
                 kwargs[param_name] = injector.get(dep)
-        return self._cls(**kwargs)
+        return self._target(**kwargs)
 
 
 class ConfigDrivenModule(Module):
-    """Reads cfg.components and binds each entry to the injector."""
-
     def __init__(self, cfg: DictConfig):
         self._cfg = cfg
 
     def _make_binding_key(self, cls: type, name: str | None) -> type:
-        """
-        Unique type per (cls, name).
-        Unnamed bindings use cls itself.
-        Named bindings use a cached dynamic subclass so both passes agree.
-        """
         if name is None:
             return cls
         cache_key = (cls, name)
         if cache_key not in self._key_cache:
-            subclass = type(f"{cls.__name__}__{name}", (cls,), {})
-            self._key_cache[cache_key] = subclass
+            self._key_cache[cache_key] = type(f"{cls.__name__}__{name}", (cls,), {})
         return self._key_cache[cache_key]
 
     def configure(self, binder):
-        self._key_cache: dict[tuple[type, str | None], type] = {}
+        self._key_cache: dict = {}
         components = self._cfg.get("components", {})
 
-        # First pass: assign a binding key to every component, detect duplicates.
+        # First pass: assign binding keys, detect duplicates
         component_keys: dict[str, type] = {}
         name_lookup: dict[tuple[type, str | None], type] = {}
+        targets: dict[str, Any] = {}
+
         for comp_name, comp in components.items():
-            target = comp.get("_target_")
-            if target is None:
+            target_path = comp.get("_target_")
+            if target_path is None:
                 raise ValueError(f"Component '{comp_name}' missing '_target_'")
-            cls = import_class(target)
+            target = import_callable(target_path)
+            return_type = get_return_type(target)
             name = comp.get("_name_")
-            if (cls, name) in name_lookup:
+
+            if (return_type, name) in name_lookup:
                 raise ValueError(
-                    f"Duplicate binding for {cls.__name__}"
+                    f"Duplicate binding for {return_type.__name__}"
                     + (f" name='{name}'" if name else " (unnamed)")
                     + f" — second occurrence at component '{comp_name}'"
                 )
-            key = self._make_binding_key(cls, name)
+            key = self._make_binding_key(return_type, name)
             component_keys[comp_name] = key
-            name_lookup[(cls, name)] = key
+            name_lookup[(return_type, name)] = key
+            targets[comp_name] = target
 
-        # Second pass: build providers and bind them.
+        # Second pass: build providers and bind
         for comp_name, comp in components.items():
-            cls = import_class(comp["_target_"])
+            target = targets[comp_name]
             scope_name = comp.get("_scope_")
 
             comp_dict = OmegaConf.to_container(comp, resolve=True)
@@ -155,7 +161,7 @@ class ConfigDrivenModule(Module):
             }
             explicit_deps = comp_dict.get("_deps_") or {}
 
-            typed_deps = find_typed_deps(cls, set(scalar_params.keys()))
+            typed_deps = find_typed_deps(target, set(scalar_params.keys()))
 
             resolved_deps: dict[str, Any] = {}
             for param, (dep_type, is_optional, is_list) in typed_deps.items():
@@ -163,8 +169,7 @@ class ConfigDrivenModule(Module):
                     spec = explicit_deps[param]
                     if is_list:
                         resolved_deps[param] = [
-                            name_lookup[(dep_type, entry.get("name"))]
-                            for entry in spec
+                            name_lookup[(dep_type, e.get("name"))] for e in spec
                         ]
                     else:
                         resolved_deps[param] = name_lookup[(dep_type, spec.get("name"))]
@@ -172,13 +177,13 @@ class ConfigDrivenModule(Module):
                     resolved_deps[param] = _OMIT
                 elif is_list:
                     raise ValueError(
-                        f"Required list dep '{param}: list[{dep_type.__name__}]' on "
-                        f"{cls.__name__} needs a '_deps_' entry"
+                        f"Required list dep '{param}' on '{comp_name}' "
+                        f"needs a '_deps_' entry"
                     )
                 else:
                     resolved_deps[param] = dep_type
 
-            provider = ComponentProvider(cls, scalar_params, resolved_deps)
+            provider = ComponentProvider(target, scalar_params, resolved_deps)
             binding_key = component_keys[comp_name]
 
             if scope_name == "singleton":
