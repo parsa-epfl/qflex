@@ -476,39 +476,41 @@ def create_experiment_context(
     # Workload section:
     workload_name: str,
     primary_core_start: int,
-    secondary_core_start: int,
     is_consolidated: bool,
     primary_ipc: float,
-    secondary_ipc: float,
     population_seconds: int,
-    phantom_cpu_ipc: float,
+    # ↓ these gained defaults (matching the old typer defaults)
+    secondary_core_start: int = -1,
+    secondary_ipc: float = 0.0,
+    phantom_cpu_ipc: float = -1.0,
     # experiment sections
-    image_folder: str,
-    # Default parameters that can be induced from others
-    experiment_name=None,
-    image_name: str=None,
+    image_folder: str = "./images",          # ← was required, gained default
+    experiment_name: str = "default-experiment",   # ← was None, made explicit
+    image_name: str = "root.qcow2",          # ← was None, made explicit
     keep_experiment_unique: bool = True,
     use_image_directly: bool = False,
     loadvm_name: str = "",
     mounting_folder: str = ".",
-    # Default for simulation context
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
-    machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
+    machine_freq_ghz: float = 2.0,
     include_affinity: bool = False,
-    
     # Multi-node parameters
     node_number: int = -1,
-    neighbor_node_list: List[int] = [],
-    latencies_ns_list: List[int] = [],
-    syncs_list: List[str] = [],
+    neighbor_node_list: List[int] = None,    # ← see note below
+    latencies_ns_list: List[int] = None,
+    syncs_list: List[str] = None,
     seed_image_name: str = '',
     telnet_port: int = -1,
     use_telnet_monitor: bool = False,
     partition_number: int = -1,
     idx: int = -1,
-    pdes_net_devs: List[str] = [],
+    pdes_net_devs: List[str] = None,
 ) -> ExperimentContext:
+    neighbor_node_list = neighbor_node_list or []
+    latencies_ns_list = latencies_ns_list or []
+    syncs_list = syncs_list or []
+    pdes_net_devs = pdes_net_devs or []
     
     creation_kwargs = {k: v for k, v in locals().items()}
 

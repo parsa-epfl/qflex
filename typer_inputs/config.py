@@ -1,179 +1,66 @@
-from typing import Annotated, List
+import os
+from typing import Annotated, List, Optional
 import typer
-from commands.config import create_experiment_context, ExperimentContext
+
+from commands.config import ExperimentContext
+from dep_injection import build_experiment_context
+
 from .typer_base import TyperDataClassMeta
 
+
+CONFIG_ENV_VAR = "QFLEX_EX_Y"
+DEFAULT_CONFIG_PATH = "config.yaml"
+
+
+def _resolve_config_path(cli_value: Optional[str]) -> str:
+    """
+    Resolution order:
+      1. --config CLI flag (if non-empty)
+      2. QFLEX_EX_Y env var (if non-empty)
+      3. config.yaml in the current directory (if it exists)
+      4. raise
+    """
+    result = ""
+    default_config_path = os.path.join(os.getcwd(), DEFAULT_CONFIG_PATH)
+    env_value = os.environ.get(CONFIG_ENV_VAR, "").strip()
+    
+    if cli_value:
+        result = cli_value
+
+    elif env_value:
+        result = env_value
+
+    elif os.path.exists(default_config_path):
+        result = default_config_path
+
+    if result is not None and result.strip() != "":
+        print(f"Using config file: {result}")
+        return result
+
+    raise typer.BadParameter(
+        f"No config file specified. Pass --config / -c, "
+        f"or set the {CONFIG_ENV_VAR} environment variable, "
+        f"or ensure {DEFAULT_CONFIG_PATH} exists in the current directory."
+    )
+
+
 class ExperimentContextTyper(TyperDataClassMeta):
-    """
-    A class to hold metadata for Typer CLI dataclass inputs.
-    """
     def __init__(self, name):
         super().__init__(name=name, init_function=self.experiment_context_typer)
 
     def experiment_context_typer(
         self,
-        core_count: Annotated[int, typer.Option(help="Number of CPU cores for the VM.")],
-        double_cores: Annotated[bool, typer.Option(help="Double the number of CPU cores for the client.")],
-        quantum_size_ns: Annotated[int, typer.Option(help="Quantum size for the simulator in nanoseconds.")],
-        llc_size_per_tile_mb: Annotated[int, typer.Option(help="LLC size per tile in MB.")],
-        parallel: Annotated[bool, typer.Option(help="Whether the simulation is parallel or not.")],
-        network: Annotated[str, typer.Option(help="Network mode, either user or none, this is in addition to connecting to internet and other nodes that are there by default.")],
-        memory_gb: Annotated[int, typer.Option(help="Memory size for the VM in GB.")],
-        # Host section
-        host_name:Annotated[str, typer.Option(help="Host name, used to create initial ipns file")],
-        # Workload section
-        # TODO check where workload name is used
-        workload_name:Annotated[str, typer.Option(help="Workload name")],
-        # TODO possibly move this to be only in fw?
-        population_seconds: Annotated[float, typer.Option(
-            help="Population size for the workload in seconds."
-        )],
-        consolidated: Annotated[bool, typer.Option(
-            help="Whether the workload is consolidated or not."
-        )],
-        primary_ipc: Annotated[float, typer.Option(
-            help="Target IPC for primary workload."
-        )],
-        primary_core_start: Annotated[int, typer.Option(
-            help="Starting core for primary workload."
-        )],
-        secondary_core_start: Annotated[int, typer.Option(
-            help="Starting core for secondary workload. Only used if consolidated is True."
-        )] = -1,
-        secondary_ipc: Annotated[float, typer.Option(
-            help="Target IPC for secondary workload. Only used if consolidated is True."
-        )] = 0.0,
-        phantom_cpu_ipc: Annotated[float, typer.Option(
-            help="Target IPC for phantom CPU. This is used for the client in the same node. Only used in double core mode."
-        )] = -1.0,
-        # experiment context with default values
-        experiment_name: Annotated[str, typer.Option(
-            help="Name of the experiment. Used for organizing output files."
-        )] = 'default-experiment',
-        image_name:  Annotated[str, typer.Option(
-            help="Name of the image file to load."
-        )] = 'root.qcow2',
-        image_folder: Annotated[str, typer.Option(
-            help="Folder where images are stored."
-        )] = './images',
-        unique: Annotated[bool, typer.Option(
-            help="Whether to keep the experiment folder unique by adding a timestamp."
-        )] = True,
-        use_image_directly: Annotated[bool, typer.Option(
-            help="Whether to use the image directly from the image folder or copy it to the experiment folder."
-        )] = False,
-        loadvm_name: Annotated[str, typer.Option(
-            help="Name of the loadvm to use in QEMU, optional"
+        config: Annotated[str, typer.Option(
+            "--config", "-c",
+            help=f"Path to YAML config. If empty, falls back to the "
+                 f"{CONFIG_ENV_VAR} environment variable. and then to {DEFAULT_CONFIG_PATH} if it exists."
         )] = "",
-        mounting_folder: Annotated[str, typer.Option(
-            help="Mounting directory where the experiment folders will be created."
-        )] = ".",
-        check_period_quantum_coeff: Annotated[float, typer.Option(
-            help="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period."
-        )] = 53.0,
-        use_cd_rom: Annotated[bool, typer.Option(help="Whether to use a CD-ROM for initial setup.")]=False,
-        machine_freq_ghz: Annotated[float, typer.Option(help="Machine frequency in GHz.")]=2.0,
-        include_affinity: Annotated[bool, typer.Option(
-            help="Whether or not generate affinity index in core_info.csv."
-        )]=False,
-        # Multi-node section
-        node_number: Annotated[int, typer.Option(
-            help="Node number in multi-node setup, -1 means single node. 0 is the master node."
-        )]=-1,
-        neighbor_nodes: Annotated[str, typer.Option(
-            help="Comma separated list of neighbor node numbers in multi-node setup, only used if node_number is not -1."
-        )]="",
-        latancies_ns: Annotated[str, typer.Option(
-            help="Comma separated list of latencies to neighbor nodes in nanoseconds, only used if node_number is not -1. The order should be the same as neighbor_nodes."
-        )]="",
-        syncs: Annotated[str, typer.Option(
-            help="Comma separated list of sync options to neighbor nodes, only used if node_number is not -1. The order should be the same as neighbor_nodes. The value should be either true or false."
-        )]="",
-        partition_number: Annotated[int, typer.Option(
-            help="Partition number for the nodes to run things in parallel",
-        )]=-1,
-
-
-        # Seed image settings
-        seed_image_name: Annotated[str, typer.Option(
-            help="Name of the seed image file to use in multi-node setup."
-        )] = '',
-
-
-        # STDIO settings
-        use_telnet_monitor: Annotated[bool, typer.Option(
-            help="Whether to use telnet monitor for QEMU instead of stdio."
-        )]=False,
-        telnet_port: Annotated[int, typer.Option(
-            help="Telnet port for QEMU monitor instead of stdio."
-        )]=-1,
-        idx: Annotated[int, typer.Option(
-            help="Index of the partition to run, used for some qemu options."
-        )]=-1,
-        pdes_net_devs: Annotated[str, typer.Option(
-            help="Comma separated list of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup."
-        )]="",
-    ):        
-        has_neighbors = len(neighbor_nodes) > 0
-        neighbor_node_list: List[int] = []
-        latencies_ns_list: List[int] = []
-        syncs_list: [] = []
-        if has_neighbors:
-            neighbor_node_list = [int(x) for x in neighbor_nodes.split(",")]
-            latencies_ns_list = [int(x) for x in latancies_ns.split(",")]
-            syncs_list = [x.strip() for x in syncs.split(",")]
-            pdes_net_devs = [x.strip() for x in pdes_net_devs.split(",")]
-        else:
-            neighbor_node_list = []
-            latencies_ns_list = []
-            syncs_list = []
-            pdes_net_devs = []
-
-
-
-        if unique:
-            print("Unique experiment is deprecated, will skip adding timestamp.")
-            unique = False
-            # TODO remove this in future
-        experiment_context: ExperimentContext = create_experiment_context(
-            experiment_name=experiment_name,
-            image_name=image_name,
-            core_count=core_count,
-            quantum_size=quantum_size_ns,
-            doubled_vcpu=double_cores,
-            llc_size_per_tile_mb=llc_size_per_tile_mb,
-            is_parallel=parallel,
-            network=network,
-            memory_gb=memory_gb,
-            # Host section:
-            host_name=host_name,
-            # Workload section:
-            workload_name=workload_name,
-            is_consolidated=consolidated,
-            population_seconds=population_seconds,
-            primary_core_start=primary_core_start,
-            primary_ipc=primary_ipc,
-            secondary_core_start=secondary_core_start,
-            secondary_ipc=secondary_ipc,
-            phantom_cpu_ipc=phantom_cpu_ipc,
-            image_folder=image_folder,
-            keep_experiment_unique=unique,
-            use_image_directly=use_image_directly,
-            loadvm_name=loadvm_name,
-            mounting_folder=mounting_folder,
-            check_period_quantum_coeff=check_period_quantum_coeff,
-            use_cd_rom=use_cd_rom,
-            machine_freq_ghz=machine_freq_ghz,
-            include_affinity=include_affinity,
-            node_number=node_number,
-            neighbor_node_list=neighbor_node_list,
-            latencies_ns_list=latencies_ns_list,
-            syncs_list=syncs_list,
-            seed_image_name=seed_image_name,
-            telnet_port=telnet_port,
-            use_telnet_monitor=use_telnet_monitor,
-            partition_number=partition_number,
-            idx=idx,
-            pdes_net_devs=pdes_net_devs,
-        )
-        return experiment_context
+        set_: Annotated[List[str], typer.Option(
+            "--set", "-s",
+            help="Override a config value, e.g. "
+                 "-s components.experiment_context.core_count=16. "
+                 "Can be passed multiple times."
+        )] = None,
+    ) -> ExperimentContext:
+        config_path = _resolve_config_path(config)
+        return build_experiment_context(config_path, set_ or [])
