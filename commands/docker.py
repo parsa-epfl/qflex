@@ -79,12 +79,15 @@ class DockerStarter(Executor):
         -v {cwd}/clean_up.sh:/home/dev/qflex/clean_up.sh\
         -v {cwd}/multi-node-experiments:/home/dev/qflex/multi-node-experiments \
         -v {cwd}/multi-node-web-search_virtio/:/home/dev/qflex/multi-node-web-search_virtio \
+        -v {cwd}/multi-node-dc:/home/dev/qflex/multi-node-dc \
+        -v {cwd}/multi-node-dc-old-shanqing:/home/dev/qflex/multi-node-dc-old-shanqing \
+        -v {cwd}/experiments:/home/dev/qflex/experiments \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE --cap-add SYS_ADMIN \
         --pid=host \
         --cap-add=NET_ADMIN --device=/dev/net/tun  \
-        --shm-size=32g \
+        --shm-size=128g \
         {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}
         """

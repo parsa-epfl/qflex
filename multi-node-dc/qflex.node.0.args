@@ -1,0 +1,7 @@
+--quantum-size-ns 1000
+--core-count 1
+--no-double-cores
+--node-number 0 
+--experiment-name data-caching_experiment_0_0
+--neighbor-nodes "1"
+--pdes-net-devs "virtio-net-pci"
