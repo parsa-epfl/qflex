@@ -77,8 +77,8 @@ case $SIM in
                 rm -rf $FLEXUS_ROOT/$BUILD_DIRECTORY
             fi
 
-            mkdir -p $FLEXUS_ROOT/$BUILD_DIRECTORY            
-    
+            mkdir -p $FLEXUS_ROOT/$BUILD_DIRECTORY
+
             pushd $FLEXUS_ROOT/$BUILD_DIRECTORY
 
             cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSIMULATOR=$SIM -G Ninja $FLEXUS_ROOT
@@ -106,6 +106,7 @@ case $SIM in
                         --enable-libqflex                   \
                         --enable-snapvm-external            \
                         --disable-gtk                       \
+                        --with-bxdb=../../../bxdb/             \
                         --enable-debug
         else
             ./configure --target-list=aarch64-softmmu       \
@@ -114,7 +115,8 @@ case $SIM in
                         --enable-slirp                      \
                         --enable-libqflex                   \
                         --disable-gtk                       \
-                        --enable-snapvm-external
+                        --enable-snapvm-external            \
+                        --with-bxdb=../../../bxdb/
         fi
         popd
         make -C qemu -j
