@@ -6,6 +6,16 @@ from multiprocessing import Pool
 from .config import ExperimentContext
 
 
+DRY_RUN_ENV_VAR = "QFLEX_DRY_RUN"
+
+
+def _is_dry_run(dry_run: bool) -> bool:
+    """Honor the caller-passed flag; fall back to QFLEX_DRY_RUN env var."""
+    if dry_run:
+        return True
+    return os.environ.get(DRY_RUN_ENV_VAR, "").lower() in ("1", "true", "yes")
+
+
 class Executor(abc.ABC):
 
     @abc.abstractmethod
@@ -17,7 +27,7 @@ class Executor(abc.ABC):
             return None
         return self.experiment
 
-    def execute(self, to_stdio: bool = True, run_in_background: bool = False) -> bool:
+    def execute(self, to_stdio: bool = True, run_in_background: bool = False, dry_run: bool = False) -> bool:
         args = self.cmd()
         cwd = os.getcwd()
         if isinstance(args, str):
@@ -25,6 +35,10 @@ class Executor(abc.ABC):
 
         arg = " && ".join([a.strip() for a in args])
         # TODO see if we need to support other type of concatting args
+
+        if _is_dry_run(dry_run):
+            print(f"[dry-run] {self.__class__.__name__} (cwd={cwd}):\n  {arg}")
+            return True
 
         # TODO look into if shell needs to be turned False
         if run_in_background:
@@ -87,11 +101,11 @@ class SequentialGroupExecutor(Executor):
     def __init__(self, children: list[Executor]):
         self.children = children
 
-    def execute(self, to_stdio = True, run_in_background = False):
+    def execute(self, to_stdio = True, run_in_background = False, dry_run: bool = False):
         # One by one execute the children and stop if any of them fails
         results = []
         for child in self.children:
-            result = child.execute(to_stdio=to_stdio, run_in_background=run_in_background)
+            result = child.execute(to_stdio=to_stdio, run_in_background=run_in_background, dry_run=dry_run)
             results.append((child, result))
             if not result:
                 # read ouptut and error for debugging
@@ -123,8 +137,13 @@ class ParallelExecutor(Executor):
         to_stdio: bool = args[1]
         return child.execute(to_stdio=to_stdio, run_in_background=False)
 
-    def execute(self, to_stdio: bool = False, run_in_background: bool = False):
+    def execute(self, to_stdio: bool = False, run_in_background: bool = False, dry_run: bool = False):
         assert not run_in_background, "run_in_background is not supported for ParallelExecutor."
+
+        if _is_dry_run(dry_run):
+            for child in self.children:
+                child.execute(to_stdio=to_stdio, dry_run=True)
+            return True
 
         results: list[bool] = []
         with Pool(processes=len(self.children)) as pool:
