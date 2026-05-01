@@ -1,6 +1,6 @@
 ---
 name: qflex-dependency-injection
-description: Use when working on the YAML/DI configuration path of qflex — writing or debugging YAML configs in [conf/](../../conf/), changing [dep_injection/](../../dep_injection/) (builder, config_loader, di_loader), adding new components/factory functions, debugging injector errors, or wiring overrides. TRIGGER when the user mentions conf YAMLs, OmegaConf, python-injector, _target_/_scope_/_name_/_deps_, build_experiment_context, or "the DI graph". SKIP for changes that only touch CLI flags or factory body logic without touching the DI plumbing.
+description: Use when working on the YAML/DI configuration path of qflex — writing or debugging YAML configs in [conf/](../../../conf/), changing [dep_injection/](../../../dep_injection/) (builder, config_loader, di_loader), adding new components/factory functions, debugging injector errors, or wiring overrides. TRIGGER when the user mentions conf YAMLs, OmegaConf, python-injector, _target_/_scope_/_name_/_deps_, build_experiment_context, or "the DI graph". SKIP for changes that only touch CLI flags or factory body logic without touching the DI plumbing.
 ---
 
 # qflex dependency injection
@@ -9,7 +9,7 @@ A YAML+DI layer on top of `create_experiment_context`. Loads an OmegaConf docume
 
 ## Entry points
 
-The user-facing call is `build_experiment_context` in [dep_injection/builder.py](../../dep_injection/builder.py):
+The user-facing call is `build_experiment_context` in [dep_injection/builder.py](../../../dep_injection/builder.py):
 
 ```python
 def build_experiment_context(
@@ -21,7 +21,7 @@ def build_experiment_context(
 
 Pipeline: `load_config(path)` → `apply_cli_overrides(cfg, overrides)` → optional `OmegaConf.merge` of `component_overrides` → `Injector([ConfigDrivenModule(cfg)]).get(ExperimentContext)`.
 
-The CLI calls this lazily from inside [`data_class_wrap`](../../typer_inputs/config_wrapper.py); see the qflex-cli skill for that side.
+The CLI calls this lazily from inside [`data_class_wrap`](../../../typer_inputs/config_wrapper.py); see the qflex-cli skill for that side.
 
 ## YAML shape
 
@@ -30,20 +30,20 @@ A config file is one OmegaConf document with two recognized top-level keys:
 - `extends: <bare-name>` — optional. Loads sibling `<name>.yaml` first, then merges current doc on top. Recursive. **Bare name only** — `extends: dc` not `extends: dc.yaml` (the loader appends `.yaml` itself; passing `dc.yaml` makes it look up `dc.yaml.yaml`). Sibling lookup only — parent must live in the same directory.
 - `components:` — a map of `<component-name>: { _target_: ..., ...params }`. The component-name is a free-form key used for diagnostics and `_deps_` references; the **actual injection key** is `(return_type, _name_)`.
 
-Real examples: [conf/dc.yaml](../../conf/dc.yaml) (single-node base) and [conf/dc-node-0.yaml](../../conf/dc-node-0.yaml) (multi-node, extends `dc`).
+Real examples: [conf/dc.yaml](../../../conf/dc.yaml) (single-node base) and [conf/dc-node-0.yaml](../../../conf/dc-node-0.yaml) (multi-node, extends `dc`).
 
 ### Reserved keys inside a component
 
 | Key | Purpose |
 |---|---|
-| `_target_` | **Required.** Fully-qualified callable, `pkg.module.Name`. A class returns itself; a factory function **must** have a `-> ReturnType` annotation (enforced by `get_return_type` in [di_loader.py:82](../../dep_injection/di_loader.py#L82)). |
+| `_target_` | **Required.** Fully-qualified callable, `pkg.module.Name`. A class returns itself; a factory function **must** have a `-> ReturnType` annotation (enforced by `get_return_type` in [di_loader.py:82](../../../dep_injection/di_loader.py#L82)). |
 | `_scope_` | Optional. Only `singleton` is recognized. Anything else raises. |
 | `_name_` | Optional. Named binding — lets two components produce the same return type. Implemented internally as a dynamic subclass `type(f"{cls.__name__}__{name}", (cls,), {})` so the injector treats them as distinct types. |
 | `_deps_` | Optional. Explicit wiring for non-primitive params. `param_name: {name: '<other-component>'}` for scalar deps; `[{name: '...'}, {name: '...'}]` for `list[T]` deps. |
 
 Everything else is passed straight to the target as a kwarg.
 
-## Param resolution rules ([di_loader.py:113](../../dep_injection/di_loader.py#L113))
+## Param resolution rules ([di_loader.py:113](../../../dep_injection/di_loader.py#L113))
 
 `ConfigDrivenModule.configure` walks the components in two passes. For each component:
 
@@ -93,8 +93,8 @@ In both cases, also add `Annotated[T, Field(description="...")] = default` to th
 
 ## Key files
 
-- [dep_injection/builder.py](../../dep_injection/builder.py) — `build_experiment_context`. Top-level entry; small.
-- [dep_injection/config_loader.py](../../dep_injection/config_loader.py) — `load_config` (recursive `extends:`) and `apply_cli_overrides`.
-- [dep_injection/di_loader.py](../../dep_injection/di_loader.py) — `ConfigDrivenModule`, `find_typed_deps`, `get_return_type`, `_unwrap_optional`/`_unwrap_list`. The real engine.
-- [commands/config.py:467](../../commands/config.py#L467) — `create_experiment_context`, the canonical factory.
-- [conf/](../../conf/) — example YAMLs.
+- [dep_injection/builder.py](../../../dep_injection/builder.py) — `build_experiment_context`. Top-level entry; small.
+- [dep_injection/config_loader.py](../../../dep_injection/config_loader.py) — `load_config` (recursive `extends:`) and `apply_cli_overrides`.
+- [dep_injection/di_loader.py](../../../dep_injection/di_loader.py) — `ConfigDrivenModule`, `find_typed_deps`, `get_return_type`, `_unwrap_optional`/`_unwrap_list`. The real engine.
+- [commands/config.py:467](../../../commands/config.py#L467) — `create_experiment_context`, the canonical factory.
+- [conf/](../../../conf/) — example YAMLs.

@@ -1,20 +1,20 @@
 ---
 name: qflex-cli
-description: Use when working on the qflex CLI surface — adding/modifying pipeline subcommands, touching the [data_class_wrap](../../typer_inputs/config_wrapper.py) decorator, debugging Typer flag parsing, understanding precedence between CLI flags and YAML, or wiring help text. TRIGGER when the user mentions Typer, click flags, --config/-c, $QFLEX_CONFIG, the [qflex](../../qflex) script, mkdocs-click, or "how does the CLI build an ExperimentContext". SKIP for changes purely inside the YAML/DI layer or inside command body logic that doesn't touch flag handling.
+description: Use when working on the qflex CLI surface — adding/modifying pipeline subcommands, touching the [data_class_wrap](../../../typer_inputs/config_wrapper.py) decorator, debugging Typer flag parsing, understanding precedence between CLI flags and YAML, or wiring help text. TRIGGER when the user mentions Typer, click flags, --config/-c, $QFLEX_CONFIG, the [qflex](../../../qflex) script, mkdocs-click, or "how does the CLI build an ExperimentContext". SKIP for changes purely inside the YAML/DI layer or inside command body logic that doesn't touch flag handling.
 ---
 
 # qflex CLI
 
 The repo has two top-level CLIs. Both are Typer apps with `--help` autocompletion and a public docs page rendered via `mkdocs-click`.
 
-- **[./dep](../../dep)** — host-side. Builds and starts the QFlex Docker dev container.
-- **[./qflex](../../qflex)** — runs **inside** the container. Orchestrates the simulation pipeline; one subcommand per phase. **This is the interesting one.**
+- **[./dep](../../../dep)** — host-side. Builds and starts the QFlex Docker dev container.
+- **[./qflex](../../../qflex)** — runs **inside** the container. Orchestrates the simulation pipeline; one subcommand per phase. **This is the interesting one.**
 
-A separate, lower-level launcher [./runq](../../runq) takes a QEMU config file plus `+arg`/`-arg` overrides and `execvp`s a qemu-aarch64 binary directly. The pipeline doesn't use it; only reach for it when poking at QEMU directly.
+A separate, lower-level launcher [./runq](../../../runq) takes a QEMU config file plus `+arg`/`-arg` overrides and `execvp`s a qemu-aarch64 binary directly. The pipeline doesn't use it; only reach for it when poking at QEMU directly.
 
 ## Pipeline command shape
 
-Every pipeline command in [qflex](../../qflex) accepts the same `ExperimentContext`-building options plus a few command-specific flags. The per-field flags are **auto-derived** from `create_experiment_context`'s signature by the `@data_class_wrap` decorator — they are never hand-declared.
+Every pipeline command in [qflex](../../../qflex) accepts the same `ExperimentContext`-building options plus a few command-specific flags. The per-field flags are **auto-derived** from `create_experiment_context`'s signature by the `@data_class_wrap` decorator — they are never hand-declared.
 
 ```python
 @app.command()
@@ -60,13 +60,13 @@ For any `ExperimentContext` field, the final value is resolved in this order:
 
 Resolution precedence for *which* YAML to load: explicit `-c <path>` > `$QFLEX_CONFIG` env var > no YAML. There is no implicit `./config.yaml` lookup.
 
-## How `data_class_wrap` works ([typer_inputs/config_wrapper.py](../../typer_inputs/config_wrapper.py))
+## How `data_class_wrap` works ([typer_inputs/config_wrapper.py](../../../typer_inputs/config_wrapper.py))
 
 ### Decorator time
 
 1. Reads `inspect.signature(target).parameters`.
 2. For each parameter, builds a synthetic Typer param. The annotation is widened to `Annotated[Optional[T], typer.Option(help=..., show_default=False)]` and the default is set to `None` — **regardless** of whether the factory's param was required or had a default. The factory's actual default (if any) is preserved separately by being formatted into the help text as `[factory default: X]`.
-3. **List-typed factory params** (`List[T]` / `Optional[List[T]]`) get special handling: the CLI-facing type becomes `Optional[str]` (so users pass `--neighbor-node-list "1,2,3"`, not multi-flag repetition), `(comma-separated)` is appended to the help text, and a per-param converter `str -> [T(part) for part in s.split(",")]` is registered for call time. Click natively treats typed lists as `multiple=True`, which is the wrong UX here. See `_cli_type_and_converter` in [config_wrapper.py](../../typer_inputs/config_wrapper.py).
+3. **List-typed factory params** (`List[T]` / `Optional[List[T]]`) get special handling: the CLI-facing type becomes `Optional[str]` (so users pass `--neighbor-node-list "1,2,3"`, not multi-flag repetition), `(comma-separated)` is appended to the help text, and a per-param converter `str -> [T(part) for part in s.split(",")]` is registered for call time. Click natively treats typed lists as `multiple=True`, which is the wrong UX here. See `_cli_type_and_converter` in [config_wrapper.py](../../../typer_inputs/config_wrapper.py).
 4. Prepends one synthetic param: `--config / -c` (`Optional[str] = None`).
 5. Splices the resulting parameter list into the wrapped Typer command's signature, in addition to whatever per-command flags the command body declares.
 
@@ -105,7 +105,7 @@ For **list-typed** fields (`List[int]`, `List[str]`, `Optional[List[float]]`, �
 
 ## mkdocs-click integration
 
-[docs_shim/qflex.py](../../docs_shim/qflex.py) loads the Typer `app` and converts it to a click `Command` via `typer.main.get_command`. [mk_docs/reference/qflex.md](../../mk_docs/reference/qflex.md) embeds it via `::: mkdocs-click`. Help text on every flag — including the auto-derived per-field flags — ends up on the published docs page automatically. Don't strip `Field(description=...)` from factory params unless you're OK with a blank doc cell.
+[docs_shim/qflex.py](../../../docs_shim/qflex.py) loads the Typer `app` and converts it to a click `Command` via `typer.main.get_command`. [mk_docs/reference/qflex.md](../../../mk_docs/reference/qflex.md) embeds it via `::: mkdocs-click`. Help text on every flag — including the auto-derived per-field flags — ends up on the published docs page automatically. Don't strip `Field(description=...)` from factory params unless you're OK with a blank doc cell.
 
 ## Common errors
 
@@ -116,7 +116,7 @@ For **list-typed** fields (`List[int]`, `List[str]`, `Optional[List[float]]`, �
 
 ## Key files
 
-- [qflex](../../qflex) — the Typer app; one `@app.command()` per pipeline phase.
-- [typer_inputs/config_wrapper.py](../../typer_inputs/config_wrapper.py) — `data_class_wrap`, `_typer_param_for`, `_cli_type_and_converter`, `_config_param`. The load-bearing piece.
-- [commands/config.py:467](../../commands/config.py#L467) — `create_experiment_context`, the factory whose signature drives the entire CLI flag set.
-- [docs_shim/qflex.py](../../docs_shim/qflex.py) — the `mkdocs-click` adapter.
+- [qflex](../../../qflex) — the Typer app; one `@app.command()` per pipeline phase.
+- [typer_inputs/config_wrapper.py](../../../typer_inputs/config_wrapper.py) — `data_class_wrap`, `_typer_param_for`, `_cli_type_and_converter`, `_config_param`. The load-bearing piece.
+- [commands/config.py:467](../../../commands/config.py#L467) — `create_experiment_context`, the factory whose signature drives the entire CLI flag set.
+- [docs_shim/qflex.py](../../../docs_shim/qflex.py) — the `mkdocs-click` adapter.
