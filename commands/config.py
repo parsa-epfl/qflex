@@ -1,4 +1,4 @@
-from typing import List
+from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr
 import os
@@ -464,48 +464,47 @@ class ExperimentContext(BaseModel):
 
 
 def create_experiment_context(
-    core_count: int,
-    quantum_size: int,
-    doubled_vcpu: bool,
-    llc_size_per_tile_mb: int,
-    is_parallel: bool,
-    network: str,
-    memory_gb: int,
+    core_count: Annotated[int, Field(description="Number of CPU cores for the VM.")],
+    quantum_size: Annotated[int, Field(description="Quantum size for the simulator in nanoseconds.")],
+    doubled_vcpu: Annotated[bool, Field(description="Double the number of CPU cores for the client.")],
+    llc_size_per_tile_mb: Annotated[int, Field(description="LLC size per tile in MB.")],
+    is_parallel: Annotated[bool, Field(description="Whether the simulation is parallel or not.")],
+    network: Annotated[str, Field(description="Network mode, either user or none, this is in addition to connecting to internet and other nodes that are there by default.")],
+    memory_gb: Annotated[int, Field(description="Memory size for the VM in GB.")],
     # Host section:
-    host_name: str,
+    host_name: Annotated[str, Field(description="Host name, used to create initial ipns file.")],
     # Workload section:
-    workload_name: str,
-    primary_core_start: int,
-    is_consolidated: bool,
-    primary_ipc: float,
-    population_seconds: int,
-    # ↓ these gained defaults (matching the old typer defaults)
-    secondary_core_start: int = -1,
-    secondary_ipc: float = 0.0,
-    phantom_cpu_ipc: float = -1.0,
+    workload_name: Annotated[str, Field(description="Workload name.")],
+    primary_core_start: Annotated[int, Field(description="Starting core for primary workload.")],
+    is_consolidated: Annotated[bool, Field(description="Whether the workload is consolidated or not.")],
+    primary_ipc: Annotated[float, Field(description="Target IPC for primary workload.")],
+    population_seconds: Annotated[float, Field(description="Population size for the workload in seconds.")],
+    secondary_core_start: Annotated[int, Field(description="Starting core for secondary workload. Only used if consolidated is True.")] = -1,
+    secondary_ipc: Annotated[float, Field(description="Target IPC for secondary workload. Only used if consolidated is True.")] = 0.0,
+    phantom_cpu_ipc: Annotated[float, Field(description="Target IPC for phantom CPU. This is used for the client in the same node. Only used in double core mode.")] = -1.0,
     # experiment sections
-    image_folder: str = "./images",          # ← was required, gained default
-    experiment_name: str = "default-experiment",   # ← was None, made explicit
-    image_name: str = "root.qcow2",          # ← was None, made explicit
-    keep_experiment_unique: bool = True,
-    use_image_directly: bool = False,
-    loadvm_name: str = "",
-    mounting_folder: str = ".",
-    check_period_quantum_coeff: float = 53.0,
-    use_cd_rom: bool = False,
-    machine_freq_ghz: float = 2.0,
-    include_affinity: bool = False,
+    image_folder: Annotated[str, Field(description="Folder where images are stored.")] = "./images",
+    experiment_name: Annotated[str, Field(description="Name of the experiment. Used for organizing output files.")] = "default-experiment",
+    image_name: Annotated[str, Field(description="Name of the image file to load.")] = "root.qcow2",
+    keep_experiment_unique: Annotated[bool, Field(description="Whether to keep the experiment folder unique by adding a timestamp.")] = False,
+    use_image_directly: Annotated[bool, Field(description="Whether to use the image directly from the image folder or copy it to the experiment folder.")] = False,
+    loadvm_name: Annotated[str, Field(description="Name of the loadvm to use in QEMU, optional.")] = "",
+    mounting_folder: Annotated[str, Field(description="Mounting directory where the experiment folders will be created.")] = ".",
+    check_period_quantum_coeff: Annotated[float, Field(description="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period.")] = 53.0,
+    use_cd_rom: Annotated[bool, Field(description="Whether to use a CD-ROM for initial setup.")] = False,
+    machine_freq_ghz: Annotated[float, Field(description="Machine frequency in GHz.")] = 2.0,
+    include_affinity: Annotated[bool, Field(description="Whether or not to generate affinity index in core_info.csv.")] = False,
     # Multi-node parameters
-    node_number: int = -1,
-    neighbor_node_list: List[int] = None,    # ← see note below
-    latencies_ns_list: List[int] = None,
-    syncs_list: List[str] = None,
-    seed_image_name: str = '',
-    telnet_port: int = -1,
-    use_telnet_monitor: bool = False,
-    partition_number: int = -1,
-    idx: int = -1,
-    pdes_net_devs: List[str] = None,
+    node_number: Annotated[int, Field(description="Node number in multi-node setup, -1 means single node. 0 is the master node.")] = -1,
+    neighbor_node_list: Annotated[Optional[List[int]], Field(description="List of neighbor node numbers in multi-node setup, only used if node_number is not -1.")] = None,
+    latencies_ns_list: Annotated[Optional[List[int]], Field(description="List of latencies to neighbor nodes in nanoseconds, only used if node_number is not -1. Order matches neighbor_node_list.")] = None,
+    syncs_list: Annotated[Optional[List[str]], Field(description="List of sync options to neighbor nodes ('true' or 'false'), only used if node_number is not -1. Order matches neighbor_node_list.")] = None,
+    seed_image_name: Annotated[str, Field(description="Name of the seed image file to use in multi-node setup.")] = "",
+    telnet_port: Annotated[int, Field(description="Telnet port for QEMU monitor instead of stdio.")] = -1,
+    use_telnet_monitor: Annotated[bool, Field(description="Whether to use telnet monitor for QEMU instead of stdio.")] = False,
+    partition_number: Annotated[int, Field(description="Partition number for the nodes to run things in parallel.")] = -1,
+    idx: Annotated[int, Field(description="Index of the partition to run, used for some qemu options.")] = -1,
+    pdes_net_devs: Annotated[Optional[List[str]], Field(description="List of network device models ('e1000' or 'virtio-net-pci') to use for each neighbor node in multi-node setup. Order matches neighbor_node_list.")] = None,
 ) -> ExperimentContext:
     neighbor_node_list = neighbor_node_list or []
     latencies_ns_list = latencies_ns_list or []

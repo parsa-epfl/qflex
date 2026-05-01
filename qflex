@@ -4,7 +4,7 @@ import typer
 from typing import Annotated
 from commands.createimage import CreateImage
 from commands.boot import Boot
-from commands.config import ExperimentContext
+from commands.config import ExperimentContext, create_experiment_context
 from commands.load import Load
 from commands.init_warm import InitWarm
 from commands.functional_warming import FunctionalWarming
@@ -13,7 +13,6 @@ from commands.run_partition import RunPartitionCommand
 from commands.run_idx import RunIdxCommand
 from commands.run_single_partition import RunSinglePartitionCommand
 from commands.result import RunResultCommand
-from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
 app = typer.Typer(
@@ -44,7 +43,7 @@ def create_base_image(
     create_image_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def boot(
     experiment_context: ExperimentContext,
     vanilla: Annotated[bool, typer.Option(
@@ -66,7 +65,7 @@ def boot(
     boot_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def load(
     experiment_context: ExperimentContext,
     vanilla: Annotated[bool, typer.Option(
@@ -86,7 +85,7 @@ def load(
 
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def initialize(
     experiment_context: ExperimentContext,
     skip_generate_cfg: Annotated[bool, typer.Option(
@@ -104,7 +103,7 @@ def initialize(
     init_warm_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def fw(
     experiment_context: ExperimentContext,
     sample_size: Annotated[int, typer.Option(
@@ -122,7 +121,7 @@ def fw(
     functional_warm_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def partition(
     experiment_context: ExperimentContext,
     partition_count: Annotated[int, typer.Option(help="Number of partitions to create.")] = 16,
@@ -138,7 +137,7 @@ def partition(
     partition_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def partition_cleanup(
     experiment_context: ExperimentContext,
 ):
@@ -149,7 +148,7 @@ def partition_cleanup(
     partition_cleaner_executor.execute(to_stdio=True, run_in_background=False)
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def unpartition(
     experiment_context: ExperimentContext,
 ):
@@ -161,7 +160,7 @@ def unpartition(
 
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def run_idx(
     experiment_context: ExperimentContext,
     warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
@@ -176,7 +175,7 @@ def run_idx(
 
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def run_single_partition(
     experiment_context: ExperimentContext,
     warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
@@ -193,7 +192,7 @@ def run_single_partition(
 # TODO add formatting for the new variables outside exp_context
 # TODO change name to run_partitions
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def run_partition(
     experiment_context: ExperimentContext,
     warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
@@ -212,7 +211,7 @@ def run_partition(
     run_partition_executor.execute(to_stdio=to_stdio, run_in_background=run_in_background)
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def result(
     experiment_context: ExperimentContext,
 ):
@@ -229,7 +228,7 @@ def result(
 from commands.multinode import Multi
 
 @app.command()
-@data_class_wrap(ExperimentContextTyper("experiment_context"))
+@data_class_wrap(create_experiment_context, name="experiment_context")
 def multi(
     experiment_context: ExperimentContext,
 ):
