@@ -1,4 +1,4 @@
-from typing import Annotated, Callable, Optional, get_args, get_origin
+from typing import Annotated, Callable, Optional, Union, get_args, get_origin
 import functools
 import inspect
 import os
@@ -10,10 +10,42 @@ from pydantic.fields import FieldInfo
 CONFIG_ENV_VAR = "QFLEX_CONFIG"
 
 
-def _typer_param_for(param: inspect.Parameter) -> inspect.Parameter:
+def _cli_type_and_converter(inner_type):
+    """
+    Decide how a factory-param's inner type should appear on the CLI.
+
+    Returns (cli_type, converter):
+    - cli_type: the type to advertise on the Typer flag.
+    - converter: callable str -> list[T] for list-typed params, else None.
+
+    Click natively treats `Annotated[Optional[List[int]], typer.Option(...)]` as
+    multi-flag repetition (`--flag 1 --flag 2`), not comma-separated. To get the
+    comma-separated UX without per-field custom ParamTypes, list-typed factory
+    params are exposed as Optional[str] on the CLI and parsed in the wrapper.
+    """
+    if get_origin(inner_type) is Union:
+        non_none = [a for a in get_args(inner_type) if a is not type(None)]
+        if len(non_none) == 1:
+            inner_type = non_none[0]
+
+    if get_origin(inner_type) is list:
+        (elem_type,) = get_args(inner_type)
+        def convert(s: str):
+            stripped = s.strip()
+            if not stripped:
+                return []
+            return [elem_type(part.strip()) for part in stripped.split(",")]
+        return str, convert
+    return inner_type, None
+
+
+def _typer_param_for(param: inspect.Parameter):
     """
     Translate a factory parameter into the form Typer expects:
     Annotated[Optional[T], typer.Option(help=...)] with default None.
+    Returns (typer_param, converter) — converter is non-None for list-typed
+    factory params, which become Optional[str] on the CLI and need
+    string-to-list parsing at call time.
 
     All CLI flags become Optional[T] = None so "not passed" is distinguishable
     from "passed with the factory's default value" — critical when --config is
@@ -23,7 +55,8 @@ def _typer_param_for(param: inspect.Parameter) -> inspect.Parameter:
 
     Pulls help text from pydantic Field(description=...) attached via Annotated.
     Suffixes the factory default into the help text so --help still tells the
-    user what they get when they omit a flag.
+    user what they get when they omit a flag. Adds a (comma-separated) hint
+    when the param is list-typed.
     """
     annotation = param.annotation
     inner_type = annotation
@@ -37,12 +70,16 @@ def _typer_param_for(param: inspect.Parameter) -> inspect.Parameter:
                 help_text = meta.description
                 break
 
+    cli_type, converter = _cli_type_and_converter(inner_type)
+    if converter is not None:
+        help_text = f"{help_text} (comma-separated)".strip()
+
     if param.default is not inspect.Parameter.empty:
         suffix = f"[factory default: {param.default!r}]"
         help_text = f"{help_text}  {suffix}" if help_text else suffix
 
-    new_annotation = Annotated[Optional[inner_type], typer.Option(help=help_text, show_default=False)]
-    return param.replace(annotation=new_annotation, default=None)
+    new_annotation = Annotated[Optional[cli_type], typer.Option(help=help_text, show_default=False)]
+    return param.replace(annotation=new_annotation, default=None), converter
 
 
 def _config_param() -> inspect.Parameter:
@@ -92,7 +129,13 @@ def data_class_wrap(target: Callable, *, name: str):
             f"Cannot wrap {target.__name__}: it has a parameter named 'config' "
             "which collides with the injected --config/-c flag."
         )
-    typer_params = [_config_param()] + [_typer_param_for(p) for p in target_params]
+    typer_params = [_config_param()]
+    converters: dict[str, Callable] = {}
+    for p in target_params:
+        new_param, converter = _typer_param_for(p)
+        typer_params.append(new_param)
+        if converter is not None:
+            converters[p.name] = converter
 
     def func_wrapper(func):
         @functools.wraps(func)
@@ -105,11 +148,35 @@ def data_class_wrap(target: Callable, *, name: str):
                     v = kwargs.pop(n)
                     if v is None:
                         continue
+                    if n in converters:
+                        v = converters[n](v)
                     # Click renders multi-value options (List[T]) as `()` / `[]`
                     # when the flag is omitted; treat that as "not passed".
                     if isinstance(v, (list, tuple)) and len(v) == 0:
                         continue
                     cli_overrides[n] = v
+
+            yaml_keys: set[str] = set()
+            if config_path:
+                from dep_injection.config_loader import load_config
+                from dep_injection.di_loader import RESERVED_KEYS
+                cfg = load_config(config_path)
+                comp = cfg.get("components", {}).get(name)
+                if comp is not None:
+                    yaml_keys = {k for k in comp.keys() if k not in RESERVED_KEYS}
+                    deps = comp.get("_deps_") or {}
+                    yaml_keys.update(deps.keys())
+
+            provided = cli_overrides.keys() | yaml_keys
+            missing = target_required_param_names - provided
+            if missing:
+                flag_names = sorted(f"--{m.replace('_', '-')}" for m in missing)
+                msg = "Missing required option(s): " + ", ".join(flag_names) + "."
+                if config_path:
+                    msg += f" Add them to the YAML config at {config_path} or pass them as CLI flags."
+                else:
+                    msg += f" Either pass them as flags or provide --config <path> (or set ${CONFIG_ENV_VAR})."
+                raise typer.BadParameter(msg)
 
             if config_path:
                 from dep_injection.builder import build_experiment_context
@@ -118,14 +185,6 @@ def data_class_wrap(target: Callable, *, name: str):
                     component_overrides={name: cli_overrides} if cli_overrides else None,
                 )
             else:
-                missing = target_required_param_names - cli_overrides.keys()
-                if missing:
-                    flag_names = sorted(f"--{m.replace('_', '-')}" for m in missing)
-                    raise typer.BadParameter(
-                        "Missing required option(s): "
-                        + ", ".join(flag_names)
-                        + f". Either pass them as flags or provide --config <path> (or set ${CONFIG_ENV_VAR})."
-                    )
                 kwargs[name] = target(**cli_overrides)
             return func(*args, **kwargs)
 
