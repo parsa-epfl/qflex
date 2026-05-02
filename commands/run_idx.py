@@ -1,25 +1,18 @@
-import os
 from commands import Executor
 from .config import ExperimentContext
-from commands.qemu import VanillaQemuArgParser   
+from commands.qemu import VanillaQemuArgParser
 
 
 class RunIdxCommand(Executor):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 warming_ratio: int, 
+                 warming_ratio: int,
                  measurement_ratio: int,
                  use_stdio: bool = True):
-        idx = experiment_context.idx
         self.experiment_context = experiment_context
         self.detailed_warming_ratio = warming_ratio
         self.measurement_ratio = measurement_ratio
-        # TODO turn this into a param, for now each ratio represents 100000 cycles
-        ratio_coefficient = 100000
-        self.total_cycles = ((self.detailed_warming_ratio * ratio_coefficient) + (self.measurement_ratio * ratio_coefficient))  + 1
-        self.vanilla_qemu_arg_parser = VanillaQemuArgParser(experiment_context, idx, self.total_cycles, use_stdio=use_stdio)
-        # TODO add this to configs
         self.use_stdio = use_stdio
 
     def get_err_file_address(self):
@@ -28,10 +21,16 @@ class RunIdxCommand(Executor):
     def get_log_file_address(self):
         return f"{self.experiment_context.get_partition_folder()}/log"
 
-
     def cmd(self) -> str:
-        # TODO get rid of partition at some point and move run_flexus.sh in our python commands
+        # Build per-context derived state fresh — see Executor refactor notes.
+        # TODO turn this into a param, for now each ratio represents 100000 cycles
+        ratio_coefficient = 100000
+        total_cycles = ((self.detailed_warming_ratio * ratio_coefficient)
+                        + (self.measurement_ratio * ratio_coefficient)) + 1
         idx = self.experiment_context.idx
+        vanilla_parser = VanillaQemuArgParser(self.experiment_context, idx, total_cycles,
+                                              use_stdio=self.use_stdio)
+
         partition_folder = self.experiment_context.get_partition_folder()
         setup_commands = [
             f"cd {partition_folder}",
@@ -41,14 +40,13 @@ class RunIdxCommand(Executor):
             f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
         ]
 
-        # Add a command to get time in seconds and save it to variable tick, from the host
         tick_command = " tick=$(($(date +%s%N) / 1000000)) "
         output = ""
         if not self.use_stdio:
             output = f"> {self.get_log_file_address()} 2> {self.get_err_file_address()}"
         timing_command = f"""
             gdb -batch -ex run -ex "python try: gdb.execute('bt')\nexcept: pass" -return-child-result --args ../vanilla-qemu-system-aarch64 \
-            {self.vanilla_qemu_arg_parser.get_qemu_base_args()} {output}
+            {vanilla_parser.get_qemu_base_args()} {output}
         """
         prints = []
         if not self.use_stdio:
@@ -72,4 +70,3 @@ class RunIdxCommand(Executor):
             tock_command,
             time_command,
         ] + prints + backup_commands
-    

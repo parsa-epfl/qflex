@@ -2,7 +2,7 @@ import math
 
 from commands import Executor
 from .config import ExperimentContext
-from commands.qemu import QemuCommonArgParser   
+from commands.qemu import QemuCommonArgParser
 
 class FunctionalWarming(Executor):
     """
@@ -13,26 +13,22 @@ class FunctionalWarming(Executor):
                  experiment_context: ExperimentContext,
                  sample_size: int):
         self.experiment_context = experiment_context
-        self.simulation_context = self.experiment_context.simulation_context
-        self.qemu_common_parser = QemuCommonArgParser(experiment_context)
         self.sample_size = sample_size
-        self.sampling_interval = math.ceil(
+
+    def cmd(self) -> str:
+        # Build per-context derived state fresh so this method works whether
+        # self.experiment_context was set at __init__ or mutated later (multi-experiment dispatch).
+        parser = QemuCommonArgParser(self.experiment_context)
+        sampling_interval = math.ceil(
             (self.experiment_context.workload.population + self.sample_size - 1) / self.sample_size
         )
 
-
-
-    
-
-    def cmd(self) -> str:
         fw_cmd = f"""
             gdb -ex run --args ./qemu-system-aarch64 \
-            {self.qemu_common_parser.get_qemu_base_args()} \
-            {self.qemu_common_parser.quantum_args()} \
-            -plugin ../lib/libworm_cache.so,mode=warm,init_threshold={self.sampling_interval},interval={self.sampling_interval},count={self.sample_size} \
+            {parser.get_qemu_base_args()} \
+            {parser.quantum_args()} \
+            -plugin ../lib/libworm_cache.so,mode=warm,init_threshold={sampling_interval},interval={sampling_interval},count={self.sample_size} \
         """
-        print("fw command:")
-        print(fw_cmd)
         tock_command = " tock=$(($(date +%s%N) / 1000000)) "
         time_command = ' echo "Elapsed: $((tock - tick)) ms " '
         return [

@@ -7,6 +7,9 @@ serve-docs:
 build-docs:
 	mkdocs build --clean
 
+test:
+	python -m pytest tests/ -v
+
 install-dev-requirements:
 	pip install -r requirements.txt && \
 	pip install -r requirements.docs.txt && \

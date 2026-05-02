@@ -11,82 +11,65 @@ class InitWarm(Executor):
                  experiment_context: ExperimentContext,
                  skip_generate_cfg: bool = False):
         self.experiment_context = experiment_context
-        self.simulation_context = self.experiment_context.simulation_context
-        self.qemu_common_parser = QemuCommonArgParser(experiment_context)
+        self.skip_generate_cfg = skip_generate_cfg
 
+    def _generate_cfgs(self):
+        """Render Jinja templates into the current experiment_context's cfg/scripts folders.
+        Called from cmd() so it operates on the current experiment_context (works correctly
+        across multi-experiment dispatch where the context can be mutated to a sub)."""
         experiment_folder = self.experiment_context.get_experiment_folder_address()
-        self.worm_params_address = f"{experiment_folder}/cfg/parameter.rs"
-        if not skip_generate_cfg:
-            self.worm_parameter_loader = wormloader.WormConfigLoader(
-                experiment_context=experiment_context
-            )
-            self.flexus_configuration_loader = FlexusCheckpointConfigLoader(
-                experiment_context=experiment_context
-            )
-            self.timing_loader = TimingLoader(
-                experiment_context=experiment_context
-            )
+        worm_params_address = f"{experiment_folder}/cfg/parameter.rs"
 
-            self.worm_params = self.worm_parameter_loader.load_parameters()
-            assert self.worm_params_address == self.worm_params, "Worm parameter file path mismatch"
-            self.flexus_config = self.flexus_configuration_loader.load_parameters()
-            self.timing_config = self.timing_loader.load_parameters()
+        if not self.skip_generate_cfg:
+            worm_parameter_loader = wormloader.WormConfigLoader(experiment_context=self.experiment_context)
+            flexus_configuration_loader = FlexusCheckpointConfigLoader(experiment_context=self.experiment_context)
+            timing_loader = TimingLoader(experiment_context=self.experiment_context)
+
+            written_worm_params = worm_parameter_loader.load_parameters()
+            assert worm_params_address == written_worm_params, "Worm parameter file path mismatch"
+            flexus_configuration_loader.load_parameters()
+            timing_loader.load_parameters()
         else:
             print("Skipping configuration generation as per user request. Please make sure all necessary configuration files are present in cfg folder.")
-            assert os.path.exists(self.worm_params_address), "Worm parameter file does not exist, cannot skip generation."
+            assert os.path.exists(worm_params_address), "Worm parameter file does not exist, cannot skip generation."
 
         # TODO potential problem that the potential script is created at the init_warm stage change later and move to partition file
-        self.flexus_script_loader = FlexusScriptLoader(
-            experiment_context=experiment_context,
-        )
-        self.flexus_script = self.flexus_script_loader.load_parameters()
+        flexus_script_loader = FlexusScriptLoader(experiment_context=self.experiment_context)
+        flexus_script_loader.load_parameters()
 
+        return worm_params_address
 
-
-
-    def build_worm_cache(self) -> List[str]:
+    def build_worm_cache(self, worm_params_address: str) -> List[str]:
         print("building workm cache")
         # TODO fix bug of not being able to recompile in docker, and let it be compilable and also make this step fully compile things, one file at least is not being removed after recompilation in exp folder
         experiment_folder = self.experiment_context.get_experiment_folder_address()
         return [
-            f"cp {self.worm_params_address} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",
+            f"cp {worm_params_address} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",
             f"cd {experiment_folder}/lib/WormCacheQFlex",
             # TODO check if this needs to be debug
             "cargo build --release",
             f"cd {experiment_folder}/run",
-            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/",
-            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/checkpoint_conversion {self.experiment_context.get_experiment_folder_address()}/bin/checkpoint_conversion",
+            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/libworm_cache.so {experiment_folder}/lib/",
+            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/checkpoint_conversion {experiment_folder}/bin/checkpoint_conversion",
             #  TODO check if all needed files are copied (check main file of replica plus necessary files declared in partition.py and result.py)
         ]
-    
+
     def cmd(self) -> str:
+        # Render the cfg files for THIS experiment_context (could be a sub after multi dispatch).
+        worm_params_address = self._generate_cfgs()
 
-
+        parser = QemuCommonArgParser(self.experiment_context)
 
         # TODO check if we need variables for the plugin
         init_cmd = f"""
         gdb -ex run --args ./qemu-system-aarch64 \
-        {self.qemu_common_parser.get_qemu_base_args()} \
-        {self.qemu_common_parser.quantum_args()} \
+        {parser.get_qemu_base_args()} \
+        {parser.quantum_args()} \
         -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init
         """
 
-
-        return self.build_worm_cache() + [
+        return self.build_worm_cache(worm_params_address) + [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             "ls",
             init_cmd
         ]
-
-
-
-
-
-
-
-    
-
-    
-
-
-

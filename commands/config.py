@@ -17,16 +17,10 @@ def get_experiment_folder_address(
     mounting_folder: str,
     experiment_name: str
 ) -> str:
-    # check if working directory exists
-    if not os.path.isdir(mounting_folder):
-        raise ValueError(f"Working directory {mounting_folder} does not exist.")
-    # create experiments if it doesn't exist
-    if not os.path.isdir(f'{mounting_folder}/experiments'):
-        os.makedirs(f'{mounting_folder}/experiments', exist_ok=False)
-    path = f'{mounting_folder}/experiments/{experiment_name}'
-    if not os.path.isdir(path):
-        os.makedirs(path, exist_ok=False)
-    return os.path.abspath(path)
+    # Pure path computation — no filesystem side effects. The folder is
+    # materialised by ExperimentContext.set_up_folders() (called from the
+    # executor's leaf branch via prepare_for_execution()).
+    return os.path.abspath(f'{mounting_folder}/experiments/{experiment_name}')
 
 # TODO move simulation context to a separate folder
 class SimulationContext(BaseModel):
@@ -130,8 +124,19 @@ class ExperimentContext(BaseModel):
     telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
     use_telnet_monitor: bool = Field(default=False, description="Whether to use telnet monitor for QEMU instead of stdio.")
     pdes_net_devs: List[str] = Field(default=[], description="List of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup.")
+    sub_experiments: List["ExperimentContext"] = Field(default_factory=list, description="Optional sub-experiments. If non-empty, this context is a group node; leaf-level fields are unused and the executor recurses into each sub-experiment.")
+    wait_for_nodes: List[int] = Field(default_factory=list, description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master. Set to e.g. [0] to wait for the master, or [2] to wait for node 2.")
     _creation_kwargs: dict = PrivateAttr(default_factory=dict)
 
+
+    def has_sub_experiments(self) -> bool:
+        return len(self.sub_experiments) > 0
+
+    def prepare_for_execution(self):
+        """One entry point for all leaf-level prep. Called by the executor right before the leaf bash runs.
+        Wraps the existing prep functions; do not call these from create_experiment_context."""
+        self.set_up_folders()
+        self.setup_nic_args()
 
     def get_partition_folder(self) -> str:
         if self.partition_number < 0:
@@ -505,19 +510,24 @@ def create_experiment_context(
     partition_number: Annotated[int, Field(description="Partition number for the nodes to run things in parallel.")] = -1,
     idx: Annotated[int, Field(description="Index of the partition to run, used for some qemu options.")] = -1,
     pdes_net_devs: Annotated[Optional[List[str]], Field(description="List of network device models ('e1000' or 'virtio-net-pci') to use for each neighbor node in multi-node setup. Order matches neighbor_node_list.")] = None,
+    sub_experiments: Annotated[Optional[List[ExperimentContext]], Field(description="Optional sub-experiments. If non-empty, this is a group node — leaf-level fields are inherited (e.g. via YAML extends) but unused, and the executor recurses into each sub-experiment in parallel.")] = None,
+    wait_for_nodes: Annotated[Optional[List[int]], Field(description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master; set e.g. [0] to wait for the master.")] = None,
 ) -> ExperimentContext:
     neighbor_node_list = neighbor_node_list or []
     latencies_ns_list = latencies_ns_list or []
     syncs_list = syncs_list or []
     pdes_net_devs = pdes_net_devs or []
-    
+    sub_experiments = sub_experiments or []
+    wait_for_nodes = wait_for_nodes or []
+
     creation_kwargs = {k: v for k, v in locals().items()}
+    is_group = len(sub_experiments) > 0
 
     # assert False
     # TODO add how to create experiment name
 
     neighbers_length = min([len(neighbor_node_list), len(latencies_ns_list), len(syncs_list)])
-    if neighbers_length > 0 or node_number != -1:
+    if not is_group and (neighbers_length > 0 or node_number != -1):
 
         for value in set(syncs_list):
             assert value in ['true', 'false'], "syncs values must be either 'true' or 'false'"
@@ -600,10 +610,10 @@ def create_experiment_context(
         partition_number=partition_number,
         idx=idx,
         pdes_net_devs=pdes_net_devs,
+        sub_experiments=sub_experiments,
+        wait_for_nodes=wait_for_nodes,
     )
 
-    e.set_up_folders()
-    e.setup_nic_args()
     e._creation_kwargs = creation_kwargs
 
     # TODO add a print config so every one sees the final config

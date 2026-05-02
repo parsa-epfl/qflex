@@ -82,6 +82,8 @@ class DockerStarter(Executor):
         -v {cwd}/multi-node-dc:/home/dev/qflex/multi-node-dc \
         -v {cwd}/multi-node-dc-old-shanqing:/home/dev/qflex/multi-node-dc-old-shanqing \
         -v {cwd}/experiments:/home/dev/qflex/experiments \
+        -v {cwd}/conf:/home/dev/qflex/conf \
+        -v {cwd}/qflex:/home/dev/qflex/qflex \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE --cap-add SYS_ADMIN \
