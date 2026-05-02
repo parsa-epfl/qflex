@@ -7,6 +7,52 @@ from .version import get_version
 DEFAULT_CONTAINER_NAME = "qflex-dev"
 
 
+def _read_host_dns() -> tuple[list[str], list[str]]:
+    """Return ``(servers, search_domains)`` discovered from the host's resolv.conf.
+
+    Why this exists: on systemd-resolved hosts (the common case on Ubuntu) the
+    real /etc/resolv.conf is a stub pointing at 127.0.0.53, which Docker filters
+    out when copying the file into the container — Docker then falls back to
+    8.8.8.8, which can be unreachable on locked-down networks. Discovering the actual upstream resolvers here
+    and passing them via ``--dns`` flags sidesteps both the stub and the 8.8.8.8
+    fallback.
+
+    Order: prefer ``/run/systemd/resolve/resolv.conf`` (systemd-resolved's
+    upstream-list view) over ``/etc/resolv.conf`` (which may be the stub).
+    Localhost addresses are always skipped — they aren't reachable from inside
+    the container. Returns empty lists if nothing usable is found, in which case
+    the caller should pass no ``--dns`` flag and let Docker do its default
+    thing.
+    """
+    candidates = ("/run/systemd/resolve/resolv.conf", "/etc/resolv.conf")
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path) as f:
+                lines = f.readlines()
+        except OSError:
+            continue
+        servers: list[str] = []
+        searches: list[str] = []
+        for raw in lines:
+            line = raw.strip()
+            if line.startswith("nameserver "):
+                addr = line.split(None, 1)[1].split("#", 1)[0].strip()
+                if addr.startswith("127.") or addr == "::1":
+                    continue
+                if addr and addr not in servers:
+                    servers.append(addr)
+            elif line.startswith("search ") or line.startswith("domain "):
+                for d in line.split()[1:]:
+                    d = d.split("#", 1)[0].strip()
+                    if d and d not in searches:
+                        searches.append(d)
+        if servers:
+            return servers, searches
+    return [], []
+
+
 class DockerStarter(Executor):
 
     def __init__(self,
@@ -85,6 +131,13 @@ class DockerStarter(Executor):
             attach_flags = "-it"
             tail = ""
 
+        # DNS is discovered from the host (not exposed on the CLI) — see
+        # _read_host_dns above for why the stub /etc/resolv.conf isn't enough.
+        host_dns_servers, host_dns_search = _read_host_dns()
+        dns_parts = [f"--dns {srv}" for srv in host_dns_servers]
+        dns_parts += [f"--dns-search {dom}" for dom in host_dns_search]
+        dns_flags = " ".join(dns_parts)
+
         # TODO remove unecessary mounts including .sh ones and micro_scripts
         # TODO make shared memory size equal to 512 * number of partitions
         return f"""
@@ -121,6 +174,7 @@ class DockerStarter(Executor):
         --pid=host \
         --cap-add=NET_ADMIN --device=/dev/net/tun  \
         --shm-size=128g \
+        {dns_flags} \
         {self.start_directory} \
         {commands_mount} {binary_mount} {self.docker_image_name}{tail}
         """

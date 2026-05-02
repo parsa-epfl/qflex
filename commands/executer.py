@@ -238,13 +238,18 @@ class Executor(abc.ABC):
                 and exp.interactive_tmux):
             return self._execute_in_tmux(sentinel_dir, log_path, err_path)
 
-        # Block until upstream nodes have started their phase. Python-side polling.
-        self._wait_for_sentinels(sentinel_dir)
-
-        # Leaf-level filesystem prep — moved out of create_experiment_context so DI
-        # graph construction has no side effects. This is the *only* place leaf prep runs.
+        # Leaf-level filesystem prep first — moved out of create_experiment_context
+        # so DI graph construction has no side effects. Both this leaf and any
+        # upstream leaves prep in parallel; we don't wait for upstream until prep
+        # is done. Otherwise multi-node QEMU's PDES sync would deadlock the master
+        # while a follower is still cping its per-node qcow2 (~tens of seconds).
         if exp is not None:
             exp.prepare_for_execution()
+
+        # NOW block until upstream nodes have actually launched their phase. The
+        # `started` sentinel signifies "I've finished prep and am about to spawn
+        # QEMU" — that's the right moment for downstream nodes to also spawn.
+        self._wait_for_sentinels(sentinel_dir)
 
         # Mark this leaf as started before the bash runs, so any node waiting on us
         # (its wait_for_nodes contains our node_number) can proceed.
@@ -273,10 +278,12 @@ class Executor(abc.ABC):
         import libtmux  # type: ignore
 
         exp = self.get_experiment()
-        # Same Python-side dance as the subprocess path.
-        self._wait_for_sentinels(sentinel_dir)
+        # Same prep-then-wait dance as the subprocess path: prep first (both
+        # nodes can do it in parallel), then wait for upstream's started, then
+        # touch our own started.
         if exp is not None:
             exp.prepare_for_execution()
+        self._wait_for_sentinels(sentinel_dir)
         self._touch_sentinel(sentinel_dir, "started")
 
         server = libtmux.Server()

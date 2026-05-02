@@ -17,6 +17,26 @@ test:
 test-verbose:
 	python -m pytest tests/ -v -s --tb=long
 
+# Run a single real-mode test (or file). Sets QFLEX_REAL_RUN_TESTS=1 so the
+# real-run gate opens, then runs the pytest nodeid you pass via TEST=...
+# Example:
+#     make test-real-one TEST=tests/test_real_runs_docker_image.py
+#     make test-real-one TEST=tests/test_real_runs_docker_image.py::test_iputils_ping_installed
+test-real-one:
+ifndef TEST
+	$(error TEST is not set. Usage: make test-real-one TEST=tests/test_real_runs_docker_image.py[::test_name])
+endif
+	QFLEX_REAL_RUN_TESTS=1 python -m pytest -v -s --tb=long $(TEST)
+
+bump-major:
+	bump-my-version bump major --allow-dirty
+
+bump-minor:
+	bump-my-version bump minor --allow-dirty
+
+bump-patch:
+	bump-my-version bump patch --allow-dirty
+
 install-dev-requirements:
 	pip install -r requirements.txt && \
 	pip install -r requirements.docs.txt && \

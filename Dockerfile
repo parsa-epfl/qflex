@@ -49,7 +49,31 @@ RUN apt-get install -y expect telnet
 
 RUN apt-get update && apt-get install -y \
     iproute2 \
+    iputils-ping \
     && rm -rf /var/lib/apt/lists/*
+
+# perf + flame-graph toolchain. linux-tools-$(uname -r) is host-kernel-pinned and
+# can't be installed at build time; the shim below makes `perf` resolve to whatever
+# version-suffixed binary linux-tools-generic ships, which is good enough for the
+# `perf record -F 99 -g` flow that feeds inferno. If exact-host-kernel matching is
+# needed, install linux-tools-$(uname -r) from inside the running container.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    linux-tools-common \
+    linux-tools-generic \
+    linux-cloud-tools-generic \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf $(ls /usr/lib/linux-tools/*/perf | tail -n1) /usr/local/bin/perf
+
+# Rust toolchain (system-wide) + inferno for collapsing perf samples and rendering
+# flame graphs. Lives in the base so all variants — including non-worm — can profile.
+ENV RUSTUP_HOME=/home/dev/rust/rustup
+ENV CARGO_HOME=/home/dev/rust/cargo
+ENV PATH=/home/dev/rust/cargo/bin:${PATH}
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --no-modify-path
+RUN echo 'export RUSTUP_HOME=/home/dev/rust/rustup' >> /etc/bash.bashrc && \
+    echo 'export CARGO_HOME=/home/dev/rust/cargo' >> /etc/bash.bashrc && \
+    echo 'export PATH=/home/dev/rust/cargo/bin:$PATH' >> /etc/bash.bashrc
+RUN cargo install inferno
 
 # --break-system-package for ubuntu 24.04
 RUN pip install conan && pip cache purge

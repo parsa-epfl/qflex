@@ -347,5 +347,5 @@ Expose the new executor as a thin `@app.command()` wrapper in [qflex](../../../q
 - [commands/run_partition.py](../../../commands/run_partition.py) — canonical example of dynamic sub_experiments generation for parallel fan-out.
 - [commands/run_single_partition.py](../../../commands/run_single_partition.py) — canonical `SequentialGroupExecutor` subclass with lazy `_build_children`.
 - [commands/run_idx.py](../../../commands/run_idx.py) — example of overriding `get_log/err_file_address` for use under a sequential group.
-- [tests/test_multi_node_ordering.py](../../../tests/test_multi_node_ordering.py) — assertions about the dispatch + sentinel behaviour. See the `testing` skill.
+- [tests/](../../../tests/) — assertions about the dispatch + sentinel behaviour. One `test_<phase>.py` per pipeline phase (`test_boot.py`, `test_load.py`, `test_run_partition.py`, `test_run_idx.py`, …), all driven by the dry-run parser in [tests/conftest.py](../../../tests/conftest.py). See the `testing` skill.
 - [qflex](../../../qflex) — the per-subcommand `executor.execute(...)` call sites.

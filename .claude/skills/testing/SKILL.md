@@ -5,27 +5,31 @@ description: Use when adding to or debugging the pytest suite under [tests/](../
 
 # Testing — pytest + dry-run output parser
 
-Until recently this repo had no tests. Now there is one suite, [tests/test_multi_node_ordering.py](../../../tests/test_multi_node_ordering.py), driven by a parser that consumes the executor's dry-run stdout and asserts on the structured markers it prints. Run it with `make test` (or directly: `python -m pytest tests/ -v`).
+Tests live under [tests/](../../../tests/), one file per pipeline phase. They're driven by a parser that consumes the executor's dry-run stdout and asserts on the structured markers it prints. Run with `make test` (or directly: `python -m pytest tests/ -v`).
 
 The whole strategy hinges on the dry-run printer in [`Executor._print_dry_run_actions`](../../../commands/executer.py) emitting one structured block per leaf. Tests don't actually invoke QEMU — they capture the stdout, parse the markers, and assert the dispatch order / sentinel basenames / bash content match expectations.
+
+A separate set of **real-run** test files (`tests/test_real_runs*.py`) bring up the dev container via `./dep` and exec real commands inside it. Those are gated behind `QFLEX_REAL_RUN_TESTS=1` so the default `make test` skips them.
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| [Makefile](../../../Makefile) | `test:` target → `python -m pytest tests/ -v`. |
+| [Makefile](../../../Makefile) | `test:` → all tests; `test-verbose:` → `-v -s --tb=long`; `test-real-one TEST=<nodeid>` → single test/file with `QFLEX_REAL_RUN_TESTS=1` set. |
 | [tests/__init__.py](../../../tests/__init__.py) | Empty — makes `tests` a package. |
-| [tests/conftest.py](../../../tests/conftest.py) | Parser (`parse_dry_run_blocks`, `DryRunBlock`), stdout capture context manager (`capture_dry_run_stdout`), shared pytest fixtures (`mock_mounting_folder`, `multi_context`, `login_ls_script`), and shared helpers (`pin_per_sub`, `assert_two_node_master_first`). |
+| [tests/conftest.py](../../../tests/conftest.py) | Dry-run parser (`parse_dry_run_blocks`, `DryRunBlock`), stdout capture (`capture_dry_run_stdout`), fixtures (`mock_mounting_folder`, `multi_context`, `login_ls_script`), shared helpers (`pin_per_sub`, `assert_two_node_master_first`). Also the **real-run helpers**: `_docker_available`, `_qflex_image_present`, `_exec_in_container`, and the session-scoped `dev_container` fixture (start `qflex_test` in background, yield mounting folder, stop on teardown). |
 | [tests/test_boot.py](../../../tests/test_boot.py) | Boot phase: vanilla two-node, Path A (interaction_script) for single-node + two-node, Path B (interactive_tmux). |
 | [tests/test_load.py](../../../tests/test_load.py) | Load phase: vanilla two-node + Path A. |
 | [tests/test_init_warm.py](../../../tests/test_init_warm.py) | InitWarm phase. |
-| [tests/test_functional_warming.py](../../../tests/test_functional_warming.py) | FunctionalWarming phase + the SUPPORTS_INTERACTIVE gate (FW must ignore interactive_tmux). |
+| [tests/test_functional_warming.py](../../../tests/test_functional_warming.py) | FunctionalWarming phase + the `SUPPORTS_INTERACTIVE` gate (FW must ignore `interactive_tmux`). |
 | [tests/test_partition.py](../../../tests/test_partition.py) | PartitionCommand / CleanPartitionCommand / UnPartitionCommand. |
 | [tests/test_result.py](../../../tests/test_result.py) | RunResultCommand. |
 | [tests/test_run_idx.py](../../../tests/test_run_idx.py) | RunIdxCommand — per-(partition, idx) sentinel coordination at the leaf. |
 | [tests/test_run_single_partition.py](../../../tests/test_run_single_partition.py) | RunSinglePartitionCommand — sequential idxs within a partition. |
 | [tests/test_run_partition.py](../../../tests/test_run_partition.py) | RunPartitionCommand — full multi-node × per-partition × per-idx tree, plus the wall-clock parallelism test. |
-| [tests/test_real_runs.py](../../../tests/test_real_runs.py) | Real docker-based runs (skipped by default). Smoke + qflex-help-inside-container + alpine-login-and-ls. Drives `./dep`. |
+| [tests/test_real_runs.py](../../../tests/test_real_runs.py) | Real docker-based runs (skipped by default). Smoke + `./qflex --help` + alpine-login-and-ls. |
+| [tests/test_real_runs_savevm.py](../../../tests/test_real_runs_savevm.py) | Real two-node `boot` (savevm-create) → `load` (savevm-verify). Skipped by default. |
+| [tests/test_real_runs_docker_image.py](../../../tests/test_real_runs_docker_image.py) | Real assertions on the dev image itself: `iputils-ping`, `perf` shim, `rustc`/`cargo`, both `inferno-*` binaries, and that every host-discovered DNS server / search domain (via `commands.docker._read_host_dns`) propagates into the container's `/etc/resolv.conf`. Skipped by default. |
 
 **One file per phase / component.** When adding tests for a new phase, create a new `test_<phase>.py` rather than appending to an existing one — keeps each file focused and easy to scan.
 
@@ -82,7 +86,7 @@ blocks = parse_dry_run_blocks(buf.getvalue())
 
 `multi_context`: builds [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml) via `dep_injection.builder.build_experiment_context`, passing `component_overrides` so all three components (the unnamed group + the two named subs) point their `mounting_folder` and `image_folder` at the temp dir.
 
-For tests that need to override leaf fields (e.g. set `partition_number=5, idx=3` for a `RunIdxCommand` test, or set `interaction_script="./drive.exp"` for a Path A test), use the small `_pin_per_sub` helper in `test_multi_node_ordering.py` which clones each sub via `model_copy(update=...)` and rebuilds the top group.
+For tests that need to override leaf fields (e.g. set `partition_number=5, idx=3` for a `RunIdxCommand` test, or set `interaction_script="./drive.exp"` for a Path A test), use the `pin_per_sub` helper in [tests/conftest.py](../../../tests/conftest.py) which clones each sub via `model_copy(update=...)` and rebuilds the top group. Used by `test_boot.py`, `test_load.py`, `test_functional_warming.py`, etc.
 
 ## The master-first ordering helper
 

@@ -148,7 +148,14 @@ def test_something_real(dev_container):
     assert r.returncode == 0
 ```
 
-Run with `QFLEX_REAL_RUN_TESTS=1 make test` (or `pytest tests/test_real_runs.py`) when you want them; ordinary `make test` skips them. Override the mounting folder via `QFLEX_REAL_RUN_MOUNTING=<path>` if needed.
+Run with `QFLEX_REAL_RUN_TESTS=1 make test` to run *every* test (real-run files included), or use `make test-real-one TEST=<nodeid>` to run a single file or single test under the same env-var:
+
+```bash
+make test-real-one TEST=tests/test_real_runs_docker_image.py
+make test-real-one TEST=tests/test_real_runs.py::test_dev_container_exec_smoke
+```
+
+Override the mounting folder via `QFLEX_REAL_RUN_MOUNTING=<path>`, the image variant via `QFLEX_REAL_RUN_WORM=0|1` and `QFLEX_REAL_RUN_DEBUG=0|1` (both default to `1` — i.e. `qflex-worm-debug-<ver>`, the user's canonical local image).
 
 ## Key files
 

@@ -20,7 +20,7 @@ description: Use when working with the host-side `./dep` Typer CLI — the launc
 
 | Subcommand | What it does | Notes |
 |---|---|---|
-| `build-docker` | `docker buildx` for the dev image (`Dockerfile` → deps; `Dockerfile.qemu.{release,debug}` → qflex; optionally `Dockerfile.WormCacheQFlex`). Tags `ghcr.io/parsa-epfl/qflex:<variant>-<version>`. `--push` pushes to GHCR (auth required). | Implemented by `DockerBuild` in [commands/docker.py](../../../commands/docker.py). |
+| `build-docker` | `docker buildx` for the dev image (`Dockerfile` → deps + perf/Rust/inferno; `Dockerfile.qemu.{release,debug}` → qemu + parallel-qemu + flexus build; optionally `Dockerfile.WormCacheQFlex`). Tags `ghcr.io/parsa-epfl/qflex:<variant>-<version>`. `--push` pushes to GHCR (auth required). | Implemented by `DockerBuild` in [commands/docker.py](../../../commands/docker.py). |
 | `start-docker` (default) | `docker run -it --entrypoint /bin/bash <image>` with all the QFlex mounts. Drops the user into an interactive bash inside the container. | Implemented by `DockerStarter` ([commands/docker.py](../../../commands/docker.py)). `--mounting-folder` is required — that path is mounted into the container at the same absolute path. |
 | `start-docker --background` | `docker run -d --name qflex-dev --entrypoint /bin/bash <image> -c "tail -f /dev/null"`. Same mounts as the interactive variant, but detached + named + kept alive. Subsequent `./dep exec` calls land inside this container. | The `tail -f /dev/null` keep-alive is the standard "do nothing forever" idiom. The container stays up until `./dep stop-docker`. |
 | `exec` | `docker exec -w /home/dev/qflex <name> /bin/bash -c "<command>"` against the running container. Fast — no per-call container start. **Requires** `start-docker --background` to have been run first. | New `DockerExec` class in [commands/docker.py](../../../commands/docker.py); uses `shlex.quote` so internal quotes / spaces in the command Just Work. |
@@ -86,6 +86,17 @@ Plus these process-level flags (mostly for multi-node QEMU + gdb):
 | `--pid=host` | Multi-node nodes need to see each other's PIDs. |
 | `--cap-add NET_ADMIN --device=/dev/net/tun` | virtio-net-pci / e1000 setup inside the guest. |
 | `--shm-size=128g` | PDES rings under `/dev/shm/pdes_*` need real shared memory; smaller shm = silent multi-node breakage. |
+| `--dns <addr>` × N + `--dns-search <domain>` × N | Auto-discovered from the host's `/run/systemd/resolve/resolv.conf` (preferred) or `/etc/resolv.conf` via `_read_host_dns()` in [commands/docker.py](../../../commands/docker.py). Localhost resolvers are skipped. **Not exposed on the CLI** — this is intentionally hidden so users don't need to know about it. The reason it exists: on systemd-resolved hosts the stub `/etc/resolv.conf` points at `127.0.0.53`, which Docker filters when copying into containers — Docker then falls back to `8.8.8.8`, which is unreachable on locked-down networks. Discovering the real upstream resolvers and passing them via `--dns` sidesteps both. |
+
+## Image-build chain
+
+Three sequential `docker buildx build` invocations (see `DockerBuild.cmd` in [commands/docker.py](../../../commands/docker.py)):
+
+1. **`Dockerfile` → `qflex-dependencies`**: Ubuntu 22.04 base, gcc-13 toolchain, all libqemu/libflexus build deps (`libcapstone-dev`, `libslirp-dev`, `libpixman-1-dev`, `libglib2.0-dev`, `meson`, `ninja-build`, `cmake`), `iputils-ping`, perf packages (`linux-tools-common` + `linux-tools-generic` + a `/usr/local/bin/perf` shim because `linux-tools-$(uname -r)` is host-kernel-pinned), Python toolchain + `conan` via pip, the Rust toolchain via `rustup`, and `cargo install inferno` for collapsing perf samples + rendering flame graphs.
+2. **`Dockerfile.qemu.{debug,release}` → `qflex-{debug,release}:<ver>`**: Builds qemu (timing fork: `--enable-libqflex --enable-snapvm-external --enable-slirp --enable-capstone`), parallel-qemu (FW fork: `--enable-capstone` only), and **flexus** (conan + cmake + ninja → `kraken_out/lib{knotty,semi}kraken.so`). Debug variant uses `COPY` to bake source into the image; release variant uses BuildKit `--mount=type=bind,source=...,rw` so the source isn't baked but the build outputs (`qemu-saved/`, `parallel-qemu-saved/`, `kraken_out/`) end up in the image layer.
+3. **`Dockerfile.WormCacheQFlex` → `qflex-worm-{debug,release}:<ver>`** (only with `--worm`): Slim layer on top — Rust + cargo + inferno are inherited from the base, this file just copies in `WormCacheQFlex/`, `qflex/`, `commands/`, `micro_scripts/` and sets up the legacy `/qflex/{qemu-saved,p-qemu-saved}` symlinks.
+
+The PPA line in the base Dockerfile (`add-apt-repository ppa:ubuntu-toolchain-r/test`) for gcc-13 is the most fragile part of the build — it 504s when launchpad is flaky.
 
 ## Preconditions in the host cwd
 

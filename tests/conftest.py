@@ -1,12 +1,16 @@
-"""Test fixtures for the multi-node ordering tests.
+"""Shared pytest fixtures + helpers used by every test file under tests/.
 
-Each test invokes a phase's executor on a 2-node multi config in dry-run, captures
-stdout, and asserts on the [py-wait] / [py-touch] / [bash] markers. See
-test_multi_node_ordering.py for the assertions; this file only provides setup.
+* The dry-run side: `parse_dry_run_blocks`, `DryRunBlock`, `capture_dry_run_stdout`,
+  `mock_mounting_folder`, `multi_context`, `pin_per_sub`, `assert_two_node_master_first`.
+* The real-run side: `dev_container` session fixture (start/stop the
+  `qflex_test` container via `./dep`) plus `_docker_available`, `_qflex_image_present`
+  and `_exec_in_container` so test_real_runs*.py files can share them.
 """
 import io
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import contextlib
@@ -19,6 +23,10 @@ import pytest
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+
+# Constants shared by every real-run test file.
+DEFAULT_MOUNTING = "/mnt/sdc/data-caching-1c/"
+TEST_CONTAINER_NAME = "qflex_test"            # never collides with the user's qflex-dev
 
 
 @dataclass
@@ -252,3 +260,158 @@ def multi_context(mock_mounting_folder):
     }
     return build_experiment_context("conf/DC/dc-multi.yaml",
                                     component_overrides=overrides)
+
+
+# ============================================================================
+# Real-run helpers — shared by tests/test_real_runs*.py.
+#
+# These tests skip themselves unless QFLEX_REAL_RUN_TESTS=1, but the helpers
+# below are imported by both files (via `from .conftest import ...`).
+# ============================================================================
+
+def _docker_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    try:
+        r = subprocess.run(["docker", "info"], capture_output=True, timeout=10)
+        return r.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _qflex_image_present() -> bool:
+    """True if at least one ghcr.io/parsa-epfl/qflex image is locally available."""
+    try:
+        r = subprocess.run(
+            ["docker", "image", "ls", "--format", "{{.Repository}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    if r.returncode != 0:
+        return False
+    return any("parsa-epfl/qflex" in line for line in r.stdout.splitlines())
+
+
+def _exec_in_container(command: str, timeout: int = 60) -> subprocess.CompletedProcess:
+    """Run `./dep exec --command "<bash>" --container-name qflex_test`.
+    Returns the CompletedProcess so callers can assert on rc / stdout / stderr."""
+    return subprocess.run(
+        ["./dep", "exec", "--command", command,
+         "--container-name", TEST_CONTAINER_NAME],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout,
+    )
+
+
+@pytest.fixture(scope="session")
+def dev_container():
+    """Session-scoped: start the QFlex dev container in background once (named
+    `qflex_test`), yield the host mounting folder, stop+remove on teardown.
+
+    The container name is intentionally distinct from the default `qflex-dev` so
+    a user running `./dep start-docker --background` in another terminal isn't
+    disturbed by the test suite.
+
+    Mounting folder defaults to /mnt/sdc/data-caching-1c/; override via the
+    QFLEX_REAL_RUN_MOUNTING env var. Image variant defaults to --worm --debug
+    (the user's standard); override via QFLEX_REAL_RUN_WORM / QFLEX_REAL_RUN_DEBUG.
+
+    Always `./dep stop-docker` first to clear any leftover container from a
+    prior crashed run.
+    """
+    if not os.environ.get("QFLEX_REAL_RUN_TESTS"):
+        pytest.skip("set QFLEX_REAL_RUN_TESTS=1 to enable real docker-based runs")
+    if not _docker_available():
+        pytest.skip("docker daemon not reachable")
+    if not _qflex_image_present():
+        pytest.skip("ghcr.io/parsa-epfl/qflex image not present locally; "
+                    "run `./dep build-docker` or pull it first")
+
+    mounting = os.environ.get("QFLEX_REAL_RUN_MOUNTING", DEFAULT_MOUNTING)
+    if not os.path.isdir(mounting):
+        pytest.skip(f"mounting folder does not exist: {mounting}")
+
+    def _envflag(name: str, default: str) -> bool:
+        return os.environ.get(name, default).lower() not in ("0", "false", "no", "")
+
+    use_worm = _envflag("QFLEX_REAL_RUN_WORM", "1")
+    use_debug = _envflag("QFLEX_REAL_RUN_DEBUG", "1")
+
+    subprocess.run(
+        ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
+        cwd=REPO_ROOT, capture_output=True, timeout=30,
+    )
+
+    start_cmd = [
+        "./dep", "start-docker", "--mounting-folder", mounting,
+        "--background", "--container-name", TEST_CONTAINER_NAME,
+    ]
+    if use_worm:
+        start_cmd.append("--worm")
+    if use_debug:
+        start_cmd.append("--debug")
+    start = subprocess.run(
+        start_cmd,
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
+    )
+    if start.returncode != 0:
+        pytest.skip(
+            f"./dep start-docker --background failed (rc={start.returncode}):\n"
+            f"stdout:\n{start.stdout}\nstderr:\n{start.stderr}"
+        )
+
+    # The published images predate the YAML/DI layer (`injector`, `omegaconf`)
+    # and the libtmux Path B. Best-effort `pip install` of the new deps so any
+    # qflex command that hits the DI loader (anything with `-c <yaml>`) imports
+    # cleanly. Skip rather than fail if pip itself errors.
+    pip = subprocess.run(
+        ["./dep", "exec", "--container-name", TEST_CONTAINER_NAME,
+         "--command", "pip install --quiet injector 'omegaconf>=2.3' libtmux"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
+    )
+    if pip.returncode != 0:
+        subprocess.run(
+            ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
+            cwd=REPO_ROOT, capture_output=True, timeout=30,
+        )
+        pytest.skip(
+            f"pip install of injector/omegaconf/libtmux failed inside the container "
+            f"(rc={pip.returncode}):\n{pip.stderr[-800:]}"
+        )
+
+    try:
+        yield mounting
+    finally:
+        subprocess.run(
+            ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
+            cwd=REPO_ROOT, capture_output=True, timeout=30,
+        )
+
+
+@pytest.fixture(scope="session")
+def parallel_qemu_supports_latencyns(dev_container) -> bool:
+    """Probe whether the parallel-qemu binary baked into the running dev container
+    accepts the `latencyns` parameter on the `pdes` netdev. Older pre-built images
+    (≲ Nov 2024) reject it with "Invalid parameter 'latencyns'" — the multi-node
+    real-run tests can't work on those images until the binary is rebuilt
+    (`./dep build-docker --worm --debug` from the repo root, or rebuild
+    parallel-qemu inside the running container).
+
+    Returns True if the param is recognized, False otherwise. Multi-node real-run
+    tests should `pytest.skip(...)` when False rather than fail confusingly."""
+    qemu_bin = "/home/dev/qflex/parallel-qemu-saved/build/qemu-system-aarch64"
+    # qemu errors on cmdline parsing BEFORE doing anything heavyweight, so this
+    # exits in milliseconds. The trailing `; true` swallows the always-non-zero
+    # rc — we care about the stderr signature, not the exit code.
+    probe_cmd = (
+        f"{qemu_bin} "
+        "-netdev pdes,id=probe,shm-send=/probe_a,shm-recv=/probe_b,"
+        "latencyns=1,sync=true,master=true 2>&1 | head -20; true"
+    )
+    r = subprocess.run(
+        ["./dep", "exec", "--container-name", TEST_CONTAINER_NAME,
+         "--command", probe_cmd],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30,
+    )
+    output = (r.stdout or "") + (r.stderr or "")
+    return "Invalid parameter 'latencyns'" not in output

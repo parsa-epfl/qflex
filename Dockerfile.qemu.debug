@@ -12,11 +12,18 @@ WORKDIR /home/dev/qflex
 # TODO address the two qemu versions
 COPY ./qemu /home/dev/qflex/qemu
 COPY ./parallel-qemu /home/dev/qflex/parallel-qemu
+COPY ./flexus /home/dev/qflex/flexus
 
 
-RUN make MODE=debug qemu-config && make MODE=debug qemu-build 
+RUN make MODE=debug qemu-config && make MODE=debug qemu-build
 
 RUN make MODE=debug parallel-qemu-config && make MODE=debug parallel-qemu-build
+
+# Flexus (timing model) — produces /home/dev/qflex/kraken_out/lib{knotty,semi}kraken.so
+# which set_up_folders() symlinks into each experiment's run/ folder. Conan does the
+# heavy lifting; build-multiple-kraken_vanilla.py wires the per-target wiring.cpp
+# variants and shells out to ./build for each.
+RUN make flexus-config && make flexus-build MODE=debug
 
 
 

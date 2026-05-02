@@ -173,7 +173,7 @@ The `_part<P>_idx<I>` suffixes appear when `partition_number` / `idx` are set on
 
 Both `RunPartitionCommand` (per-partition fan-out) and `RunSinglePartitionCommand` (per-idx sequential) now route through this same machinery. The full tree at `./qflex run-partition -c <multi.yaml>` is `top group → node ctx (per-partition fan-out) → partition ctx (per-idx sequential) → idx ctx (RunIdxCommand leaf bash)`.
 
-See [conf/DC/dc-multi.yaml](conf/DC/dc-multi.yaml) for the canonical YAML, [tests/test_multi_node_ordering.py](tests/test_multi_node_ordering.py) for the assertions about ordering, and the `executor` and `multi-node` skills for the implementation details.
+See [conf/DC/dc-multi.yaml](conf/DC/dc-multi.yaml) for the canonical YAML, [tests/](tests/) (one `test_<phase>.py` per pipeline phase, all using the shared `assert_two_node_master_first` helper from [tests/conftest.py](tests/conftest.py)) for the assertions about ordering, and the `executor` and `multi-node` skills for the implementation details.
 
 ## Operational gotchas
 

@@ -15,45 +15,21 @@ Pre-requisites:
 - For the alpine-login test specifically: the alpine image at
   `<mounting-folder>/<image_name>` already has a `qflex` user with password
   `qflex` configured (the user's existing setup).
+
+The session fixture `dev_container` and helpers `_exec_in_container` /
+`_docker_available` / `_qflex_image_present` live in tests/conftest.py so they
+can be reused by other real-run files (e.g. test_real_runs_savevm.py).
 """
 import os
-import shutil
-import subprocess
 import sys
 
 import pytest
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DEFAULT_MOUNTING = "/mnt/sdc/data-caching-1c/"
-TEST_CONTAINER_NAME = "qflex_test"           # never collides with the user's qflex-dev
-TEST_EXPERIMENT_NAME = "qflex_real_run_test"  # owned by this test file; safe to wipe
-
-
-def _docker_available() -> bool:
-    if shutil.which("docker") is None:
-        return False
-    try:
-        r = subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=10
-        )
-        return r.returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-
-
-def _qflex_image_present() -> bool:
-    """True if at least one ghcr.io/parsa-epfl/qflex image is locally available."""
-    try:
-        r = subprocess.run(
-            ["docker", "image", "ls", "--format", "{{.Repository}}"],
-            capture_output=True, text=True, timeout=10,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-    if r.returncode != 0:
-        return False
-    return any("parsa-epfl/qflex" in line for line in r.stdout.splitlines())
-
+from .conftest import (
+    _docker_available,
+    _exec_in_container,
+    _qflex_image_present,
+)
 
 # Module-level skip — applied to every test in this file unless overridden.
 pytestmark = [
@@ -66,95 +42,6 @@ pytestmark = [
                        reason="ghcr.io/parsa-epfl/qflex image not present locally; "
                               "run `./dep build-docker` or pull it first"),
 ]
-
-
-@pytest.fixture(scope="session")
-def dev_container():
-    """Session-scoped: start the QFlex dev container in background once (named
-    `qflex_test`), yield the mounting folder, stop+remove on teardown.
-
-    Subsequent tests use `./dep exec --container-name qflex_test` to talk to this
-    container. The container name is intentionally distinct from the default
-    `qflex-dev` so a user running `./dep start-docker --background` in another
-    terminal isn't disturbed by the test suite.
-
-    Mounting folder defaults to /mnt/sdc/data-caching-1c/; override via the
-    QFLEX_REAL_RUN_MOUNTING env var. We always `./dep stop-docker` first to clear
-    any leftover container from a prior crashed run."""
-    mounting = os.environ.get("QFLEX_REAL_RUN_MOUNTING", DEFAULT_MOUNTING)
-    if not os.path.isdir(mounting):
-        pytest.skip(f"mounting folder does not exist: {mounting}")
-
-    # The image variant must match what's locally tagged. The user's standard
-    # workflow is `--worm --debug`, so default to that. Override via env vars if
-    # you've built a different variant (e.g. release).
-    def _envflag(name: str, default: str) -> bool:
-        return os.environ.get(name, default).lower() not in ("0", "false", "no", "")
-
-    use_worm = _envflag("QFLEX_REAL_RUN_WORM", "1")
-    use_debug = _envflag("QFLEX_REAL_RUN_DEBUG", "1")
-
-    # Best-effort cleanup of any prior test container.
-    subprocess.run(
-        ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
-        cwd=REPO_ROOT, capture_output=True, timeout=30,
-    )
-
-    # Start fresh, detached, named `qflex_test`.
-    start_cmd = [
-        "./dep", "start-docker", "--mounting-folder", mounting,
-        "--background", "--container-name", TEST_CONTAINER_NAME,
-    ]
-    if use_worm:
-        start_cmd.append("--worm")
-    if use_debug:
-        start_cmd.append("--debug")
-    start = subprocess.run(
-        start_cmd,
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
-    )
-    if start.returncode != 0:
-        pytest.skip(
-            f"./dep start-docker --background failed (rc={start.returncode}):\n"
-            f"stdout:\n{start.stdout}\nstderr:\n{start.stderr}"
-        )
-
-    # The published images predate the YAML/DI layer (`injector`, `omegaconf`)
-    # and the libtmux Path B. Best-effort `pip install` of the new deps so any
-    # qflex command that hits the DI loader (anything with `-c <yaml>`) imports
-    # cleanly. Skip rather than fail if pip itself errors.
-    pip = subprocess.run(
-        ["./dep", "exec", "--container-name", TEST_CONTAINER_NAME,
-         "--command", "pip install --quiet injector 'omegaconf>=2.3' libtmux"],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
-    )
-    if pip.returncode != 0:
-        subprocess.run(
-            ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
-            cwd=REPO_ROOT, capture_output=True, timeout=30,
-        )
-        pytest.skip(
-            f"pip install of injector/omegaconf/libtmux failed inside the container "
-            f"(rc={pip.returncode}):\n{pip.stderr[-800:]}"
-        )
-
-    try:
-        yield mounting
-    finally:
-        subprocess.run(
-            ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
-            cwd=REPO_ROOT, capture_output=True, timeout=30,
-        )
-
-
-def _exec_in_container(command: str, timeout: int = 60) -> subprocess.CompletedProcess:
-    """Helper: run `./dep exec --command "<bash>" --container-name qflex_test`
-    and return the CompletedProcess."""
-    return subprocess.run(
-        ["./dep", "exec", "--command", command,
-         "--container-name", TEST_CONTAINER_NAME],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +67,9 @@ def test_qflex_help_inside_container(dev_container):
 # Heavyweight: actually boot Alpine, log in via the sample expect script,
 # capture the `ls` output, and verify the host can read it back.
 # ---------------------------------------------------------------------------
+
+TEST_EXPERIMENT_NAME = "qflex_real_run_test"  # owned by this test file
+
 
 def test_alpine_login_and_ls_real_run(dev_container):
     """End-to-end: boot Alpine inside the dev container, drive the login prompt
