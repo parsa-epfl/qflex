@@ -1,0 +1,105 @@
+#!/usr/bin/env expect
+# Path A driver for the load side of the multi-node savevm test:
+#   1) Connect to serial. The guest has been resumed from `savevm
+#      qflex-makefile-test` via QEMU's `-loadvm`, so we should land at the
+#      shell prompt where savevm captured us.
+#   2) `ls`, capture the output to $EXP_FOLDER/ls_after_load.txt.
+#   3) `quit` over the monitor.
+#
+# Always tries to `quit` QEMU at the end (success or failure) so the host's
+# `gdb -ex run --args qemu-system-aarch64` doesn't hang.
+
+set timeout 900
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+proc connect_telnet {host port max_attempts} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set sid -1
+    for {set i 0} {$i < $max_attempts} {incr i} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set sid $this_sid
+            break
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    return $sid
+}
+
+proc quit_qemu {monitor_port} {
+    set sid [connect_telnet 127.0.0.1 $monitor_port 5]
+    if {$sid == -1} {
+        puts "quit_qemu: could not connect to monitor on port $monitor_port"
+        return
+    }
+    set timeout 30
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+set ok 0
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port 60]
+if {$serial_sid == -1} {
+    puts "ERROR: could not connect to serial telnet on port $serial_port"
+    quit_qemu $monitor_port
+    exit 1
+}
+set spawn_id $serial_sid
+
+# Send a newline to make the shell re-render the prompt — useful in case the
+# loadvm point captured the cursor mid-way through the shell's own redraw.
+send "\r"
+
+expect {
+    timeout { puts "ERROR: timed out waiting for shell prompt (loadvm didn't restore?)"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+set ls_output $expect_out(buffer)
+
+set out_path "$exp_folder/ls_after_load.txt"
+if {[catch {open $out_path "w"} f]} {
+    puts "ERROR: could not open $out_path for writing: $f"
+} else {
+    puts $f $ls_output
+    close $f
+    puts "wrote ls output to $out_path"
+    set ok 1
+}
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+quit_qemu $monitor_port
+
+if {!$ok} { exit 1 }

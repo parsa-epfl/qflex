@@ -97,6 +97,29 @@ expect "(qemu) "         ; send "quit\r"
 
 `expect` and `telnet` are already installed in the dev Docker image (commit 6c2dce6).
 
+### Path A under multi-node: master vs non-master scripts
+
+**Hard rule: when you script a snapshot under multi-node, the master and non-master nodes must run *different* `interaction_script`s.** PDES `savevm` triggers a `DRAIN_START` / `DRAIN_END` coordination across every node and persists per-node CPU+memory state as part of the distributed snapshot. The implications for your script are non-negotiable:
+
+- **Only node 0 sends `savevm` over its monitor.** If a non-master also sends it, you double-drive the drain and produce a corrupt snapshot. If nobody sends it, nothing happens.
+- **Non-master QEMUs must stay alive during the master's savevm.** They participate in the drain. A non-master that quits via the monitor before the master is done tears down the PDES wire mid-snapshot.
+- **The standard cross-node handshake is a sentinel file** in the shared parent of `EXP_FOLDER`: master writes `<dirname $EXP_FOLDER>/savevm_done.flag` after `savevm` returns; every non-master script polls for that file before quitting.
+- The same applies to other monitor-issued, drain-coordinated commands — anything that walks the PDES wire is master-only by convention.
+
+YAML wiring follows: each leaf points at the script that fits its role, not a single shared script. The canonical example is [conf/DC/dc-multi-savevm-create.yaml](../../../conf/DC/dc-multi-savevm-create.yaml):
+
+```yaml
+components:
+  experiment_context_node_0:
+    interaction_script: /home/dev/qflex/sample_scripts/boot_create_and_savevm_master.exp
+  experiment_context_node_1:
+    interaction_script: /home/dev/qflex/sample_scripts/boot_create_and_wait.exp
+```
+
+Defensive scripts should also assert their own `NODE_NUMBER` matches the role they expect (master script refuses to run on `node_number != 0`; non-master script refuses on `node_number == 0`) so a YAML mis-wiring fails loudly rather than silently producing a non-snapshotted run.
+
+The `dc-multi-savevm-verify.yaml` (load side) is fine with a single script for both leaves because `loadvm` happens via QEMU's `-loadvm` cmdline arg per node — there's no cross-node monitor command, no drain, just symmetric `ls` + `quit`.
+
 ## Path B — tmux interactive windows
 
 ```

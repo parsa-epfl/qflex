@@ -1,0 +1,15 @@
+# Companion to dc-multi-savevm-create.yaml — extends dc-multi.yaml and sets
+# both `interaction_script` (load+ls driver) and `loadvm_name` per leaf so
+# QEMU starts via `-loadvm qflex-makefile-test` and the script runs against
+# the restored guest state from the prior savevm.
+
+extends: dc-multi
+
+components:
+  experiment_context_node_0:
+    interaction_script: /home/dev/qflex/sample_scripts/load_verify_ls.exp
+    loadvm_name: qflex-makefile-test
+
+  experiment_context_node_1:
+    interaction_script: /home/dev/qflex/sample_scripts/load_verify_ls.exp
+    loadvm_name: qflex-makefile-test

@@ -1,0 +1,9 @@
+extends: dc-multi
+
+components:
+  experiment_context_node_0:
+    experiment_name: data-caching_yaml_node_0_interactive
+    interactive_tmux: true
+  experiment_context_node_1:
+    experiment_name: data-caching_yaml_node_1_interactive
+    interactive_tmux: true

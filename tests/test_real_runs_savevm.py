@@ -24,12 +24,6 @@ so the dev container starts once and both tests run inside it.
 
 Disabled by default — same gating as test_real_runs.py (QFLEX_REAL_RUN_TESTS=1
 + docker reachable + qflex image local).
-
-Additional gate: the multi-node PDES netdev's `latencyns` parameter is required
-here (every leaf in `dc-multi.yaml` uses `latencies_ns_list`). Older pre-built
-dev images (≲ Nov 2024) ship a parallel-qemu that doesn't recognize that
-parameter and these tests skip instead of failing confusingly. Rebuild via
-`./dep build-docker --worm --debug` to get a current binary.
 """
 import os
 import sys
@@ -66,23 +60,45 @@ def _read_capture(mounting: str, sub_name: str, filename: str) -> str:
         return f.read()
 
 
-def test_01_boot_two_nodes_create_files_and_savevm(
-    dev_container, parallel_qemu_supports_latencyns
-):
+def test_01_boot_two_nodes_create_files_and_savevm(dev_container):
     """Boot both nodes, login, `touch test{N+1}.txt` per node, ls, savevm,
-    quit. Verify each node's ls captured the right file."""
-    if not parallel_qemu_supports_latencyns:
-        pytest.skip(
-            "dev image's parallel-qemu predates the `latencyns` pdes netdev "
-            "parameter. Rebuild via `./dep build-docker --worm --debug` to enable "
-            "multi-node real-run tests."
-        )
+    quit. Verify each node's ls captured the right file.
+
+    Wipes each leaf's experiment folder first so `set_up_folders()` runs end-to-
+    end on every test invocation. `keep_experiment_unique=False` (the YAML's
+    default) means folders are reused across runs, and `set_up_folders()` uses
+    `cp -u` for the qemu binaries — which silently skips the copy when the dest
+    is newer than the source. After a docker image rebuild, that mtime check
+    can leave the experiment folder pinned to whatever binary the previous
+    image had. Removing the folder forces a fresh copy from the freshly-built
+    image's `parallel-qemu-saved/` so the test always exercises the binary
+    the framework currently produces."""
     mounting = dev_container
+
+    # Cleanup runs inside the container so root-owned files left by previous
+    # qemu runs (qcow2 dirs etc.) can be removed without sudo on the host.
+    # Also wipes the per-node qcow2 copies — `copy_image_for_node` uses `cp -u`
+    # which won't refresh a per-node image whose mtime is newer than the
+    # master, so a previous run's dirty state can persist into this run's boot.
+    rm_targets = [f"{mounting}/experiments/{sub}" for sub in NODE_SUB_NAMES]
+    # Per-node qcow2s live next to the master image: <image_folder>/<image_name>-node<N>.
+    # The master is /mnt/sdc/data-caching-1c/root-single-node.qcow2; per-node
+    # copies are root-single-node.qcow2-node0 / -node1.
+    rm_targets.extend(
+        f"{mounting}/root-single-node.qcow2-node{n}" for n in range(len(NODE_SUB_NAMES))
+    )
+    rm_cmd = " && ".join(f"rm -rf {t}" for t in rm_targets)
+    rm_result = _exec_in_container(rm_cmd, timeout=120)
+    assert rm_result.returncode == 0, (
+        f"failed to clean experiment folders before test_01 "
+        f"(rc={rm_result.returncode}). stderr:\n{rm_result.stderr}"
+    )
 
     cmd = (
         "./qflex boot -c conf/DC/dc-multi-savevm-create.yaml"
     )
-    r = _exec_in_container(cmd, timeout=900)
+    # Multi-node Alpine boots are slow under quantum sync; 30 min upper bound.
+    r = _exec_in_container(cmd, timeout=1800)
     assert r.returncode == 0, (
         f"boot+savevm failed (rc={r.returncode}).\n"
         f"stdout (last 2k):\n{r.stdout[-2000:]}\n"
@@ -100,23 +116,15 @@ def test_01_boot_two_nodes_create_files_and_savevm(
         )
 
 
-def test_02_load_two_nodes_verify_files(
-    dev_container, parallel_qemu_supports_latencyns
-):
+def test_02_load_two_nodes_verify_files(dev_container):
     """Load both nodes from the snapshot, ls, quit. Verify each node's file
     survived the savevm/loadvm round-trip."""
-    if not parallel_qemu_supports_latencyns:
-        pytest.skip(
-            "dev image's parallel-qemu predates the `latencyns` pdes netdev "
-            "parameter. Rebuild via `./dep build-docker --worm --debug` to enable "
-            "multi-node real-run tests."
-        )
     mounting = dev_container
 
     cmd = (
         "./qflex load -c conf/DC/dc-multi-savevm-verify.yaml"
     )
-    r = _exec_in_container(cmd, timeout=600)
+    r = _exec_in_container(cmd, timeout=1800)
     assert r.returncode == 0, (
         f"load+verify failed (rc={r.returncode}).\n"
         f"stdout (last 2k):\n{r.stdout[-2000:]}\n"

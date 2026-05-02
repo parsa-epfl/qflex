@@ -119,6 +119,15 @@ The assertion is `1.5s < elapsed < 3.5s`. Comes in at ~2s reliably.
 
 The fork-vs-spawn caveat: monkeypatching survives across mp.Process on Linux (default `fork`), but not on macOS/Windows (default `spawn`). If we ever need cross-platform tests we'd switch to a different strategy (e.g. wrap the leaf bash itself rather than monkeypatching the class).
 
+## Cardinal rule: tests exercise the code under test
+
+Tests must drive the code we ship — never duplicate it.
+
+- **Dry-run / unit tests** import the relevant class from [commands/](../../../commands/) (or the factory `create_experiment_context`) directly and call `executor.execute()` under `capture_dry_run_stdout()`. The dispatch path being tested is the same one production hits.
+- **Real-run tests** drive the CLI: `./qflex <subcommand> -c <yaml>` via `_exec_in_container`, or — for host-side workflows — run the actual `./dep` Typer commands. They walk the full `data_class_wrap → create_experiment_context → Executor.execute → cmd() → subprocess.run` pipeline.
+- **Never invoke a binary directly from a test or fixture** to "probe" capabilities (e.g. running `qemu-system-aarch64 -netdev pdes,...,latencyns=...` to gate a skip). That duplicates parsing/wiring logic in a place that can disagree with the real code path — and when it does disagree, the test silently lies. If a binary is stale, the *real* run will fail with the *real* error message; that's the signal you want. Gate skips on env vars, docker availability, or repo state — not on subprocess outputs of the very thing you're testing.
+- The same rule applies to "test helpers" that build commands by hand: if a helper duplicates what `cmd()` would emit, it'll drift from the real implementation. Either call the class or assert against its `cmd()` output.
+
 ## Adding a new test
 
 For a new pipeline phase (or any executor that follows the dispatch contract):

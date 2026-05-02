@@ -313,30 +313,28 @@ class ExperimentContext(BaseModel):
         # TODO check if rom and bios files can be linked from parallel-qemu-saved when using qemu
         # TODO check why files are being turned into bz2
         
-        run_files = [
-            "./parallel-qemu-saved/build/qemu-system-aarch64", 
+        
+        # Read the staged trees the Makefile produces. `make parallel-qemu-build`
+        # copies parallel-qemu/build/ → parallel-qemu-saved/build/ and same for
+        # qemu → qemu-saved; the docker image build is expected to run those
+        # targets so both `-saved/` dirs are present in the image regardless of
+        # variant (release/debug, base/worm).
+        # (source, target_basename_in_run_folder)
+        run_files: list[tuple[str, str]] = [
+            ("./parallel-qemu-saved/build/qemu-system-aarch64", "qemu-system-aarch64"),
+            ("./qemu-saved/build/qemu-system-aarch64", "vanilla-qemu-system-aarch64"),
             # TODO if we ever decide to change EFI and bios, this needs to change
-            "./QEMU_EFI.fd", 
-            "./qemu-saved/build/qemu-system-aarch64",
-            "./parallel-qemu-saved/pc-bios/efi-virtio.rom",
-            "./parallel-qemu-saved/pc-bios/efi-e1000.rom",
-            "./qemu-img",
-            "debug.cfg",
+            ("./QEMU_EFI.fd", "QEMU_EFI.fd"),
+            ("./parallel-qemu-saved/pc-bios/efi-virtio.rom", "efi-virtio.rom"),
+            ("./parallel-qemu-saved/pc-bios/efi-e1000.rom", "efi-e1000.rom"),
+            ("./qemu-img", "qemu-img"),
+            ("debug.cfg", "debug.cfg"),
         ]
-        for f in run_files:
-
-            if "parallel-qemu-saved/" in f:
-                # Link as the name of the file to run folder
-                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-            elif "qemu-saved/" in f:
-                # Link as the name of the file to run folder with
-                link_address = f"{self.get_experiment_folder_address()}/run/vanilla-{f.split('/')[-1]}"
-            else:
-                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-            
-            print(f"copying {f} to {link_address}...")
+        for src, basename in run_files:
+            link_address = f"{self.get_experiment_folder_address()}/run/{basename}"
+            print(f"copying {src} to {link_address}...")
             # TODO add checks for when cp fails
-            os.system(f"cp -u {f} {link_address}")
+            os.system(f"cp -u {src} {link_address}")
         # TODO turn WormCacheQFlex address into a parameter
         # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
         if not os.path.exists(f"./WormCacheQFlex"):

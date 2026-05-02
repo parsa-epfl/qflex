@@ -58,7 +58,7 @@ components:
     node_number: 0
     neighbor_node_list: [1]
     pdes_net_devs: ["virtio-net-pci"]
-    latencies_ns_list: [1000]
+    latencies_ns_list: [100000]
     syncs_list: ["true"]
     # wait_for_nodes: []   # default — master, no wait
 
@@ -69,6 +69,6 @@ components:
     node_number: 1
     neighbor_node_list: [0]
     pdes_net_devs: ["virtio-net-pci"]
-    latencies_ns_list: [1000]
+    latencies_ns_list: [100000]
     syncs_list: ["true"]
     wait_for_nodes: [0]      # wait for master's .started before booting

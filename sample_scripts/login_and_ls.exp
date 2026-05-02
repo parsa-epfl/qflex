@@ -1,0 +1,145 @@
+#!/usr/bin/env expect
+# Demo of qflex's Path A (interaction_script) hook against an Alpine guest:
+# wait for the login prompt, log in as qflex/qflex, run `ls`, write the captured
+# ls output to a host-visible file ($EXP_FOLDER/ls_output.txt), then quit QEMU
+# cleanly via the monitor.
+#
+# Always issues `quit` on the monitor at the end (success OR failure) so QEMU
+# doesn't hang forever waiting for input. Everything sent / received is logged
+# to $EXP_FOLDER/expect_log.txt for debugging.
+#
+# Receives TELNET_SERIAL_PORT and TELNET_MONITOR_PORT (and EXP_FOLDER,
+# NODE_NUMBER, SERIAL_LOG_PATH) as env vars from qflex's executor bash.
+
+set timeout 240
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+# Make sure the folder exists, then enable a debug log of everything that flows
+# through the expect spawns. Mounted into the container at the same path, so
+# the host can read it after the run.
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+# Spawn telnet and verify the connection actually came up — `spawn` succeeds
+# even if telnet immediately fails ("Connection refused"), so we must look at
+# what telnet wrote. Returns the spawn_id on success, or -1 if all retries
+# exhausted.
+proc connect_telnet {host port max_attempts} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set sid -1
+    for {set i 0} {$i < $max_attempts} {incr i} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set sid $this_sid
+            break
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    return $sid
+}
+
+proc quit_qemu {monitor_port} {
+    # Best-effort QEMU shutdown via the monitor telnet endpoint. We swallow
+    # errors here — the goal is "leave the host's `gdb -ex run --args qemu`
+    # process unstuck", not perfect cleanliness.
+    set sid [connect_telnet 127.0.0.1 $monitor_port 5]
+    if {$sid == -1} {
+        puts "quit_qemu: could not connect to monitor on port $monitor_port"
+        return
+    }
+    set timeout 30
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            expect -i $sid eof
+        }
+    }
+}
+
+set ok 0
+
+# Connect to the guest serial console — retry while QEMU brings the listener up.
+set serial_sid [connect_telnet 127.0.0.1 $serial_port 60]
+if {$serial_sid == -1} {
+    puts "ERROR: could not connect to serial telnet on port $serial_port after retries"
+    quit_qemu $monitor_port
+    exit 1
+}
+
+# Make subsequent send/expect operate on the validated serial connection.
+set spawn_id $serial_sid
+
+# Send a newline so the kernel/getty re-renders the prompt if the guest is
+# already past the boot output (idempotent, harmless if not).
+send "\r"
+
+# NOTE on regex anchors: we deliberately do NOT anchor to end-of-buffer here.
+# Alpine's busybox shell sends an ESC[6n "report cursor position" sequence right
+# after rendering the prompt — the buffer ends with bytes after `$ `, so an
+# end-anchored regex never matches. Matching `$ ` (or `# `) without `$` works
+# because expect consumes the buffer up through the first match per expect call.
+
+expect {
+    timeout { puts "ERROR: timed out waiting for login prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }
+}
+send "qflex\r"
+
+expect {
+    timeout { puts "ERROR: timed out waiting for password prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[Pp]assword: }
+}
+send "qflex\r"
+
+# Wait for an unprivileged or root shell prompt. Alpine's busybox prompt is
+# typically `$ ` for normal users; allow `# ` for the root variant just in case.
+expect {
+    timeout { puts "ERROR: timed out waiting for shell prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# Run `ls` and capture everything the guest sends back until the prompt returns.
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+set ls_output $expect_out(buffer)
+
+# Persist ls output to a host-visible path so the pytest harness can read it.
+set out_path "$exp_folder/ls_output.txt"
+if {[catch {open $out_path "w"} f]} {
+    puts "ERROR: could not open $out_path for writing: $f"
+} else {
+    puts $f $ls_output
+    close $f
+    puts "wrote ls output to $out_path"
+    set ok 1
+}
+
+# Disconnect from serial; switch to the monitor and quit QEMU cleanly.
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+quit_qemu $monitor_port
+
+if {!$ok} {
+    exit 1
+}

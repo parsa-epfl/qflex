@@ -19,6 +19,11 @@ RUN make MODE=debug qemu-config && make MODE=debug qemu-build
 
 RUN make MODE=debug parallel-qemu-config && make MODE=debug parallel-qemu-build
 
+RUN test -x parallel-qemu-saved/build/qemu-system-aarch64 \
+ && test -x qemu-saved/build/qemu-system-aarch64 \
+ && test -f parallel-qemu-saved/pc-bios/efi-virtio.rom \
+ && test -f parallel-qemu-saved/pc-bios/efi-e1000.rom
+
 # Flexus (timing model) — produces /home/dev/qflex/kraken_out/lib{knotty,semi}kraken.so
 # which set_up_folders() symlinks into each experiment's run/ folder. Conan does the
 # heavy lifting; build-multiple-kraken_vanilla.py wires the per-target wiring.cpp

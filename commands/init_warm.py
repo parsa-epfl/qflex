@@ -64,7 +64,6 @@ class InitWarm(Executor):
         init_cmd = f"""
         gdb -ex run --args ./qemu-system-aarch64 \
         {parser.get_qemu_base_args()} \
-        {parser.quantum_args()} \
         -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init
         """
 

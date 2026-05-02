@@ -4,6 +4,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Coding style for this repo (read first)
+
+Keep edits minimal. The shortest correct version wins.
+
+- **No defensive ceremony.** No `trap`, no try/except, no fallback constants, no error handling for failure modes that can't actually happen here. If you reach for one, you should be able to name the concrete failure it catches.
+- **Don't re-document `--help`.** Shell wrappers and small utilities should not carry multi-paragraph headers explaining what `./qflex <cmd>` already prints. A `set -euo pipefail` + the command itself is usually enough.
+- **Trust simple primitives.** `pushd`/`popd`, `set -euo pipefail`, `exec`, plain bash conditionals — use them as-is, don't wrap them in safety nets.
+- **No hardcoded fallback for values the host already provides.** Read `/run/systemd/resolve/resolv.conf`, the host's `uname -r`, etc. directly, instead of baking site-specific constants into the source.
+- **No `sleep N` as a timeout.** Polling loops with a `sleep N` between checks are fine, but capping them with a count or wall-clock budget so they "fail fast" duplicates whatever timeout already wraps the operation (test timeout, `_exec_in_container` timeout, expect `set timeout`). Strip the cap; let the outer timeout catch hangs.
+- **Before moving / generalising a piece of behaviour, grep for existing callers.** When you take something a few specific files do (e.g. each call site appending `quantum_args()` to its qemu command line) and push it into a shared helper or base method, do a quick `grep -rn` for the symbol or string first. If only a few files match, open them and check whether they already do the thing — otherwise you'll add it twice. Cheap to check, expensive to debug.
+- **Single Responsibility — one place owns each cross-cutting concern.** When you spot the same logic in N places (qemu cmdline assembly, telnet retry, sentinel coordination, …), don't fix the symptom in just one of them. Pick the file that *should* own it (`commands/qemu.py` for qemu args, `commands/executer.py` for dispatch, etc.), put the logic there, and have callers parameterise via constructor / function args rather than reaching into helpers themselves. The recent example: time-discipline (`-quantum` / `-icount`) belongs to `commands/qemu.py` — `boot.py`, `load.py`, `fw.py`, `init_warm.py`, and `multinode.py` should not each manually concatenate `parser.quantum_args()` onto their cmdline. They call one method; the parser decides. SOLID's S — applied as a guideline, not a religion.
+
+These rules apply to both Python and shell. If a defensive construct doesn't catch a real failure mode the user hits today, drop it.
+
 ## What this repo is
 
 QFlex (PARSA-EPFL) is a full-system computer-architecture simulator that performs **timing (microarchitecture) simulation on top of QEMU emulation**, with statistical sampling so long workloads stay tractable. A run goes through four phases:
@@ -41,7 +55,7 @@ Before diving anywhere else, the **five minimum-core areas** that explain the wh
 2. [dep](dep) — Typer CLI for building/starting the Docker dev image (everything else runs inside it).
 3. [typer_inputs/](typer_inputs/) — adapter layer: turns CLI flags into a populated `ExperimentContext`.
 4. [commands/](commands/) — the actual logic. Every CLI subcommand resolves to a class here that takes an `ExperimentContext`, builds a bash command, and runs it via [commands/executer.py](commands/executer.py). [commands/config.py](commands/config.py) defines `ExperimentContext` and is the central data model.
-5. [Makefile](Makefile) — drives Conan/Ninja builds of the submodules and stages their artifacts (`./qemu-saved/`, `./parallel-qemu-saved/`, `./kraken_out/`) for `set_up_folders()` to symlink into per-experiment `run/` dirs.
+5. [Makefile](Makefile) — drives Conan/Ninja builds of the submodules and stages their artifacts into `./parallel-qemu-saved/`, `./qemu-saved/`, and `./kraken_out/` (each `make <name>-build` target ends with `rm -rf <name>-saved && cp -r <name>/build <name>-saved/build`). `set_up_folders()` then `cp -u`'s those staged binaries into each experiment's `run/` dir. The image build runs `make qemu-build` + `make parallel-qemu-build` in both [Dockerfile.qemu.debug](Dockerfile.qemu.debug) and [Dockerfile.qemu.release](Dockerfile.qemu.release), so the `-saved/` dirs are present in every variant (debug, release, base, +worm); the WormCacheQFlex layer inherits them and only adds compatibility symlinks. Each qemu Dockerfile asserts the binaries actually landed (`RUN test -x …-saved/build/qemu-system-aarch64`) so a silently-failed compile fails the image build instead of leaking through.
 
 If a path of investigation doesn't touch one of these five, you're probably looking at vendored or auxiliary code.
 
@@ -81,6 +95,10 @@ make build-docs
 The [build](build) shell script is an alternative entry point (`./build <sim>` where `<sim>` ∈ `knottykraken`, `semikraken`, `cq`/`qemu`, `q`, `docker`); the Makefile targets cover the same ground and are preferred.
 
 A pytest suite lives under [tests/](tests/), one file per pipeline component (`test_boot.py`, `test_load.py`, …, `test_run_partition.py`). Default `make test` ([Makefile](Makefile)) runs only the dry-run-based tests — fast and hermetic. A separate set of real-run files ([tests/test_real_runs.py](tests/test_real_runs.py), [tests/test_real_runs_savevm.py](tests/test_real_runs_savevm.py), [tests/test_real_runs_docker_image.py](tests/test_real_runs_docker_image.py)) drive `./dep start-docker --background` + `./dep exec` to actually run qflex inside the dev container; gated behind `QFLEX_REAL_RUN_TESTS=1` so default `make test` skips them. To run a single real-mode test or file, use `make test-real-one TEST=tests/test_real_runs_docker_image.py[::test_name]`. See the `testing` and `dep` / `run-in-dev-container` skills for the conventions used there (capture stdout, parse `[py-wait]` / `[py-touch]` / `[bash]` / `[tmux]` markers, master-first invariants, and the start-bg → exec → stop-bg session pattern).
+
+**ALWAYS ASK BEFORE TRIGGERING REAL-RUN TESTS.** Anything under `make test-real-one` / `QFLEX_REAL_RUN_TESTS=1` boots actual QEMU under docker — minutes per test, mutates the host's `/dev/shm`, writes large qcow2 deltas, may leave a `qflex_test` container running, and can collide with other docker work the user is doing. Treat them as non-reversible side-effecting operations: confirm with the user before running, then run **one test at a time** so progress is visible and a hang is easy to abort. The default `make test` (dry-run, hermetic) can always be run without asking.
+
+**TESTS MUST EXERCISE THE CODE UNDER TEST.** Never invoke binaries (qemu, flexus, kraken libs) or other artifacts directly from a test to assert behaviour or "probe" capabilities — that duplicates logic that already lives in the CLI / [commands/](commands/) classes and gives a separate, can-disagree path. Real-run tests drive `./qflex <subcommand>` (or `./dep exec ...`) so they walk the same `data_class_wrap → create_experiment_context → Executor.execute → cmd()` pipeline production does. Dry-run / unit tests import the command class (`Boot`, `RunIdxCommand`, …) or factory directly. If a real-run test fails because a binary is stale or missing, that's the *correct* failure signal — surface the actual error from the real code path, don't paper over it with a hand-rolled check. Same applies to fixtures: a fixture that subprocess-runs a binary to gate skip behaviour is a smell; gate on env / docker availability / repo state instead.
 
 ## Pipeline (the `./qflex` subcommands)
 
@@ -274,7 +292,7 @@ Adding a new pipeline step almost always means: add a class that subclasses `Exe
 
 `ExperimentContext.set_up_folders()` ([commands/config.py:245](commands/config.py#L245)) creates a self-contained tree under `<mounting_folder>/experiments/<experiment_name>[-<timestamp>]/` with subdirs `bin/ cfg/ flags/ lib/ run/ scripts/ images/`. **`set_up_folders()` (and `setup_nic_args()`) is called by the executor right before the leaf bash runs** — via `ExperimentContext.prepare_for_execution()` from `Executor._execute_leaf` — **not** by the factory. `create_experiment_context` is pure: constructing the YAML/DI graph builds every sub-experiment's context object up front but doesn't materialise any folder until that leaf actually runs. It also:
 
-- Symlinks/copies QEMU binaries from `parallel-qemu-saved/build/qemu-system-aarch64` (becomes `qemu-system-aarch64` — the FW/emulation binary) and `qemu-saved/build/qemu-system-aarch64` (becomes `vanilla-qemu-system-aarch64` — the timing binary) into `run/`.
+- Copies QEMU binaries from `parallel-qemu-saved/build/qemu-system-aarch64` (→ `run/qemu-system-aarch64`, the FW/emulation binary) and `qemu-saved/build/qemu-system-aarch64` (→ `run/vanilla-qemu-system-aarch64`, the timing binary). The `-saved/` dirs are populated by the Makefile (`make parallel-qemu-build` / `make qemu-build` end with `rm -rf <name>-saved && cp -r <name>/build <name>-saved/build`) and baked into the docker image during build. **If you bump parallel-qemu / qemu source you must rebuild the docker image (`./dep build-docker --debug` / `--release`, optionally with `--worm`) — the `-saved/` dirs are docker-image layers, not host-mounted, so a host-side rebuild won't reach them.** The qemu Dockerfiles assert the binaries actually landed so a broken build fails the image build, not the runtime.
 - Hard-codes the kraken libs path to `/home/dev/qflex/kraken_out/lib{knotty,semi}kraken.so` ([commands/config.py:323](commands/config.py#L323)) — this matches the in-container layout but will fail on a host build.
 - Copies [partition.py](partition.py) and [result.py](result.py) into the experiment folder. These are run from inside the experiment dir, not the repo root.
 
@@ -291,6 +309,13 @@ Inter-node traffic flows over POSIX shared memory (`/dev/shm/pdes_<from>_to_<to>
 Each node also gets its own copy of the disk image (suffix `-node<N>`) via `copy_image_for_node()`.
 
 For `boot` and `load` specifically, two opt-in per-leaf modes let the user actually interact with QEMU under multi-node: `interaction_script: <path>` (Path A — drives QEMU automatically via expect against telnet serial + telnet monitor; auto-enables both telnet endpoints) and `interactive_tmux: true` (Path B — opens one tmux window per leaf via `libtmux`; the executor blocks until QEMU exits in every window). See the `boot-load-interactive` skill for the channel-by-channel mental model.
+
+**Critical invariant for `interaction_script` under multi-node: the script that runs on the master (node 0) is NOT the same script that runs on non-master nodes. Different work, different YAML wiring per leaf.** Concretely:
+
+- **Only the master issues `savevm` over its monitor.** PDES `savevm` triggers a `DRAIN_START` / `DRAIN_END` coordination across every node; each node's CPU+memory state is persisted as part of the distributed snapshot. If a non-master also sends `savevm`, you double-drive the drain and produce a corrupt snapshot. If no node sends it, nothing happens.
+- **Non-master nodes must STAY ALIVE during the master's savevm.** Their QEMU processes participate in the drain; quitting before the master finishes tears down the PDES wire mid-snapshot. The standard pattern is: master writes a sentinel file (e.g. `<dirname $EXP_FOLDER>/savevm_done.flag`) after `savevm` returns, and every non-master script polls for that file before quitting.
+- **Same applies to other monitor-issued, drain-coordinated operations** — anything that walks the PDES wire (currently `savevm`; potentially future `loadvm`-side or sync commands) is master-only by convention.
+- The `dc-multi-savevm-create.yaml` fixture in [conf/DC/](conf/DC/) is the canonical example: node 0 → `boot_create_and_savevm_master.exp`, node 1 → `boot_create_and_wait.exp`. Never wire the same `interaction_script` to both leaves when a snapshot is involved.
 
 ### Code generation (Jinja templates)
 

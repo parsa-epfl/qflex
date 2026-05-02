@@ -95,6 +95,7 @@ WORKDIR /home/dev/qflex
 
 
 
+COPY ./requirements.txt /home/dev/qflex/requirements.txt
 RUN pip install -r requirements.txt
 COPY  ./commands /home/dev/qflex/commands
 COPY ./typer_inputs /home/dev/qflex/typer_inputs

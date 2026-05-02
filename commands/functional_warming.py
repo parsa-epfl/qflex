@@ -26,7 +26,6 @@ class FunctionalWarming(Executor):
         fw_cmd = f"""
             gdb -ex run --args ./qemu-system-aarch64 \
             {parser.get_qemu_base_args()} \
-            {parser.quantum_args()} \
             -plugin ../lib/libworm_cache.so,mode=warm,init_threshold={sampling_interval},interval={sampling_interval},count={self.sample_size} \
         """
         tock_command = " tock=$(($(date +%s%N) / 1000000)) "

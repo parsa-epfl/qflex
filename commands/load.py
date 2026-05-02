@@ -23,12 +23,12 @@ class Load(Executor):
         if not self.vanilla:
             load_cmd = (
                 f"gdb -ex run --args ./qemu-system-aarch64 "
-                f"{parser.get_qemu_base_args()} {parser.quantum_args()}"
+                f"{parser.get_qemu_base_args()}"
             )
         else:
             load_cmd = (
                 f"./vanilla-qemu-system-aarch64 "
-                f"{parser.get_qemu_base_args()} -icount shift=0,align=off,sleep=off"
+                f"{parser.get_qemu_base_args()}"
             )
 
         if not exp.interaction_script:

@@ -166,6 +166,7 @@ class DockerStarter(Executor):
         -v {cwd}/experiments:/home/dev/qflex/experiments \
         -v {cwd}/conf:/home/dev/qflex/conf \
         -v {cwd}/qflex:/home/dev/qflex/qflex \
+        -v {cwd}/requirements.txt:/home/dev/qflex/requirements.txt \
         {sample_scripts} \
         {tests_mount} \
         {micro_scripts} \

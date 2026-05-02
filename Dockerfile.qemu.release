@@ -13,6 +13,11 @@ WORKDIR /home/dev/qflex
 RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw make MODE=release qemu-config && make MODE=release qemu-build
 RUN --mount=type=bind,source=./parallel-qemu,target=/home/dev/qflex/parallel-qemu,rw make MODE=release parallel-qemu-config && make MODE=release parallel-qemu-build
 
+RUN test -x parallel-qemu-saved/build/qemu-system-aarch64 \
+ && test -x qemu-saved/build/qemu-system-aarch64 \
+ && test -f parallel-qemu-saved/pc-bios/efi-virtio.rom \
+ && test -f parallel-qemu-saved/pc-bios/efi-e1000.rom
+
 # Flexus (timing model) — bind-mounted like qemu so the source tree isn't baked
 # into the image. Output kraken_out/ is in the layer (not the bind mount), so the
 # .so files persist and set_up_folders() can symlink them into experiments later.

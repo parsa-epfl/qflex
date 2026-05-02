@@ -1,0 +1,7 @@
+extends: dc
+
+components:
+  experiment_context:
+    _target_: commands.config.create_experiment_context
+    interactive_tmux: true   # Path B: requires `tmux new -s qflex` first.
+    experiment_name: data-caching_yaml_node_single_interactive

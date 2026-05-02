@@ -388,30 +388,3 @@ def dev_container():
         )
 
 
-@pytest.fixture(scope="session")
-def parallel_qemu_supports_latencyns(dev_container) -> bool:
-    """Probe whether the parallel-qemu binary baked into the running dev container
-    accepts the `latencyns` parameter on the `pdes` netdev. Older pre-built images
-    (≲ Nov 2024) reject it with "Invalid parameter 'latencyns'" — the multi-node
-    real-run tests can't work on those images until the binary is rebuilt
-    (`./dep build-docker --worm --debug` from the repo root, or rebuild
-    parallel-qemu inside the running container).
-
-    Returns True if the param is recognized, False otherwise. Multi-node real-run
-    tests should `pytest.skip(...)` when False rather than fail confusingly."""
-    qemu_bin = "/home/dev/qflex/parallel-qemu-saved/build/qemu-system-aarch64"
-    # qemu errors on cmdline parsing BEFORE doing anything heavyweight, so this
-    # exits in milliseconds. The trailing `; true` swallows the always-non-zero
-    # rc — we care about the stderr signature, not the exit code.
-    probe_cmd = (
-        f"{qemu_bin} "
-        "-netdev pdes,id=probe,shm-send=/probe_a,shm-recv=/probe_b,"
-        "latencyns=1,sync=true,master=true 2>&1 | head -20; true"
-    )
-    r = subprocess.run(
-        ["./dep", "exec", "--container-name", TEST_CONTAINER_NAME,
-         "--command", probe_cmd],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30,
-    )
-    output = (r.stdout or "") + (r.stderr or "")
-    return "Invalid parameter 'latencyns'" not in output

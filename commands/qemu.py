@@ -103,8 +103,12 @@ class QemuCommonArgParser:
         {self.simulation_context.qemu_nic} \
         {telnet_monitor_arg} \
         {self.get_stdio()} -nographic -no-reboot """
-        
-        
+
+        # Time discipline (`-quantum` / `-icount`) is part of the qemu cmdline
+        # this parser owns. Callers do not — and must not — append their own;
+        # they get the right one for this parser's binary type via dispatch.
+        qemu_args += self.quantum_args()
+
         print("="*50+"QEMU command arguments:"+"="*50)
         print(qemu_args)
         return qemu_args
@@ -147,17 +151,17 @@ class VanillaQemuArgParser(QemuCommonArgParser):
         return f'   -icount shift=0,align=off,sleep=off '
     
     def get_qemu_base_args(self) -> str:
+        # super() already appends self.quantum_args() (overridden above to
+        # `-icount …` for the timing binary), so we only add the
+        # timing-specific pieces here.
         base_args = super().get_qemu_base_args()
-        # loadvm and image are already in
-        quantum_command = self.quantum_args()
         single_step_command = f""" -singlestep -d nochain """
         log_command = f""" -D "qemu-timing.log" """
         lib_qflex_command = f""" -libqflex """
         lib_name = "libsemikraken" if self.double_cores else "libknottykraken"
         mode_command = f""" mode=timing,lib-path=../../lib/"{lib_name}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:100000,debug=crit,ckpt-path=./snapshot_{self.idx}-flexus,freq=2 """
-        
+
         qemu_args = base_args + \
-        quantum_command + \
         single_step_command + \
         log_command + \
         lib_qflex_command + \
