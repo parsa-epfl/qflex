@@ -80,7 +80,7 @@ make build-docs
 
 The [build](build) shell script is an alternative entry point (`./build <sim>` where `<sim>` ∈ `knottykraken`, `semikraken`, `cq`/`qemu`, `q`, `docker`); the Makefile targets cover the same ground and are preferred.
 
-There is **no test suite** in this repo. Don't fabricate `pytest` or `make test` instructions.
+A pytest suite lives under [tests/](tests/), one file per pipeline component (`test_boot.py`, `test_load.py`, …, `test_run_partition.py`). Default `make test` ([Makefile](Makefile)) runs only the dry-run-based tests — fast and hermetic. A separate [tests/test_real_runs.py](tests/test_real_runs.py) drives `./dep start-docker --background` + `./dep exec` to actually run qflex inside the dev container; gated behind `QFLEX_REAL_RUN_TESTS=1` so default `make test` skips them. See the `testing` and `dep` / `run-in-dev-container` skills for the conventions used there (capture stdout, parse `[py-wait]` / `[py-touch]` / `[bash]` / `[tmux]` markers, master-first invariants, and the start-bg → exec → stop-bg session pattern).
 
 ## Pipeline (the `./qflex` subcommands)
 
@@ -264,13 +264,15 @@ If you add a new pipeline command, follow the existing pattern — don't try to 
 
 ### Execution model
 
-Every command class in [commands/](commands/) ultimately ends up emitting a bash command that drives one of the submodules (a QEMU binary, a Flexus run script, etc.). The shared mechanism is [commands/executer.py](commands/executer.py): it defines `Executor` (abstract), `SequentialGroupExecutor`, and `ParallelExecutor`. Each command returns a string (or list of strings joined by ` && `) from `cmd()` and the base `execute()` runs it via `subprocess.run(shell=True)`. `ParallelExecutor` uses `multiprocessing.Pool` and **terminates the pool on first failure**. `run_in_background=True` is currently `NotImplementedError` — don't pass it.
+Every command class in [commands/](commands/) ultimately ends up emitting a bash command that drives one of the submodules (a QEMU binary, a Flexus run script, etc.). The shared mechanism is [commands/executer.py](commands/executer.py): it defines `Executor` (abstract), `SimpleCMDExecutor`, and `SequentialGroupExecutor`. Each command returns a string (or list of strings joined by ` && `) from `cmd()` and the base `execute()` runs it via `subprocess.run(shell=True)`. `run_in_background=True` is currently `NotImplementedError` — don't pass it.
 
-Adding a new pipeline step almost always means: add a class that subclasses `Executor`, takes `ExperimentContext` in its constructor, builds the shell invocation in `cmd()`, and is exposed by a thin `@app.command()` wrapper in [qflex](qflex).
+`Executor.execute()` dispatches on `ExperimentContext.has_sub_experiments()`: when the context carries a list of `sub_experiments` (multi-experiment / multi-node), the base spawns one `multiprocessing.Process` per sub, mutates `self.experiment_context = sub` in the child process, and re-enters `execute()` recursively. This is the single mechanism for every parallelism axis (multi-node × per-partition × …) — the legacy `ParallelExecutor` class was removed in favour of this. Per-leaf ordering is enforced by Python-side sentinel files (`<group>/.sentinels/<phase>_part<P>_idx<I>_node<N>.{started,done}`) plus an `ExperimentContext.wait_for_nodes: list[int]` field that lists upstream nodes to block on. See the `executor` and `multi-node` skills for the full mechanics.
+
+Adding a new pipeline step almost always means: add a class that subclasses `Executor`, takes `ExperimentContext` in its constructor, builds the shell invocation in `cmd()` from the **current** `self.experiment_context` (no caching of context-derived state in `__init__` — multi-experiment dispatch mutates the context per sub), and is exposed by a thin `@app.command()` wrapper in [qflex](qflex).
 
 ### Per-experiment filesystem layout
 
-`ExperimentContext.set_up_folders()` ([commands/config.py:245](commands/config.py#L245)) creates a self-contained tree under `<mounting_folder>/experiments/<experiment_name>[-<timestamp>]/` with subdirs `bin/ cfg/ flags/ lib/ run/ scripts/ images/`. It also:
+`ExperimentContext.set_up_folders()` ([commands/config.py:245](commands/config.py#L245)) creates a self-contained tree under `<mounting_folder>/experiments/<experiment_name>[-<timestamp>]/` with subdirs `bin/ cfg/ flags/ lib/ run/ scripts/ images/`. **`set_up_folders()` (and `setup_nic_args()`) is called by the executor right before the leaf bash runs** — via `ExperimentContext.prepare_for_execution()` from `Executor._execute_leaf` — **not** by the factory. `create_experiment_context` is pure: constructing the YAML/DI graph builds every sub-experiment's context object up front but doesn't materialise any folder until that leaf actually runs. It also:
 
 - Symlinks/copies QEMU binaries from `parallel-qemu-saved/build/qemu-system-aarch64` (becomes `qemu-system-aarch64` — the FW/emulation binary) and `qemu-saved/build/qemu-system-aarch64` (becomes `vanilla-qemu-system-aarch64` — the timing binary) into `run/`.
 - Hard-codes the kraken libs path to `/home/dev/qflex/kraken_out/lib{knotty,semi}kraken.so` ([commands/config.py:323](commands/config.py#L323)) — this matches the in-container layout but will fail on a host build.
@@ -282,9 +284,13 @@ If `keep_experiment_unique=True` (default), a `-YYYYMMDD-HHMMSS` suffix is appen
 
 A node has `node_number >= 0` (0 = master); single-node uses `-1`. Connectivity is described by three parallel lists on `ExperimentContext`: `neighbor_node_list`, `latencies_ns_list`, `syncs_list` (`'true'`/`'false'` strings, not bools), plus `pdes_net_devs` (`'e1000'` or `'virtio-net-pci'`). They must all be the same length and `node_number` must be set when any are non-empty (asserted in `create_experiment_context`).
 
+A single `./qflex <phase> -c <multi.yaml>` now runs every node in the multi-node setup: the YAML places per-node leaves under the unnamed `experiment_context` group component as `_deps_.sub_experiments`, and the executor's `_execute_group` fans them out via `multiprocessing.Process`. Per-leaf ordering uses Python-side sentinels (master sets `wait_for_nodes=[]`, node 1 sets `[0]`, etc.); the sentinel basename includes `_part<P>_idx<I>` for per-(partition, idx) coordination at the `RunIdxCommand` granularity. See [conf/DC/dc-multi.yaml](conf/DC/dc-multi.yaml) for the canonical example and the `multi-node` skill for the full design.
+
 Inter-node traffic flows over POSIX shared memory (`/dev/shm/pdes_<from>_to_<to>...`), wired in by `ExperimentContext.setup_nic_args()`. The master node is responsible for clearing stale shm files before launch — non-master nodes do not. After a crashed run, [clean_up.sh](clean_up.sh) removes `/dev/shm/pdes*` and kills lingering qemu processes; use it before retrying.
 
 Each node also gets its own copy of the disk image (suffix `-node<N>`) via `copy_image_for_node()`.
+
+For `boot` and `load` specifically, two opt-in per-leaf modes let the user actually interact with QEMU under multi-node: `interaction_script: <path>` (Path A — drives QEMU automatically via expect against telnet serial + telnet monitor; auto-enables both telnet endpoints) and `interactive_tmux: true` (Path B — opens one tmux window per leaf via `libtmux`; the executor blocks until QEMU exits in every window). See the `boot-load-interactive` skill for the channel-by-channel mental model.
 
 ### Code generation (Jinja templates)
 

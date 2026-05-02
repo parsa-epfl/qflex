@@ -33,6 +33,11 @@ def _multi_experiment_target(executor: "Executor", sub: ExperimentContext, kw: d
 
 
 class Executor(abc.ABC):
+    # Class-level opt-in for the interactive-tmux dispatch path. False on the
+    # base class so phases like fw / run-partition ignore the field even if a
+    # context with `interactive_tmux=True` flows into them. Boot and Load set
+    # this to True.
+    SUPPORTS_INTERACTIVE: bool = False
 
     @abc.abstractmethod
     def cmd(self) -> str:
@@ -214,11 +219,24 @@ class Executor(abc.ABC):
         exp = self.get_experiment()
 
         if _is_dry_run(dry_run):
+            # Run the pure (no-fs) part of leaf prep so the printed bash reflects
+            # auto-computed ports / auto-flipped flags. The fs side effects
+            # (set_up_folders, shm cleanup, qemu_nic mutation) are still skipped.
+            if exp is not None:
+                exp.compute_runtime_settings()
             self._print_dry_run_actions(cwd, sentinel_dir, log_path, err_path)
             return True
 
         if run_in_background:
             raise NotImplementedError("run_in_background is not implemented yet.")
+
+        # Path B (interactive_tmux): only available on Boot/Load (gated by
+        # SUPPORTS_INTERACTIVE). Sends the bash to a fresh tmux window per leaf,
+        # then blocks until the user has actually quit QEMU in that window.
+        if (self.SUPPORTS_INTERACTIVE
+                and exp is not None
+                and exp.interactive_tmux):
+            return self._execute_in_tmux(sentinel_dir, log_path, err_path)
 
         # Block until upstream nodes have started their phase. Python-side polling.
         self._wait_for_sentinels(sentinel_dir)
@@ -246,6 +264,62 @@ class Executor(abc.ABC):
             return True
         return False
 
+    def _execute_in_tmux(self, sentinel_dir: str, log_path: str, err_path: str) -> bool:
+        """Path B: open one tmux window per leaf and send the bash to it. The user
+        attaches manually and quits QEMU when finished; we poll for the .done
+        sentinel that the bash itself touches at the end."""
+        # libtmux is an optional dependency; lazy-import so non-interactive runs
+        # don't pay the cost or require the package.
+        import libtmux  # type: ignore
+
+        exp = self.get_experiment()
+        # Same Python-side dance as the subprocess path.
+        self._wait_for_sentinels(sentinel_dir)
+        if exp is not None:
+            exp.prepare_for_execution()
+        self._touch_sentinel(sentinel_dir, "started")
+
+        server = libtmux.Server()
+        if not server.sessions:
+            raise RuntimeError(
+                "interactive_tmux requires a running tmux server — "
+                "run `tmux new -s qflex` first, then re-run."
+            )
+        # If we're inside a tmux session already, target it; otherwise pick the
+        # first existing session. We never silently spawn a server.
+        target_session_id = os.environ.get("TMUX")
+        session = None
+        if target_session_id:
+            for s in server.sessions:
+                # TMUX env var is `<socket-path>,<server-pid>,<session-id>`; just
+                # match whatever the active session is.
+                if s.session_id and s.session_id in target_session_id:
+                    session = s
+                    break
+        if session is None:
+            session = server.sessions[0]
+
+        window_name = f"{self._phase_name()}-node{exp.node_number}" if exp else self._phase_name()
+        window = session.new_window(window_name=window_name, attach=False)
+        pane = window.panes[0]
+
+        # Append the .done sentinel touch so we know exactly when QEMU exits.
+        # _build_bash emits the unredirected bash here — output stays in the
+        # pane buffer for the user to read live.
+        bash = self._build_bash(None, None)
+        done_marker = self._sentinel_path(sentinel_dir, exp.node_number, "done") if exp else None
+        if done_marker:
+            bash = f"{bash}; touch {done_marker}"
+        pane.send_keys(bash, enter=True)
+
+        # Block until the user has finished interacting and QEMU exited.
+        if done_marker:
+            while not os.path.exists(done_marker):
+                time.sleep(0.5)
+
+        self.clean_up()
+        return True
+
     def _print_dry_run_actions(self, cwd: str, sentinel_dir: str,
                                log_path: str, err_path: str) -> None:
         """Print the full sequence (Python wait/touch + bash + done-touch) so dry-run
@@ -255,13 +329,31 @@ class Executor(abc.ABC):
         that parses dry-run output line-by-line."""
         lines = [f"[dry-run] {self.__class__.__name__} (cwd={cwd}):"]
         exp = self.get_experiment()
+        in_tmux_mode = (
+            self.SUPPORTS_INTERACTIVE
+            and exp is not None
+            and exp.interactive_tmux
+        )
         if sentinel_dir is not None and exp is not None:
             for n in exp.wait_for_nodes:
                 lines.append(f"  [py-wait]  {self._sentinel_path(sentinel_dir, n, 'started')}")
             lines.append(f"  [py-touch] {self._sentinel_path(sentinel_dir, exp.node_number, 'started')}")
-        bash = self._build_bash(log_path, err_path).replace("\n", "\\n")
+        if in_tmux_mode:
+            window_name = f"{self._phase_name()}-node{exp.node_number}"
+            lines.append(f"  [tmux]     would open new window '{window_name}' and send-keys the bash")
+        # Tmux mode runs unredirected bash inside the pane; subprocess mode applies log/err redirect.
+        bash_log = None if in_tmux_mode else log_path
+        bash_err = None if in_tmux_mode else err_path
+        bash = self._build_bash(bash_log, bash_err).replace("\n", "\\n")
+        if in_tmux_mode and sentinel_dir is not None and exp is not None:
+            # Mirror the runtime: the tmux dispatch appends a `; touch <done>` to
+            # the bash so Python can poll for QEMU exit.
+            done_marker = self._sentinel_path(sentinel_dir, exp.node_number, 'done')
+            bash = f"{bash}; touch {done_marker}"
         lines.append(f"  [bash]     {bash}")
-        if sentinel_dir is not None and exp is not None:
+        if in_tmux_mode and sentinel_dir is not None and exp is not None:
+            lines.append(f"  [py-poll]  {self._sentinel_path(sentinel_dir, exp.node_number, 'done')}")
+        elif sentinel_dir is not None and exp is not None:
             lines.append(f"  [py-touch] {self._sentinel_path(sentinel_dir, exp.node_number, 'done')}")
         print("\n".join(lines))
 

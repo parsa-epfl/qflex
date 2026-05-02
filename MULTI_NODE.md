@@ -9,7 +9,7 @@ For the four-phase pipeline (emulation → FW → sampling-unit selection → ti
 Multi-node QFlex = **N independent QEMU processes**, one per simulated machine, all running on the same host, glued together host-side by **PDES (Parallel Discrete-Event Simulation)** via POSIX shared-memory rings under `/dev/shm/pdes_*`. Inter-machine guest packets never touch a real OS network stack — they travel through shm.
 
 - **Node 0 is the master.** `is_master_node()` ⇔ `node_number == 0`. Single-node uses `node_number == -1`.
-- **Master must boot first.** It clears stale `/dev/shm/pdes*` files at startup; non-master nodes do not. If a non-master starts first, you silently reuse a previous run's state.
+- **Master must boot first.** It clears stale `/dev/shm/pdes*` files at startup; non-master nodes do not. If a non-master starts first, you silently reuse a previous run's state. This is now enforced in Python via per-leaf sentinel files plus the `wait_for_nodes: list[int]` field — see [Python-side dispatch](#python-side-dispatch-sub_experiments--mpprocess) below.
 - The same `net/pdes-*.c` source files exist in **both** [parallel-qemu/](parallel-qemu/) and [qemu/](qemu/). Multi-node works in both functional warming (parallel-qemu) and timing simulation (qemu); only one fork is in play at a time, depending on phase.
 - Each node also gets its own copy of the qcow2 disk image, suffixed `-node<N>` ([commands/config.py:185](commands/config.py#L185) `copy_image_for_node`).
 
@@ -157,16 +157,34 @@ One paragraph each. Each submodule has its own `MULTI_NODE.md` for the full stor
 - **[flexus/](flexus/)** ([MULTI_NODE.md](flexus/MULTI_NODE.md)) — **is the clock** in the timing phase. Implements pause/resume/is_paused so PDES (via the middleware) can stall it on a sync boundary. Cycle count from `tick` is what becomes virtual time for PDES.
 - **[WormCacheQFlex/](WormCacheQFlex/)** ([MULTI_NODE.md](WormCacheQFlex/MULTI_NODE.md)) — multi-node-naive. The only multi-node-relevant moment is signalling "snapshot now" and yielding to PDES; PDES picks the quantum-aligned virtual time the snapshot lands at. NUMA in WormCache code is intra-chip, not multi-node.
 
+## Python-side dispatch: `sub_experiments` + `mp.Process`
+
+A single `./qflex <phase> -c conf/DC/dc-multi.yaml` now runs every node in one invocation. The YAML's unnamed `experiment_context` (the group node) carries `_deps_.sub_experiments` listing the per-node leaves; the DI graph builds them all up front. At execute time, `Executor._execute_group` ([commands/executer.py](commands/executer.py)) spawns one `multiprocessing.Process` per sub-experiment whose target sets `executor.experiment_context = sub` and re-enters `executor.execute()`. Each child process re-uses the parent executor (pickled via `mp.Process`) — no executor cloning, no kwargs stashing, no `ParallelExecutor` (that class was removed; this is the universal mechanism for any axis of parallelism).
+
+Per-leaf ordering uses Python-side sentinels under `<group_folder>/.sentinels/`. Each leaf's `_execute_leaf`:
+
+1. Polls `wait_for_nodes` upstream `.started` sentinels (`_wait_for_sentinels`).
+2. Calls `experiment_context.prepare_for_execution()` (folder setup + nic args; replaces the side effects that used to live in `create_experiment_context`).
+3. Touches its own `<phase>_part<P>_idx<I>_node<N>.started` sentinel.
+4. Runs the bash via `subprocess.run`.
+5. Touches `.done` on success.
+
+The `_part<P>_idx<I>` suffixes appear when `partition_number` / `idx` are set on the context — so for `run-partition`, two nodes coordinate per-(partition, idx) leaf pair, not per-phase. `wait_for_nodes` is a generic primitive: master sets `[]`, node 1 sets `[0]`, node 3 can set `[2]`, etc. — chained orderings without code changes.
+
+Both `RunPartitionCommand` (per-partition fan-out) and `RunSinglePartitionCommand` (per-idx sequential) now route through this same machinery. The full tree at `./qflex run-partition -c <multi.yaml>` is `top group → node ctx (per-partition fan-out) → partition ctx (per-idx sequential) → idx ctx (RunIdxCommand leaf bash)`.
+
+See [conf/DC/dc-multi.yaml](conf/DC/dc-multi.yaml) for the canonical YAML, [tests/test_multi_node_ordering.py](tests/test_multi_node_ordering.py) for the assertions about ordering, and the `executor` and `multi-node` skills for the implementation details.
+
 ## Operational gotchas
 
-- **Master must boot first.** Otherwise non-master nodes will silently reuse stale shm rings from a previous run.
+- **Master must boot first.** Otherwise non-master nodes will silently reuse stale shm rings from a previous run. Enforced in Python now via the `wait_for_nodes` sentinel mechanism above; the master's leaf touches its `.started` sentinel before any waiter can proceed.
 - **`--shm-size=128g` and `--pid=host`** on the parent's docker run are required for multi-node. Smaller shm = silent breakage.
 - **After a crash, run `./clean_up.sh`** before retrying — it removes `/dev/shm/pdes*` and kills lingering qemu processes.
-- **No automation for node launch.** `./qflex multi` resolves to [commands/multinode.py](commands/multinode.py), which today is a thin wrapper around `gdb --args ./qemu-system-aarch64 ...` — i.e. it launches a single node's parallel-qemu under gdb. Each node has to be started separately by the user (and master first).
+- **One `./qflex` invocation per phase, all nodes.** Use a multi-node YAML (see [conf/DC/dc-multi.yaml](conf/DC/dc-multi.yaml)) and the executor fans out automatically. The legacy `./qflex multi` ([commands/multinode.py](commands/multinode.py)) is a single-node `gdb --args ./qemu-system-aarch64 ...` wrapper — kept for one-off debugging, but the dispatch path is the recommended way.
 - **e1000 vs virtio-net-pci.** virtio-net-pci is cheaper — less I/O work simulated/emulated. Pick e1000 for higher fidelity, virtio for speed.
 - **Flag types are strings.** `syncs_list` entries are `'true'` / `'false'` strings, not Python bools.
 - **MAC addresses are derived from `node_number`.** [commands/config.py:373](commands/config.py#L373): `mac=52:54:00:aa:bb:<node_number*10 + i>` — guarantees uniqueness across nodes for up to 10 neighbours per node.
-- **Telnet monitor port:** if `use_telnet_monitor` is on, the port defaults to `55558 + node_number` so multiple nodes don't collide.
+- **Telnet monitor port:** if `use_telnet_monitor` is on, the port defaults to `55558 + node_number` so multiple nodes don't collide. For Path A (interaction_script on boot/load), a separate **serial** telnet port defaults to `55600 + node_number` — see the `boot-load-interactive` skill for the rationale (monitor-on-telnet for savevm; serial-on-telnet for the guest console; never multiplexed via Ctrl-A C when an `expect` script is in the loop).
 
 ## See also
 

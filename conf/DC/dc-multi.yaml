@@ -1,5 +1,18 @@
 extends: dc
 
+# Optional per-leaf hooks for boot/load only (other phases ignore these):
+#
+#   experiment_context_node_0:
+#     interaction_script: ./scripts/setup_node_0.exp   # Path A: drive QEMU automatically.
+#                                                       # Receives TELNET_SERIAL_PORT,
+#                                                       # TELNET_MONITOR_PORT, SERIAL_LOG_PATH,
+#                                                       # EXP_FOLDER, NODE_NUMBER as env vars.
+#                                                       # Auto-enables monitor + serial on telnet.
+#     # OR
+#     interactive_tmux: true                            # Path B: open a fresh tmux window per leaf
+#                                                       # (requires `tmux new -s qflex` running).
+#                                                       # Executor blocks until QEMU exits in each window.
+#
 # Leaf-defaults anchor reused by every sub-experiment component below.
 # Top-level keys other than `components:` and `extends:` are ignored by the
 # DI loader, so this is just a place to hang a YAML anchor.

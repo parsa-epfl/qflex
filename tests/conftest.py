@@ -24,12 +24,13 @@ if REPO_ROOT not in sys.path:
 @dataclass
 class DryRunBlock:
     """One [dry-run] entry parsed out of stdout."""
-    cls_name: str          # e.g. "Boot", "RunIdxCommand"
-    waits: list[str]       # full sentinel paths from [py-wait]
-    started: Optional[str] # sentinel path from the .started [py-touch]
-    bash: str              # the [bash] line
-    done: Optional[str]    # sentinel path from the .done [py-touch]
-    raw: str               # the unparsed block text
+    cls_name: str            # e.g. "Boot", "RunIdxCommand"
+    waits: list[str]         # full sentinel paths from [py-wait]
+    started: Optional[str]   # sentinel path from the .started [py-touch]
+    bash: str                # the [bash] line
+    done: Optional[str]      # sentinel path from the .done [py-touch] OR [py-poll] (tmux mode)
+    tmux_window: Optional[str] = None  # window name from [tmux] marker (Path B)
+    raw: str = ""            # the unparsed block text
 
     @property
     def waits_basenames(self) -> list[str]:
@@ -59,6 +60,7 @@ def parse_dry_run_blocks(stdout: str) -> list[DryRunBlock]:
         started = None
         bash = ""
         done = None
+        tmux_window = None
         raw_lines = [lines[i]]
         i += 1
         while i < len(lines) and lines[i].startswith("  "):
@@ -72,6 +74,14 @@ def parse_dry_run_blocks(stdout: str) -> list[DryRunBlock]:
                     started = path
                 elif path.endswith(".done"):
                     done = path
+            elif stripped.startswith("[py-poll]"):
+                # tmux mode: Python polls for the sentinel that the bash itself touches.
+                done = stripped[len("[py-poll]"):].strip()
+            elif stripped.startswith("[tmux]"):
+                rest = stripped[len("[tmux]"):].strip()
+                # Extract the window name from "would open new window 'Foo' and ..."
+                wm = re.search(r"window '([^']+)'", rest)
+                tmux_window = wm.group(1) if wm else rest
             elif stripped.startswith("[bash]"):
                 bash = stripped[len("[bash]"):].strip()
             i += 1
@@ -81,6 +91,7 @@ def parse_dry_run_blocks(stdout: str) -> list[DryRunBlock]:
             started=started,
             bash=bash,
             done=done,
+            tmux_window=tmux_window,
             raw="\n".join(raw_lines),
         ))
     return blocks
@@ -100,6 +111,93 @@ def capture_dry_run_stdout():
             os.environ.pop("QFLEX_DRY_RUN", None)
         else:
             os.environ["QFLEX_DRY_RUN"] = old_env
+
+
+@pytest.fixture
+def login_ls_script() -> str:
+    """Absolute path to sample_scripts/login_and_ls.exp.
+    Used by the Path A interaction-script tests for both single-node and two-node
+    boot configurations."""
+    path = os.path.join(REPO_ROOT, "sample_scripts", "login_and_ls.exp")
+    assert os.path.exists(path), f"sample script missing: {path}"
+    return path
+
+
+# ----- Shared assertion helpers used by every per-component test file ------
+
+def pin_per_sub(multi_context, **field_updates):
+    """Clone each sub-experiment with the given field updates and rebuild the top
+    group with the pinned subs. Returns the new group context."""
+    pinned = [s.model_copy(update=field_updates) for s in multi_context.sub_experiments]
+    return multi_context.model_copy(update={"sub_experiments": pinned})
+
+
+def assert_two_node_master_first(blocks, leaf_cls_name: str,
+                                 expected_basename_prefix: str):
+    """Assert the standard 2-node leaf-ordering invariant on a list of dry-run blocks
+    that contain at least two master+node-1 leaves of the given class.
+
+    Pairs leaves by (phase[, part, idx]) and asserts: master has no [py-wait]; node 1
+    waits exactly on master's matching .started; master appears before node 1 in
+    dispatch order. See the testing skill for the full rationale."""
+    leaves = [b for b in blocks if b.cls_name == leaf_cls_name]
+    assert len(leaves) >= 2, (
+        f"expected at least 2 {leaf_cls_name} leaves, got {len(leaves)}: "
+        f"{[b.cls_name for b in blocks]}"
+    )
+
+    # Pair up master + node-1 leaves by sentinel suffix (everything except _nodeN).
+    by_pair: dict[str, dict[int, object]] = {}
+    for b in leaves:
+        assert b.started is not None, f"missing .started touch on {b.cls_name}: {b.raw}"
+        base = b.started_basename
+        # base looks like e.g. "RunIdxCommand_part0_idx1_node0.started"
+        assert base.startswith(expected_basename_prefix), (
+            f"{b.cls_name} sentinel '{base}' missing expected prefix "
+            f"'{expected_basename_prefix}'"
+        )
+        # extract the leading shared key (everything before _nodeN.started)
+        key = base.rsplit("_node", 1)[0]
+        node = int(base.rsplit("_node", 1)[1].split(".")[0])
+        by_pair.setdefault(key, {})[node] = b
+
+    assert by_pair, "found no master/node-1 leaf pairs"
+    for key, nodes in by_pair.items():
+        assert 0 in nodes and 1 in nodes, (
+            f"missing pair member for key {key!r}: have nodes {list(nodes)}"
+        )
+        master, follower = nodes[0], nodes[1]
+
+        # Master leaf: no waits, .started touch, bash, .done touch.
+        assert master.waits == [], (
+            f"master leaf for {key} should not wait, has {master.waits}"
+        )
+        assert master.started_basename.endswith("_node0.started")
+        assert master.bash, f"master leaf for {key} has empty bash"
+        assert master.done is not None, f"master leaf for {key} missing .done"
+        assert master.done_basename.endswith("_node0.done")
+
+        # Non-master leaf: waits on master's .started, then its own touch.
+        assert len(follower.waits) == 1, (
+            f"follower leaf for {key} should wait on exactly one sentinel, "
+            f"got {follower.waits}"
+        )
+        assert follower.waits_basenames[0] == master.started_basename, (
+            f"follower for {key} waits on {follower.waits_basenames[0]}, "
+            f"expected {master.started_basename}"
+        )
+        assert follower.started_basename.endswith("_node1.started")
+        assert follower.done is not None
+        assert follower.done_basename.endswith("_node1.done")
+
+    # Master appears before follower in the dispatch order (dry-run is sequential).
+    for key, nodes in by_pair.items():
+        master_idx = blocks.index(nodes[0])
+        follower_idx = blocks.index(nodes[1])
+        assert master_idx < follower_idx, (
+            f"for {key}, master leaf at idx {master_idx} should precede "
+            f"follower leaf at idx {follower_idx}"
+        )
 
 
 @pytest.fixture

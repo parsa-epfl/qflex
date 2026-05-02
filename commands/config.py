@@ -123,6 +123,9 @@ class ExperimentContext(BaseModel):
     seed_image_name: str = Field(default='', description="Name of the seed image file to use in multi-node setup.")
     telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
     use_telnet_monitor: bool = Field(default=False, description="Whether to use telnet monitor for QEMU instead of stdio.")
+    serial_telnet_port: int = Field(default=-1, description="Telnet port for QEMU serial console (used by Path A interaction_script). -1 -> auto = 55600 + node_number.")
+    interaction_script: str = Field(default="", description="Path to an executable script (expect/bash/python/...) that drives QEMU for boot/load on this leaf. Receives TELNET_SERIAL_PORT, TELNET_MONITOR_PORT, SERIAL_LOG_PATH, EXP_FOLDER, NODE_NUMBER as env vars. Setting this auto-enables monitor-on-telnet and serial-on-telnet for the leaf.")
+    interactive_tmux: bool = Field(default=False, description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")
     pdes_net_devs: List[str] = Field(default=[], description="List of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup.")
     sub_experiments: List["ExperimentContext"] = Field(default_factory=list, description="Optional sub-experiments. If non-empty, this context is a group node; leaf-level fields are unused and the executor recurses into each sub-experiment.")
     wait_for_nodes: List[int] = Field(default_factory=list, description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master. Set to e.g. [0] to wait for the master, or [2] to wait for node 2.")
@@ -132,9 +135,31 @@ class ExperimentContext(BaseModel):
     def has_sub_experiments(self) -> bool:
         return len(self.sub_experiments) > 0
 
+    def compute_runtime_settings(self):
+        """Pure (no filesystem, no shm) part of leaf prep: auto-flip flags and
+        auto-compute ports based on user-set fields. Safe to call in dry-run so
+        the rendered bash reflects what the real run would use."""
+        # Path A (scripted boot/load): the script needs separate telnet endpoints for
+        # serial console (guest input/output) and monitor (savevm/quit). Auto-enable
+        # both so the user only needs to set interaction_script in YAML.
+        if self.interaction_script and not self.use_telnet_monitor:
+            print(f"[boot/load] interaction_script={self.interaction_script!r} -> auto-enabling use_telnet_monitor for node {self.node_number}.")
+            self.use_telnet_monitor = True
+
+        if self.use_telnet_monitor and self.telnet_port == -1:
+            self.telnet_port = 55558
+            if self.is_multi_node():
+                self.telnet_port += self.node_number
+
+        if self.interaction_script and self.serial_telnet_port == -1:
+            self.serial_telnet_port = 55600
+            if self.is_multi_node():
+                self.serial_telnet_port += self.node_number
+
     def prepare_for_execution(self):
         """One entry point for all leaf-level prep. Called by the executor right before the leaf bash runs.
         Wraps the existing prep functions; do not call these from create_experiment_context."""
+        self.compute_runtime_settings()
         self.set_up_folders()
         self.setup_nic_args()
 
@@ -393,11 +418,11 @@ class ExperimentContext(BaseModel):
         self.simulation_context.qemu_nic = nic_command.strip().lower()
 
 
-        if self.use_telnet_monitor:
-            if self.telnet_port == -1:
-                self.telnet_port = 55558 
-                if self.is_multi_node():
-                    self.telnet_port += self.node_number
+        # Port auto-compute moved to compute_runtime_settings() so dry-run can call
+        # it without filesystem side effects. Calling it here again is idempotent
+        # (no-op when ports are already set) — keep it for safety against any
+        # caller that bypasses prepare_for_execution.
+        self.compute_runtime_settings()
 
     def get_ipns_per_core(self) -> list[IPNSInfo]:
 
@@ -512,6 +537,9 @@ def create_experiment_context(
     pdes_net_devs: Annotated[Optional[List[str]], Field(description="List of network device models ('e1000' or 'virtio-net-pci') to use for each neighbor node in multi-node setup. Order matches neighbor_node_list.")] = None,
     sub_experiments: Annotated[Optional[List[ExperimentContext]], Field(description="Optional sub-experiments. If non-empty, this is a group node — leaf-level fields are inherited (e.g. via YAML extends) but unused, and the executor recurses into each sub-experiment in parallel.")] = None,
     wait_for_nodes: Annotated[Optional[List[int]], Field(description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master; set e.g. [0] to wait for the master.")] = None,
+    serial_telnet_port: Annotated[int, Field(description="Telnet port for QEMU serial console (Path A). -1 -> auto = 55600 + node_number.")] = -1,
+    interaction_script: Annotated[str, Field(description="Path to an executable script that drives QEMU on this leaf during boot/load. Receives TELNET_SERIAL_PORT, TELNET_MONITOR_PORT, SERIAL_LOG_PATH, EXP_FOLDER, NODE_NUMBER as env vars. Auto-enables monitor-on-telnet + serial-on-telnet.")] = "",
+    interactive_tmux: Annotated[bool, Field(description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")] = False,
 ) -> ExperimentContext:
     neighbor_node_list = neighbor_node_list or []
     latencies_ns_list = latencies_ns_list or []
@@ -612,6 +640,9 @@ def create_experiment_context(
         pdes_net_devs=pdes_net_devs,
         sub_experiments=sub_experiments,
         wait_for_nodes=wait_for_nodes,
+        serial_telnet_port=serial_telnet_port,
+        interaction_script=interaction_script,
+        interactive_tmux=interactive_tmux,
     )
 
     e._creation_kwargs = creation_kwargs

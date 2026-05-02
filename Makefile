@@ -10,6 +10,13 @@ build-docs:
 test:
 	python -m pytest tests/ -v
 
+# Same as `test` but with -s (don't capture stdout — see prints / dry-run output
+# / the alpine ls output live) and longer tracebacks. Combine with QFLEX_REAL_RUN_TESTS=1
+# to actually run the docker-based tests in tests/test_real_runs.py:
+#     QFLEX_REAL_RUN_TESTS=1 make test-verbose
+test-verbose:
+	python -m pytest tests/ -v -s --tb=long
+
 install-dev-requirements:
 	pip install -r requirements.txt && \
 	pip install -r requirements.docs.txt && \

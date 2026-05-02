@@ -1,16 +1,22 @@
 import os
+import shlex
 from commands import Executor
 from .utils import get_docker_image_name
 from .version import get_version
 
+DEFAULT_CONTAINER_NAME = "qflex-dev"
+
+
 class DockerStarter(Executor):
-    
-    def __init__(self, 
+
+    def __init__(self,
                 #  TODO change to experiment context
                  mounting_folder: str,
                  debug: bool = False,
                  worm: bool = False,
-                 start_directory: str = None):
+                 start_directory: str = None,
+                 background: bool = False,
+                 container_name: str = DEFAULT_CONTAINER_NAME):
         self.debug = debug
         self.worm = worm
         self.version = get_version()
@@ -21,16 +27,22 @@ class DockerStarter(Executor):
         self.start_directory = ''
         if start_directory is not None and len(start_directory) > 0:
             self.start_directory = f" -w {start_directory} "
+        # When `background` is True, the container is started detached, named, and
+        # kept alive with `tail -f /dev/null`. Subsequent `./dep exec` calls then
+        # `docker exec` into it without paying the per-command container-start cost.
+        # See the `dep` and `run-in-dev-container` skills.
+        self.background = background
+        self.container_name = container_name
 
 
     def cmd(self) -> str:
         cwd = os.getcwd()
-        
+
         # if images folder doesn't exist load it
         if not os.path.isdir(self.images_folder):
             os.makedirs(self.images_folder)
             # download alpine image
-        
+
 
         commands_mount = f" -v {cwd}/commands:/home/dev/qflex/commands"
         if not os.path.isdir('./commands'):
@@ -43,28 +55,45 @@ class DockerStarter(Executor):
         qflex_args = ''
         if os.path.exists(f'{cwd}/qflex.args'):
             qflex_args = f'-v {cwd}/qflex.args:/home/dev/qflex/qflex.args '
-        
+
         assert os.path.exists(f'{cwd}/QEMU_EFI.fd'), "QEMU_EFI.fd file not found in the current directory."
         assert os.path.exists(f'{cwd}/templates'), "templates folder not found in the current directory."
         assert os.path.exists(f'{cwd}/typer_inputs'), "typer_inputs folder not found in the current directory."
         assert os.path.exists(f'{cwd}/commands'), "commands folder not found in the current directory."
         assert os.path.exists(f'{cwd}/partition.py'), "partition.py file not found in the current directory."
         assert os.path.exists(f'{cwd}/result.py'), "result.py file not found in the current directory."
-        
+
         micro_scripts = ''
         if os.path.exists(f'{cwd}/micro_scripts'):
             micro_scripts = f'-v {cwd}/micro_scripts:/home/dev/qflex/micro_scripts '
 
+        sample_scripts = ''
+        if os.path.exists(f'{cwd}/sample_scripts'):
+            sample_scripts = f'-v {cwd}/sample_scripts:/home/dev/qflex/sample_scripts '
 
-        
+        tests_mount = ''
+        if os.path.exists(f'{cwd}/tests'):
+            tests_mount = f'-v {cwd}/tests:/home/dev/qflex/tests '
+
+        # Background mode: detach + name the container + keep it alive so subsequent
+        # `./dep exec` calls land inside the same container. tail -f /dev/null is the
+        # standard "do nothing forever" idiom.
+        if self.background:
+            attach_flags = f"-d --name {self.container_name}"
+            tail = ' -c "tail -f /dev/null"'
+        else:
+            attach_flags = "-it"
+            tail = ""
+
         # TODO remove unecessary mounts including .sh ones and micro_scripts
         # TODO make shared memory size equal to 512 * number of partitions
         return f"""
-        docker run -it --entrypoint /bin/bash \
+        docker run {attach_flags} --entrypoint /bin/bash \
         -v {self.mounting_folder}:{self.mounting_folder} \
         -v {cwd}/QEMU_EFI.fd:/home/dev/qflex/QEMU_EFI.fd \
         -v {cwd}/templates:/home/dev/qflex/templates \
         -v {cwd}/typer_inputs:/home/dev/qflex/typer_inputs \
+        -v {cwd}/dep_injection:/home/dev/qflex/dep_injection \
         -v {cwd}/commands:/home/dev/qflex/commands \
         -v {cwd}/flexus:/home/dev/qflex/flexus \
         {qflex_args} \
@@ -84,6 +113,8 @@ class DockerStarter(Executor):
         -v {cwd}/experiments:/home/dev/qflex/experiments \
         -v {cwd}/conf:/home/dev/qflex/conf \
         -v {cwd}/qflex:/home/dev/qflex/qflex \
+        {sample_scripts} \
+        {tests_mount} \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE --cap-add SYS_ADMIN \
@@ -91,13 +122,49 @@ class DockerStarter(Executor):
         --cap-add=NET_ADMIN --device=/dev/net/tun  \
         --shm-size=128g \
         {self.start_directory} \
-        {commands_mount} {binary_mount} {self.docker_image_name}
+        {commands_mount} {binary_mount} {self.docker_image_name}{tail}
         """
 
 
+class DockerExec(Executor):
+    """Run a single command inside the long-running QFlex dev container that was
+    started with `./dep start-docker --background`. Uses `docker exec` (not a fresh
+    `docker run`) so we don't pay the container-start cost per command and any state
+    that lives on tmpfs / /home/dev / running processes is preserved across calls."""
+
+    def __init__(self,
+                 command: str,
+                 container_name: str = DEFAULT_CONTAINER_NAME,
+                 working_directory: str = "/home/dev/qflex"):
+        self.command = command
+        self.container_name = container_name
+        self.working_directory = working_directory
+
+    def cmd(self) -> str:
+        # shlex.quote handles internal quotes / spaces — the user's command can be
+        # arbitrary bash. The outer shell sees `docker exec ... /bin/bash -c '<cmd>'`.
+        return (
+            f"docker exec -w {self.working_directory} {self.container_name} "
+            f"/bin/bash -c {shlex.quote(self.command)}"
+        )
+
+
+class DockerStop(Executor):
+    """Stop and remove the named QFlex dev container. `docker rm -f` stops the
+    container if running and removes it in one step. Idempotent: a missing container
+    isn't an error (we swallow the rc with `|| true`) so this can be called as cleanup
+    in fixtures or after crashed runs."""
+
+    def __init__(self, container_name: str = DEFAULT_CONTAINER_NAME):
+        self.container_name = container_name
+
+    def cmd(self) -> str:
+        return f"docker rm -f {self.container_name} 2>/dev/null || true"
+
+
 class DockerBuild(Executor):
-    
-    def __init__(self, 
+
+    def __init__(self,
                  debug: bool = False,
                  worm: bool = False,
                  worm_only: bool = False,
@@ -120,13 +187,13 @@ class DockerBuild(Executor):
 
     def cmd(self) -> str:
         # TODO add a debug build with all the files so it can be used for development without remaking the image and compiled again
-        
+
         local_qflex_name = f"{self.docker_base_image_name}:{self.version}"
         ghcr_qflex_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-{self.version}"
 
         local_worm_name = f"{self.docker_image_name_with_worm}:{self.version}"
         ghcr_worm_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
-        
+
         # TODO do some docker renamig
         dep_image_name = "qflex-dependencies"
         dep_docker_build_cmd = [
@@ -178,4 +245,3 @@ class DockerBuild(Executor):
             cmd += worm_cmd
 
         return cmd
-

@@ -4,6 +4,10 @@ from commands.qemu import QemuCommonArgParser
 # TODO IMPORTANT, remove vanilla option
 
 class Boot(Executor):
+    # Boot is one of the two phases (with Load) where the user might want to
+    # interact with QEMU manually. The base Executor reads this flag to decide
+    # whether to dispatch into the libtmux path when interactive_tmux is set.
+    SUPPORTS_INTERACTIVE = True
 
     def __init__(self,
                  experiment_context: ExperimentContext,
@@ -12,20 +16,39 @@ class Boot(Executor):
         self.vanilla = vanilla
 
     def cmd(self) -> str:
-        # Build the parser fresh from the current experiment_context so this method
-        # works regardless of whether self.experiment_context was set at __init__ time
-        # or mutated later (multi-experiment dispatch).
-        parser = QemuCommonArgParser(self.experiment_context)
+        if self.vanilla:
+            raise NotImplementedError(
+                "Booting with vanilla QEMU is not implemented yet. This was only meant "
+                "to be used for loading with vanilla QEMU for functional warming "
+                "preparation, but we can implement it if needed."
+            )
 
-        if not self.vanilla:
-            boot_cmd = f"""
-            gdb -ex run --args ./qemu-system-aarch64 \
-            {parser.get_qemu_base_args()}
-            """
-        else:
-            raise NotImplementedError("Booting with vanilla QEMU is not implemented yet. This was only meant to be used for loading with vanilla QEMU for functional warming preparation, but we can implement it if needed.")
+        exp = self.experiment_context
+        # Path A (scripted): drop stdio so the parser emits serial-on-telnet via get_stdio().
+        use_stdio = not bool(exp.interaction_script)
+        parser = QemuCommonArgParser(exp, use_stdio=use_stdio)
+        gdb_cmd = f"gdb -ex run --args ./qemu-system-aarch64 {parser.get_qemu_base_args()}"
 
-        return [
-            f"cd {self.experiment_context.get_experiment_folder_address()}/run",
-            boot_cmd
-        ]
+        if not exp.interaction_script:
+            return [
+                f"cd {exp.get_experiment_folder_address()}/run",
+                gdb_cmd,
+            ]
+
+        # Path A: run the user's script (background, captures PID), then QEMU
+        # (foreground), then wait on the script. cd + everything else in a single
+        # `{ ...; }` group so the cwd persists past `cd`.
+        env_vars = (
+            f"TELNET_SERIAL_PORT={exp.serial_telnet_port} "
+            f"TELNET_MONITOR_PORT={exp.telnet_port} "
+            f"SERIAL_LOG_PATH=./serial.log "
+            f"EXP_FOLDER={exp.get_experiment_folder_address()} "
+            f"NODE_NUMBER={exp.node_number}"
+        )
+        return (
+            f"cd {exp.get_experiment_folder_address()}/run && "
+            f"{{ {env_vars} {exp.interaction_script} & "
+            f"SCRIPT_PID=$!; "
+            f"{gdb_cmd}; "
+            f"wait $SCRIPT_PID 2>/dev/null; }}"
+        )

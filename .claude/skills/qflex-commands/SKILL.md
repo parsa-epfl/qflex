@@ -1,6 +1,6 @@
 ---
 name: qflex-commands
-description: Use when working inside [commands/](../../../commands/) — adding a new pipeline phase, modifying an existing command's shell invocation, debugging executor failures, touching the [Executor](../../../commands/executer.py) hierarchy, working with the per-experiment filesystem layout, or tracing how `ExperimentContext` flows from CLI/YAML into a running QEMU/Flexus process. TRIGGER when the user mentions Executor/SequentialGroupExecutor/ParallelExecutor, a specific subcommand body (boot.py, fw, run_partition, …), Jinja templates in [templates/](../../../templates/), `set_up_folders`, multi-node shm wiring, or "where does the command actually run qemu". SKIP for changes to CLI flag declarations or DI/YAML wiring (those have their own skills).
+description: Use when working inside [commands/](../../../commands/) — adding a new pipeline phase, modifying an existing command's shell invocation, working with the per-experiment filesystem layout, or tracing how `ExperimentContext` flows from CLI/YAML into a running QEMU/Flexus process. TRIGGER when the user mentions a specific subcommand body (boot.py, fw, run_partition, …), Jinja templates in [templates/](../../../templates/), `set_up_folders`, `prepare_for_execution`, multi-node shm wiring, or "where does the command actually run qemu". SKIP for changes to CLI flag declarations (qflex-cli skill), DI/YAML wiring (qflex-dependency-injection), the executor dispatch / sub_experiments / sentinels machinery (executor skill), or boot/load interactive paths (boot-load-interactive skill).
 ---
 
 # qflex commands layer
@@ -23,37 +23,44 @@ The factory `create_experiment_context` ([commands/config.py:467](../../../comma
 
 | Method | Use |
 |---|---|
-| `get_experiment_folder_address()` | `<mounting_folder>/experiments/<experiment_name>[-<ts>]/` |
+| `get_experiment_folder_address()` | `<mounting_folder>/experiments/<experiment_name>[-<ts>]/` — pure path math; does not create the folder. |
 | `get_partition_folder()` | `<exp_folder>/run/partition_<N>/` (asserts `partition_number >= 0`) |
 | `is_multi_node()` | `node_number >= 0` |
 | `is_master_node()` | `node_number == 0` |
+| `has_sub_experiments()` | `len(sub_experiments) > 0` — distinguishes group nodes from leaves; the executor checks this for multi-experiment dispatch. |
 | `get_neighbor_count()` | `len(neighbor_node_list)` |
 | `get_shm_names(recieve)` | List of POSIX shm names for inter-node traffic |
-| `setup_nic_args()` | Builds the QEMU `-netdev pdes,...` arg string into `simulation_context.qemu_nic` |
-| `set_up_folders()` | Creates `bin/cfg/flags/lib/run/scripts/images/`, copies binaries, symlinks images, writes `core_info.csv`. **Has side effects — runs at factory time** |
+| `compute_runtime_settings()` | **Pure** part of leaf prep: auto-flips `use_telnet_monitor` when `interaction_script` is set, auto-computes `telnet_port = 55558+node_number` and `serial_telnet_port = 55600+node_number`. Safe to call in dry-run. |
+| `setup_nic_args()` | Builds the QEMU `-netdev pdes,...` arg string into `simulation_context.qemu_nic`. Side effects: shm cleanup on master. |
+| `set_up_folders()` | Creates `bin/cfg/flags/lib/run/scripts/images/`, copies binaries, symlinks images, writes `core_info.csv`. **Side effects.** |
+| `prepare_for_execution()` | Single entry point combining the three above. Called by the executor in `_execute_leaf` right before the bash runs — **never by `create_experiment_context`** (the factory is pure). |
 | `clone_experiment_context(src, **overrides)` | Re-build from `_creation_kwargs` with overrides applied |
 
-## Executor pattern ([commands/executer.py](../../../commands/executer.py))
+## Executor pattern (high-level)
+
+This skill assumes you've read the `executor` skill for the dispatch machinery (`_execute_group` / `_execute_leaf` / `_execute_in_tmux`, sentinels, mp.Process). Quick recap:
 
 ```
 Executor (abstract)
-├── cmd() -> str | list[str]              # subclass builds the bash invocation
-├── execute(to_stdio, run_in_background, dry_run) -> bool
-├── clean_up()                            # delegates to experiment.clean_up() if present
-├── get_experiment() -> ExperimentContext | None
+├── cmd() -> str | list[str]              # subclass builds the leaf bash from CURRENT self.experiment_context
+├── execute(...)                          # base dispatches: group → leaf or tmux
+├── _execute_group / _execute_leaf / _execute_in_tmux
+├── _build_bash, _wait_for_sentinels, _touch_sentinel, _print_dry_run_actions
+├── clean_up(), get_experiment(), get_log/err_file_address
 SimpleCMDExecutor              # wraps a literal string
-SequentialGroupExecutor        # children one-by-one; stop on first failure (raises with stdout/stderr)
-ParallelExecutor               # multiprocessing.Pool; terminates pool on first failure
+SequentialGroupExecutor        # heterogeneous children sequentially; lazy via _build_children()
 ```
 
-Every concrete command class (`Boot`, `Load`, `InitWarm`, `FunctionalWarming`, `PartitionCommand`, `RunPartitionCommand`, `RunIdxCommand`, `RunSinglePartitionCommand`, `RunResultCommand`, `Multi`, …) subclasses `Executor`, takes `experiment_context` (and any extras) in `__init__`, returns the bash string from `cmd()`, and is invoked via `executor.execute(to_stdio=True, run_in_background=False)`.
+Every concrete command class (`Boot`, `Load`, `InitWarm`, `FunctionalWarming`, `PartitionCommand`, `RunPartitionCommand`, `RunIdxCommand`, `RunSinglePartitionCommand`, `RunResultCommand`, `Multi`, …) subclasses `Executor` (or `SequentialGroupExecutor` for `RunSinglePartitionCommand`), takes `experiment_context` (and any extras) in `__init__`, returns the bash string from `cmd()` reading `self.experiment_context` afresh, and is invoked via `executor.execute(to_stdio=True, run_in_background=False)`.
+
+`ParallelExecutor` no longer exists — per-children parallelism is now expressed via `sub_experiments` + `_execute_group` (mp.Process). `RunPartitionCommand` does this dynamically by populating sub_experiments at execute time. See the `executor` skill.
 
 ### Execute conventions
 
 - **`shell=True`** is the default — `cmd()` returns a string, joined with ` && ` if a list. Be wary of injection if you ever interpolate user input (none of the current commands do).
-- **`run_in_background=True`** is `NotImplementedError`. Don't pass it. (Background path exists in code but is gated; cleanup isn't wired.)
-- **Dry-run** — pass `dry_run=True` or set `QFLEX_DRY_RUN=1` in the env. Prints the command and returns success without running. Useful when iterating on cmd-string construction.
-- **`ParallelExecutor` failure semantics** — first child to return `False` triggers `pool.terminate()` and a `RuntimeError`. Don't expect partial completion.
+- **`run_in_background=True`** is `NotImplementedError`. Don't pass it.
+- **Dry-run** — pass `dry_run=True` or set `QFLEX_DRY_RUN=1` in the env. Prints a structured `[dry-run] <Class>` block per leaf with `[py-wait]` / `[py-touch] .started` / `[bash]` / `[py-touch] .done` markers (or `[tmux]` + `[py-poll]` in tmux mode). Tests parse these markers — see the `testing` skill.
+- **Multi-experiment failure** — `_execute_group` joins all sub-processes, then raises `RuntimeError("<Cls>: sub-experiments failed: node_X(exit=…), …")`. Children get `SIGTERM` on parent exit.
 - **Sequential failure** — `SequentialGroupExecutor` reads each child's stdout/stderr file (via `get_log_file_address()` / `get_err_file_address()`) on failure and includes them in the raised `RuntimeError` message. Subclasses that go through this path should override those getters.
 
 ## Per-experiment filesystem layout ([commands/config.py:245](../../../commands/config.py#L245))
@@ -150,8 +157,9 @@ If the new phase orchestrates multiple sub-steps, use `SequentialGroupExecutor` 
 
 ## Common pitfalls
 
-- **`run_in_background=True`** is `NotImplementedError`. Don't pass it. There's a half-finished Popen path in [executer.py:44](../../../commands/executer.py#L44) but cleanup isn't wired.
-- **`set_up_folders()` runs inside the factory** — repeated runs of the *same* command in the same session can collide unless the YAML/CLI sets a unique `experiment_name` or you flip `keep_experiment_unique` to `True`.
+- **`run_in_background=True`** is `NotImplementedError`. Don't pass it.
+- **`set_up_folders()` runs at executor leaf time, not factory time.** `create_experiment_context` is pure now (the entire DI graph builds without touching the filesystem). `set_up_folders` + `setup_nic_args` run inside `prepare_for_execution()` which `_execute_leaf` calls right before the bash. Repeated runs of the same command in the same session still collide unless the YAML/CLI sets a unique `experiment_name` or you flip `keep_experiment_unique` to `True`.
+- **Don't cache context-derived state in `__init__`.** Multi-experiment dispatch mutates `self.experiment_context` per sub via `mp.Process` pickle. Build per-context state (e.g. `QemuCommonArgParser`) inside `cmd()`. Caching at `__init__` time was the root cause of every "works for one node, breaks for two" bug encountered during the multi-experiment refactor.
 - **Hardcoded `/home/dev/qflex/kraken_out/`** path — anything that runs `set_up_folders()` outside the dev container will hit `FileNotFoundError`. Run inside the container or stub the kraken libs.
 - **Jinja template + Pydantic field drift** — when a Flexus config knob changes, search [templates/](../../../templates/) for it; you almost always need to update both sides.
 

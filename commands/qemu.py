@@ -55,8 +55,25 @@ class QemuCommonArgParser:
     def get_stdio(self):
         if self.use_stdio:
             return " -serial mon:stdio "
+
+        # Non-stdio paths.
+        exp = self.experiment_context
+        parts = []
+        if exp.interaction_script:
+            # Path A (scripted boot/load): expose the guest serial console on telnet
+            # so the user's expect script can drive it. Monitor lives on its own
+            # telnet port (configured separately by use_telnet_monitor).
+            parts.append(f"-serial telnet:127.0.0.1:{exp.serial_telnet_port},server,nowait")
         else:
-            return f" -serial file:serial.log -monitor none "
+            # Default no-stdio behaviour: log serial to a file, no interactive monitor.
+            parts.append("-serial file:serial.log")
+
+        # Suppress the monitor only when it isn't routed to telnet — emitting both
+        # `-monitor telnet:...` and `-monitor none` would conflict.
+        if not exp.use_telnet_monitor:
+            parts.append("-monitor none")
+
+        return " " + " ".join(parts) + " "
 
     def get_qemu_base_args(self) -> str:
 
