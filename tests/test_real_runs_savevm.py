@@ -22,8 +22,10 @@ ordering plugin that sorts alphabetically):
 Both tests share the session-scoped `dev_container` fixture from conftest.py,
 so the dev container starts once and both tests run inside it.
 
-Disabled by default — same gating as test_real_runs.py (QFLEX_REAL_RUN_TESTS=1
-+ docker reachable + qflex image local).
+Enabled by default — same gating as test_real_runs.py (QFLEX_SKIP_REAL_RUN=1
+to disable + docker reachable + qflex image local). Both tests skip themselves
+if the per-node qcow2s don't already carry the `boot-login` snapshot bootstrapped
+by tests/test_real_runs_init.py (`QFLEX_INIT_TEST=1`-gated).
 """
 import os
 import sys
@@ -34,17 +36,20 @@ from .conftest import (
     _docker_available,
     _exec_in_container,
     _qflex_image_present,
+    _real_run_disabled,
+    require_boot_login_zstd,
+    require_snapshot,
 )
 
 SNAPSHOT_NAME = "qflex-makefile-test"
-NODE_SUB_NAMES = ("data-caching_yaml_node_0", "data-caching_yaml_node_1")
+# Test-world names — distinct from `data-caching-comparison*` in dc-multi.yaml
+# so a user's real-experiment runs never collide with these. Shared with
+# tests/test_real_runs_init.py and tests/realrun/dc-multi-*.yaml.
+NODE_SUB_NAMES = ("qflex_test_multi-node-0", "qflex_test_multi-node-1")
 
 
 pytestmark = [
-    pytest.mark.skipif(
-        not os.environ.get("QFLEX_REAL_RUN_TESTS"),
-        reason="set QFLEX_REAL_RUN_TESTS=1 to enable real docker-based runs",
-    ),
+    pytest.mark.skipif(_real_run_disabled(), reason="QFLEX_SKIP_REAL_RUN is set"),
     pytest.mark.skipif(not _docker_available(), reason="docker daemon not reachable"),
     pytest.mark.skipif(not _qflex_image_present(),
                        reason="ghcr.io/parsa-epfl/qflex image not present locally"),
@@ -61,38 +66,29 @@ def _read_capture(mounting: str, sub_name: str, filename: str) -> str:
 
 
 def test_01_boot_two_nodes_create_files_and_savevm(dev_container):
-    """Boot both nodes, login, `touch test{N+1}.txt` per node, ls, savevm,
-    quit. Verify each node's ls captured the right file.
+    """Boot both nodes from `boot-login`, login, `touch test{N+1}.txt` per
+    node, ls, savevm `qflex-makefile-test`, quit. Verify each node's ls captured
+    the right file.
 
-    Wipes each leaf's experiment folder first so `set_up_folders()` runs end-to-
-    end on every test invocation. `keep_experiment_unique=False` (the YAML's
-    default) means folders are reused across runs, and `set_up_folders()` uses
-    `cp -u` for the qemu binaries — which silently skips the copy when the dest
-    is newer than the source. After a docker image rebuild, that mtime check
-    can leave the experiment folder pinned to whatever binary the previous
-    image had. Removing the folder forces a fresh copy from the freshly-built
-    image's `parallel-qemu-saved/` so the test always exercises the binary
-    the framework currently produces."""
+    The per-node qcow2s carry the bootstrapped `boot-login` snapshot from
+    test_real_runs_init.py — DO NOT wipe them here, otherwise `copy_image_for_node`
+    re-pulls from the master qcow2 (which has the single-node boot-login, NOT
+    the multi-node-compatible one), and loadvm fails on device topology.
+    Re-run the multi-node init test if per-node qcow2s need refreshing."""
     mounting = dev_container
 
-    # Cleanup runs inside the container so root-owned files left by previous
-    # qemu runs (qcow2 dirs etc.) can be removed without sudo on the host.
-    # Also wipes the per-node qcow2 copies — `copy_image_for_node` uses `cp -u`
-    # which won't refresh a per-node image whose mtime is newer than the
-    # master, so a previous run's dirty state can persist into this run's boot.
-    rm_targets = [f"{mounting}/experiments/{sub}" for sub in NODE_SUB_NAMES]
-    # Per-node qcow2s live next to the master image: <image_folder>/<image_name>-node<N>.
-    # The master is /mnt/sdc/data-caching-1c/root-single-node.qcow2; per-node
-    # copies are root-single-node.qcow2-node0 / -node1.
-    rm_targets.extend(
-        f"{mounting}/root-single-node.qcow2-node{n}" for n in range(len(NODE_SUB_NAMES))
-    )
-    rm_cmd = " && ".join(f"rm -rf {t}" for t in rm_targets)
-    rm_result = _exec_in_container(rm_cmd, timeout=120)
-    assert rm_result.returncode == 0, (
-        f"failed to clean experiment folders before test_01 "
-        f"(rc={rm_result.returncode}). stderr:\n{rm_result.stderr}"
-    )
+    # Skip cleanly if the bootstrap snapshot hasn't been created yet — we check
+    # the external boot-login.zstd in each per-node run/ (the real VM state).
+    require_boot_login_zstd([
+        f"{mounting}/experiments/{sub}/run" for sub in NODE_SUB_NAMES
+    ])
+    # parallel-qemu's copy_image_for_node names per-node qcow2s
+    # `<basename>-node<N>.<ext>` (root-single-node-node0.qcow2), NOT
+    # `<filename>-node<N>` — referenced in require_snapshot below as well.
+
+    # No experiment-folder wipe: init shares these per-node folders and drops
+    # boot-login.zstd into each run/ — wiping would discard the snapshot. Per-
+    # node qcow2s are preserved for the same reason.
 
     cmd = "./qflex boot -c tests/realrun/dc-multi-savevm-create.yaml"
     # Multi-node Alpine boots are slow under quantum sync; 30 min upper bound.
@@ -118,6 +114,16 @@ def test_02_load_two_nodes_verify_files(dev_container):
     """Load both nodes from the snapshot, ls, quit. Verify each node's file
     survived the savevm/loadvm round-trip."""
     mounting = dev_container
+
+    # The verify snapshot is qflex-makefile-test, which test_01 wrote into
+    # each per-node qcow2. Skip cleanly if it isn't there — typically because
+    # test_01 was skipped/failed. Per-node qcow2 path is `<base>-node<N>.<ext>`
+    # (see commands/config.py:copy_image_for_node), NOT `<filename>-node<N>`.
+    require_snapshot(
+        [f"{mounting}/root-single-node-node{n}.qcow2" for n in range(len(NODE_SUB_NAMES))],
+        SNAPSHOT_NAME,
+        "run test_01_boot_two_nodes_create_files_and_savevm first to create it",
+    )
 
     cmd = "./qflex load -c tests/realrun/dc-multi-savevm-verify.yaml"
     r = _exec_in_container(cmd, timeout=1800)

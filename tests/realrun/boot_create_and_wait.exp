@@ -151,9 +151,12 @@ puts "saw savevm-done sentinel; capturing ls then quitting QEMU"
 # --- 4. ls AFTER savevm and capture --------------------------------------
 #
 # Buffer may have stray bytes from the drain pause/resume; nudge a clean
-# prompt with `\r` before issuing ls.
+# prompt with `\r` before issuing ls. Use the checkpointing budget here too —
+# under multi-node PDES with sync=false + 1ms latency the guest can take a
+# while to deliver the `\r` echo back over the chardev socket once it resumes
+# from the drain. Default 5s tripped "ERROR: serial prompt timed out post-savevm".
 
-set timeout $BUDGET_DEFAULT_S
+set timeout $BUDGET_CHECKPOINTING_S
 
 send "\r"
 expect {
@@ -161,7 +164,15 @@ expect {
     -re {[\$#] +}
 }
 
+# Two-stage ls capture (mirrors load_verify_ls.exp): first wait for the guest
+# to ECHO `ls\r` back so any leftover prompt redraw in the buffer is consumed,
+# then wait for the post-ls prompt. Buffer between the two matches is the
+# actual ls output (file listing).
 send "ls\r"
+expect {
+    timeout { puts "ERROR: ls echo didn't come back post-savevm"; quit_qemu $monitor_port; exit 1 }
+    "ls\r"
+}
 expect {
     timeout { puts "ERROR: ls didn't return post-savevm"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}

@@ -1,9 +1,9 @@
-from commands import Executor
+from commands import SimulationCommand
 from .config import ExperimentContext
 from commands.qemu import VanillaQemuArgParser
 
 
-class RunIdxCommand(Executor):
+class RunIdxCommand(SimulationCommand):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
@@ -22,6 +22,7 @@ class RunIdxCommand(Executor):
         return f"{self.experiment_context.get_partition_folder()}/log"
 
     def cmd(self) -> str:
+        self._assert_syncs_true()
         # Build per-context derived state fresh — see Executor refactor notes.
         # TODO turn this into a param, for now each ratio represents 100000 cycles
         ratio_coefficient = 100000

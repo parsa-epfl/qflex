@@ -8,3 +8,9 @@ components:
     experiment_name: qflex_real_run_test
     use_gdb: false
     interaction_script: /home/dev/qflex/tests/realrun/login_and_ls.exp
+    serial_telnet_port: 55611
+    telnet_port: 55711
+    # Load the snapshot bootstrapped by tests/test_real_runs_init.py so the
+    # guest comes up at the login prompt instead of going through a full Alpine
+    # boot (~2 minutes saved per run).
+    loadvm_name: boot-login

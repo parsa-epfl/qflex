@@ -5,7 +5,10 @@ from commands.config import ExperimentContext
 def wrap_with_gdb(qemu_invocation: str, use_gdb: bool) -> str:
     if not use_gdb:
         return qemu_invocation
-    return f"yes | gdb -ex run --args {qemu_invocation}"
+    # `set confirm off` replaces the old `yes | gdb` shutdown-prompt workaround:
+    # works for non-interactive runs and doesn't flood gdb with "y" when a user
+    # Ctrl+Cs inside an interactive tmux pane.
+    return f"gdb -ex 'set confirm off' -ex run --args {qemu_invocation}"
 
 
 class QemuCommonArgParser:
@@ -67,10 +70,18 @@ class QemuCommonArgParser:
         exp = self.experiment_context
         parts = []
         if exp.interaction_script:
-            # Path A (scripted boot/load): expose the guest serial console on telnet
-            # so the user's expect script can drive it. Monitor lives on its own
-            # telnet port (configured separately by use_telnet_monitor).
-            parts.append(f"-serial telnet:127.0.0.1:{exp.serial_telnet_port},server,nowait")
+            # Path A (scripted boot/load): expose serial on telnet for the expect
+            # script AND have qemu mirror everything to qemu_serial.log so the
+            # boot/console output survives even when expect dies before it can
+            # connect. `-chardev socket` with logfile=... is what lets us do
+            # both at once; `-serial telnet:...` shorthand can't.
+            log_path = f"{exp.get_experiment_folder_address()}/qemu_serial.log"
+            parts.append(
+                f"-chardev socket,id=qflex_serial,host=127.0.0.1,"
+                f"port={exp.serial_telnet_port},server=on,wait=off,telnet=on,"
+                f"logfile={log_path},logappend=on"
+            )
+            parts.append("-serial chardev:qflex_serial")
         else:
             # Default no-stdio behaviour: log serial to a file, no interactive monitor.
             parts.append("-serial file:serial.log")
@@ -93,9 +104,22 @@ class QemuCommonArgParser:
         loadvm = self.get_load_vm()
 
         telnet_monitor_arg = ''
-        if self.experiment_context.use_telnet_monitor:
+        # Tmux mode (Path B) reaches the monitor from the same pane via Ctrl-A C
+        # on `-serial mon:stdio`, so a separate telnet endpoint is unnecessary.
+        # Script mode (Path A) and non-interactive subprocess runs both still need
+        # it — expect scripts and external automation can't multiplex via Ctrl-A.
+        if (self.experiment_context.use_telnet_monitor
+                and not self.experiment_context.interactive_tmux):
             print(f"Using telnet monitor at port {self.experiment_context.telnet_port}")
-            telnet_monitor_arg = f""" -monitor telnet:127.0.0.1:{self.experiment_context.telnet_port},server,nowait """
+            # Same chardev-with-logfile pattern as get_stdio() so monitor traffic
+            # is preserved on disk for post-mortem inspection.
+            log_path = f"{self.experiment_context.get_experiment_folder_address()}/qemu_monitor.log"
+            telnet_monitor_arg = (
+                f" -chardev socket,id=qflex_monitor,host=127.0.0.1,"
+                f"port={self.experiment_context.telnet_port},server=on,wait=off,telnet=on,"
+                f"logfile={log_path},logappend=on"
+                f" -monitor chardev:qflex_monitor "
+            )
         
         
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \

@@ -1,11 +1,14 @@
 import glob
 
-from .executer import SequentialGroupExecutor, SimpleCMDExecutor
+from .executer import SequentialGroupExecutor, SimpleCMDExecutor, SimulationCommand
 from .config import ExperimentContext, clone_experiment_context
 from .run_idx import RunIdxCommand
 
 
-class RunSinglePartitionCommand(SequentialGroupExecutor):
+# `SequentialGroupExecutor` first so its `__init__(children)` and `execute()`
+# win MRO resolution; `SimulationCommand` adds the sync-asserts mixin. Both
+# subclass `Executor`; Python's MRO collapses the diamond cleanly.
+class RunSinglePartitionCommand(SequentialGroupExecutor, SimulationCommand):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
@@ -20,6 +23,7 @@ class RunSinglePartitionCommand(SequentialGroupExecutor):
         self.detailed_warming_ratio = warming_ratio
         self.measurement_ratio = measurement_ratio
         self.use_stdio = use_stdio
+        self._assert_syncs_true()
 
     def _build_children(self):
         snapshots = glob.glob("snapshot_*.loc",

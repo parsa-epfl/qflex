@@ -12,7 +12,7 @@ def test_init_warm_two_nodes(multi_context, mock_mounting_folder):
     """InitWarm renders Jinja templates inside cmd(); we skip that work via
     skip_generate_cfg=True so the test just verifies the dispatch shape.
     A pre-existing parameter.rs is required for that path."""
-    for sub_name in ("data-caching_yaml_node_0", "data-caching_yaml_node_1"):
+    for sub_name in ("data-caching-comparison-node-0", "data-caching-comparison-node-1"):
         cfg = f"{mock_mounting_folder}/experiments/{sub_name}/cfg"
         os.makedirs(cfg, exist_ok=True)
         open(f"{cfg}/parameter.rs", "w").close()

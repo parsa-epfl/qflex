@@ -1,74 +1,37 @@
-extends: dc
+extends: DC_base
 
 # Optional per-leaf hooks for boot/load only (other phases ignore these):
-#
 #   experiment_context_node_0:
 #     interaction_script: ./scripts/setup_node_0.exp   # Path A: drive QEMU automatically.
-#                                                       # Receives TELNET_SERIAL_PORT,
-#                                                       # TELNET_MONITOR_PORT, SERIAL_LOG_PATH,
-#                                                       # EXP_FOLDER, NODE_NUMBER as env vars.
-#                                                       # Auto-enables monitor + serial on telnet.
 #     # OR
-#     interactive_tmux: true                            # Path B: open a fresh tmux window per leaf
-#                                                       # (requires `tmux new -s qflex` running).
-#                                                       # Executor blocks until QEMU exits in each window.
-#
-# Leaf-defaults anchor reused by every sub-experiment component below.
-# Top-level keys other than `components:` and `extends:` are ignored by the
-# DI loader, so this is just a place to hang a YAML anchor.
-_leaf_defaults: &leaf_defaults
-  _target_: commands.config.create_experiment_context
-  quantum_size: 1000
-  core_count: 1
-  doubled_vcpu: false
-  llc_size_per_tile_mb: 2
-  is_parallel: true
-  network: none
-  memory_gb: 64
-  check_period_quantum_coeff: 5
-  host_name: ZEN3
-  workload_name: data-caching
-  population_seconds: 5
-  is_consolidated: false
-  primary_ipc: 2.0
-  primary_core_start: 0
-  image_folder: /mnt/sdc/data-caching-1c/
-  mounting_folder: /mnt/sdc/data-caching-1c/
-  image_name: root-single-node.qcow2
-  keep_experiment_unique: false
-  use_image_directly: true
+#     interactive_tmux: true                            # Path B: open a tmux window per leaf.
 
 components:
-  # The unnamed experiment_context is the group node — what data_class_wrap resolves
-  # to for `./qflex <phase> -c conf/DC/dc-multi.yaml`. It carries no leaf-level
-  # state of its own; leaf fields are inherited via `extends: dc` but unused,
-  # since the executor recurses into each sub-experiment.
   experiment_context:
-    _target_: commands.config.create_experiment_context
-    experiment_name: dc_multi_top
+    _base_: _leaf_defaults
+    experiment_name: data-caching-comparison
     _deps_:
       sub_experiments:
         - name: node_0
         - name: node_1
 
   experiment_context_node_0:
-    <<: *leaf_defaults
+    _base_: _leaf_defaults
     _name_: node_0
-    experiment_name: data-caching_yaml_node_0
+    experiment_name: data-caching-comparison-node-0
     node_number: 0
     neighbor_node_list: [1]
     pdes_net_devs: ["virtio-net-pci"]
     latencies_ns_list: [100000]
     syncs_list: ["true"]
-    # wait_for_nodes: []   # default — master, no wait
 
   experiment_context_node_1:
-    <<: *leaf_defaults
+    _base_: _leaf_defaults
     _name_: node_1
-    experiment_name: data-caching_yaml_node_1
+    experiment_name: data-caching-comparison-node-1
     node_number: 1
     neighbor_node_list: [0]
     pdes_net_devs: ["virtio-net-pci"]
     latencies_ns_list: [100000]
     syncs_list: ["true"]
-    wait_for_nodes: [0]      # wait for master's .started before booting
+    wait_for_nodes: [0]

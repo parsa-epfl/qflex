@@ -60,6 +60,26 @@ class Executor(abc.ABC):
         """Used in sentinel filenames. Default: class name."""
         return self.__class__.__name__
 
+    # Multi-node post-exit grace. After this leaf's bash returns, peer leaves'
+    # qemus may still be finishing their per-node savevm or running quit_qemu —
+    # so wait before _kill_peer_qemus pkills them. Single-node skips entirely.
+    # TODO replace this fixed sleep with a deterministic per-leaf "i'm done"
+    # sentinel and have peers wait on each other via that. The 30s heuristic
+    # is here so post-savevm finalisation has time without an extra handshake.
+    POST_EXIT_GRACE_SECONDS: int = 30
+
+    def _post_exit_grace(self, exp: ExperimentContext, returncode: int) -> None:
+        if not exp.is_multi_node():
+            return
+        seconds = self.POST_EXIT_GRACE_SECONDS
+        print(
+            f"[executor] {self.__class__.__name__} node {exp.node_number}: "
+            f"bash exited rc={returncode}; waiting {seconds}s grace before peer "
+            f"cleanup so neighbours can finish savevm / quit_qemu cleanly.",
+            flush=True,
+        )
+        time.sleep(seconds)
+
     def _kill_peer_qemus(self, sentinel_dir: str) -> None:
         # TODO multi-node teardown bug: parallel-qemu's PDES exit handling leaves
         # peer nodes hanging after one node quits. Fix in
@@ -221,18 +241,23 @@ class Executor(abc.ABC):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         open(path, "w").close()
 
-    def _build_bash(self, log_path: str, err_path: str) -> str:
+    def _build_bash(self, log_path: str, err_path: str, *, tee_to_stdio: bool = False) -> str:
         """Join self.cmd() into a single bash string, optionally wrapping with an
         output redirect. The sentinel wait/touch is done in Python (see _execute_leaf),
-        not embedded here."""
+        not embedded here. tee_to_stdio=True keeps the live terminal stream while
+        also persisting to file — needed when the leaf runs foreground so the user
+        sees QEMU progress and the log survives if the run dies. Uses bash process
+        substitution; the leaf invokes via `bash -c` (not /bin/sh) to make it work."""
         args = self.cmd()
         if isinstance(args, str):
             args = [args]
         # TODO see if we need to support other type of concatting args
         inner = " && ".join(a.strip() for a in args)
-        if log_path and err_path:
-            return f"( {inner} ) > {log_path} 2> {err_path}"
-        return inner
+        if not (log_path and err_path):
+            return inner
+        if tee_to_stdio:
+            return f"( {inner} ) > >(tee {log_path}) 2> >(tee {err_path} >&2)"
+        return f"( {inner} ) > {log_path} 2> {err_path}"
 
     def _execute_leaf(self,
                       to_stdio: bool,
@@ -244,13 +269,24 @@ class Executor(abc.ABC):
         cwd = os.getcwd()
         exp = self.get_experiment()
 
+        # Always persist QEMU stdout/stderr under the experiment folder so the
+        # user can inspect a failed run after the fact (expect dying mid-script,
+        # gdb crash, …). Skipped only for the interactive_tmux path, which gets
+        # an exclusive `if` branch below — there the user reads output live in
+        # the pane, so a separate file would be redundant.
+        if exp is not None and log_path is None:
+            log_path = f"{exp.get_experiment_folder_address()}/{self._phase_name()}.log"
+        if exp is not None and err_path is None:
+            err_path = f"{exp.get_experiment_folder_address()}/{self._phase_name()}.err"
+
         if _is_dry_run(dry_run):
             # Run the pure (no-fs) part of leaf prep so the printed bash reflects
             # auto-computed ports / auto-flipped flags. The fs side effects
             # (set_up_folders, shm cleanup, qemu_nic mutation) are still skipped.
             if exp is not None:
                 exp.compute_runtime_settings()
-            self._print_dry_run_actions(cwd, sentinel_dir, log_path, err_path)
+            self._print_dry_run_actions(cwd, sentinel_dir, log_path, err_path,
+                                        to_stdio=to_stdio)
             return True
 
         if run_in_background:
@@ -281,14 +317,15 @@ class Executor(abc.ABC):
         # (its wait_for_nodes contains our node_number) can proceed.
         self._touch_sentinel(sentinel_dir, "started")
 
-        arg = self._build_bash(log_path, err_path)
+        arg = self._build_bash(log_path, err_path, tee_to_stdio=to_stdio)
 
-        # Foreground: safer to use subprocess.run (no deadlock).
+        # Force bash (not /bin/sh / dash) so process substitution `>(tee ...)` works.
         if to_stdio:
-            r = subprocess.run(arg, shell=True, text=True, cwd=cwd)
+            r = subprocess.run(["bash", "-c", arg], text=True, cwd=cwd)
         else:
-            r = subprocess.run(arg, shell=True, text=True, capture_output=True, cwd=cwd)
+            r = subprocess.run(["bash", "-c", arg], text=True, capture_output=True, cwd=cwd)
         if exp is not None:
+            self._post_exit_grace(exp, r.returncode)
             self._kill_peer_qemus(sentinel_dir)
         self.clean_up()
 
@@ -306,28 +343,20 @@ class Executor(abc.ABC):
         import libtmux  # type: ignore
 
         exp = self.get_experiment()
-        # Same prep-then-wait dance as the subprocess path: prep first (both
-        # nodes can do it in parallel), then wait for upstream's started, then
-        # touch our own started.
-        if exp is not None:
-            exp.prepare_for_execution()
-        self._wait_for_sentinels(sentinel_dir)
-        self._touch_sentinel(sentinel_dir, "started")
 
+        # Open the window FIRST so the user sees a pane per leaf immediately —
+        # otherwise prepare_for_execution()'s file copies (~tens of seconds on
+        # first run) make non-master nodes look like they "didn't launch tmux".
         server = libtmux.Server()
         if not server.sessions:
             raise RuntimeError(
                 "interactive_tmux requires a running tmux server — "
                 "run `tmux new -s qflex` first, then re-run."
             )
-        # If we're inside a tmux session already, target it; otherwise pick the
-        # first existing session. We never silently spawn a server.
         target_session_id = os.environ.get("TMUX")
         session = None
         if target_session_id:
             for s in server.sessions:
-                # TMUX env var is `<socket-path>,<server-pid>,<session-id>`; just
-                # match whatever the active session is.
                 if s.session_id and s.session_id in target_session_id:
                     session = s
                     break
@@ -337,6 +366,19 @@ class Executor(abc.ABC):
         window_name = f"{self._phase_name()}-node{exp.node_number}" if exp else self._phase_name()
         window = session.new_window(window_name=window_name, attach=False)
         pane = window.panes[0]
+        node_str = f"node {exp.node_number}" if exp is not None else "leaf"
+        pane.send_keys(
+            f"echo '[qflex] {node_str}: preparing experiment files (this can take ~tens of seconds on first run)...'",
+            enter=True,
+        )
+
+        # Same prep-then-wait dance as the subprocess path: prep first (both
+        # nodes can do it in parallel), then wait for upstream's started, then
+        # touch our own started.
+        if exp is not None:
+            exp.prepare_for_execution()
+        self._wait_for_sentinels(sentinel_dir)
+        self._touch_sentinel(sentinel_dir, "started")
 
         # Append the .done sentinel touch so we know exactly when QEMU exits.
         # _build_bash emits the unredirected bash here — output stays in the
@@ -356,7 +398,8 @@ class Executor(abc.ABC):
         return True
 
     def _print_dry_run_actions(self, cwd: str, sentinel_dir: str,
-                               log_path: str, err_path: str) -> None:
+                               log_path: str, err_path: str,
+                               *, to_stdio: bool = False) -> None:
         """Print the full sequence (Python wait/touch + bash + done-touch) so dry-run
         output reflects what _execute_leaf would actually do at run time. Embedded
         newlines in the bash (e.g. gdb's multiline python blocks) are collapsed to '\\n'
@@ -369,17 +412,23 @@ class Executor(abc.ABC):
             and exp is not None
             and exp.interactive_tmux
         )
+        # Tmux mode opens the window + prints a "preparing..." echo *before*
+        # prepare_for_execution, so the user sees a pane per leaf immediately.
+        if in_tmux_mode:
+            window_name = f"{self._phase_name()}-node{exp.node_number}"
+            node_str = f"node {exp.node_number}"
+            lines.append(f"  [tmux]     would open new window '{window_name}' and send-keys the bash")
+            lines.append(f"  [bash]     echo '[qflex] {node_str}: preparing experiment files (this can take ~tens of seconds on first run)...'")
         if sentinel_dir is not None and exp is not None:
             for n in exp.wait_for_nodes:
                 lines.append(f"  [py-wait]  {self._sentinel_path(sentinel_dir, n, 'started')}")
             lines.append(f"  [py-touch] {self._sentinel_path(sentinel_dir, exp.node_number, 'started')}")
-        if in_tmux_mode:
-            window_name = f"{self._phase_name()}-node{exp.node_number}"
-            lines.append(f"  [tmux]     would open new window '{window_name}' and send-keys the bash")
         # Tmux mode runs unredirected bash inside the pane; subprocess mode applies log/err redirect.
         bash_log = None if in_tmux_mode else log_path
         bash_err = None if in_tmux_mode else err_path
-        bash = self._build_bash(bash_log, bash_err).replace("\n", "\\n")
+        bash = self._build_bash(bash_log, bash_err,
+                                tee_to_stdio=(to_stdio and not in_tmux_mode)
+                                ).replace("\n", "\\n")
         if in_tmux_mode and sentinel_dir is not None and exp is not None:
             # Mirror the runtime: the tmux dispatch appends a `; touch <done>` to
             # the bash so Python can poll for QEMU exit.
@@ -411,6 +460,24 @@ class SimpleCMDExecutor(Executor):
 
     def cmd(self) -> str:
         return self.command
+
+
+class SimulationCommand(Executor):
+    """Base for phases that drive a multi-node simulation (FW, InitWarm, Load,
+    run-partition / run-single-partition / run-idx). Boot and image-creation
+    are NOT simulation phases — they shouldn't inherit from this. The shared
+    invariant: every link in `syncs_list` must be `"true"` so per-node sampling
+    stays aligned. Single-node (empty syncs_list) is vacuously fine."""
+
+    def _assert_syncs_true(self) -> None:
+        exp = self.get_experiment()
+        if exp is None or not exp.syncs_list:
+            return
+        bad = [s for s in exp.syncs_list if s != "true"]
+        assert not bad, (
+            f"{self.__class__.__name__}: all syncs_list entries must be 'true' "
+            f"(this phase needs deterministic multi-node sync), got {exp.syncs_list}"
+        )
 
 
 class SequentialGroupExecutor(Executor):

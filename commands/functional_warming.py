@@ -1,10 +1,10 @@
 import math
 
-from commands import Executor
+from commands import SimulationCommand
 from .config import ExperimentContext
 from commands.qemu import QemuCommonArgParser, wrap_with_gdb
 
-class FunctionalWarming(Executor):
+class FunctionalWarming(SimulationCommand):
     """
     This class handles the functional warming phase of the experiment and generates checkpoints.
     """
@@ -16,6 +16,7 @@ class FunctionalWarming(Executor):
         self.sample_size = sample_size
 
     def cmd(self) -> str:
+        self._assert_syncs_true()
         # Build per-context derived state fresh so this method works whether
         # self.experiment_context was set at __init__ or mutated later (multi-experiment dispatch).
         parser = QemuCommonArgParser(self.experiment_context)

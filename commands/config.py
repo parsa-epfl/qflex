@@ -328,7 +328,6 @@ class ExperimentContext(BaseModel):
             ("./QEMU_EFI.fd", "QEMU_EFI.fd"),
             ("./parallel-qemu-saved/pc-bios/efi-virtio.rom", "efi-virtio.rom"),
             ("./parallel-qemu-saved/pc-bios/efi-e1000.rom", "efi-e1000.rom"),
-            ("./qemu-img", "qemu-img"),
             ("debug.cfg", "debug.cfg"),
         ]
         for src, basename in run_files:

@@ -1,0 +1,156 @@
+#!/usr/bin/env expect
+# Init driver for multi-node followers (node_number > 0). Waits for the guest
+# to reach the login prompt, touches its `node<N>_at_login.flag` so the master
+# knows it's safe to savevm, then waits for the master's `savevm_done.flag`
+# before quitting. The master's savevm walks the PDES drain and persists every
+# node's CPU+memory into its own per-node qcow2, so this script does NOT issue
+# its own savevm — see MULTI_NODE.md "savevm is master-only".
+#
+# Refuses to run on node 0 (the master uses boot_login_savevm.exp).
+#
+# Like the master, this script DOES NOT log in.
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+set node_number  $env(NODE_NUMBER)
+
+set group_folder        [file dirname $exp_folder]
+set my_at_login_flag    "$group_folder/node${node_number}_at_login.flag"
+set my_savevm_done_flag "$group_folder/node${node_number}_savevm_done.flag"
+set my_boot_log         "$exp_folder/Boot.log"
+
+if {$node_number == 0 || $node_number == -1} {
+    puts "ERROR: boot_login_wait.exp ran on node $node_number — only multi-node followers (node_number > 0) should run this script. Master/single-node use boot_login_savevm.exp"
+    exit 1
+}
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+# Clear our own stale sentinels so the master doesn't see leftovers from a
+# prior run.
+catch {file delete -force $my_at_login_flag}
+catch {file delete -force $my_savevm_done_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
+# Poll a file for a literal substring with a wall-clock budget. Used to wait
+# for our own per-node savevm to complete by tailing the bash-redirected
+# Boot.log for qemu's `savevm log 7` printf — that's the last thing
+# save_snapshot() emits before returning, so seeing it means save finished.
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]
+            set content [read $fh]
+            close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
+# --- 1. Connect to serial + wait for login prompt ----------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+send "\r"
+
+expect {
+    timeout { puts "ERROR: timed out waiting for login prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: } { puts "[clock format [clock seconds]] saw login prompt — signalling master" }
+}
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+# --- 2. Tell the master we're at the login prompt ----------------------------
+
+if {[catch {set f [open $my_at_login_flag "w"]; close $f} err]} {
+    puts "WARN: could not write $my_at_login_flag: $err"
+} else {
+    puts "wrote at-login sentinel: $my_at_login_flag"
+}
+
+# --- 3. Wait for our OWN per-node savevm to complete ------------------------
+#
+# Master initiated `savevm boot-login`; the PDES drain dispatched a per-node
+# savevm to us as well. `savevm log 7` is the last printf inside save_snapshot()
+# (see migration/savevm.c) — it's the deterministic signal that our local
+# savevm finalised. Tail Boot.log (which captures qemu's stdout via the bash
+# redirect set up by the executor) for that marker.
+
+wait_for_substring $my_boot_log "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "saw 'savevm log 7' in $my_boot_log; per-node savevm completed"
+
+# Tell the master we're done so it can stop waiting and quit.
+if {[catch {set f [open $my_savevm_done_flag "w"]; close $f} err]} {
+    puts "WARN: could not write $my_savevm_done_flag: $err"
+} else {
+    puts "wrote per-node savevm-done sentinel: $my_savevm_done_flag"
+}
+
+# --- 4. quit -----------------------------------------------------------------
+
+quit_qemu $monitor_port
+exit 0

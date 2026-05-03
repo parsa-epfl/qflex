@@ -14,7 +14,7 @@
 set timeout 240
 
 # Wall-clock budgets for connect/wait operations (seconds). See expect-scripts skill.
-set BUDGET_INITIAL_S        10
+set BUDGET_INITIAL_S        100
 set BUDGET_DEFAULT_S         5
 set BUDGET_CHECKPOINTING_S 1800
 

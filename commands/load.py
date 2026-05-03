@@ -1,10 +1,10 @@
-from commands import Executor
+from commands import SimulationCommand
 from .config import ExperimentContext
 from commands.qemu import QemuCommonArgParser, wrap_with_gdb
 # TODO IMPORTANT, remove vanilla option
 
 
-class Load(Executor):
+class Load(SimulationCommand):
     # See Boot — Load is the other interactive-eligible phase.
     SUPPORTS_INTERACTIVE = True
 
@@ -15,6 +15,7 @@ class Load(Executor):
         self.vanilla = vanilla
 
     def cmd(self) -> str:
+        self._assert_syncs_true()
         exp = self.experiment_context
         # Path A (scripted): drop stdio so the parser emits serial-on-telnet via get_stdio().
         use_stdio = not bool(exp.interaction_script)

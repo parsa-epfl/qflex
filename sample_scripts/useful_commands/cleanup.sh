@@ -2,5 +2,5 @@
 
 set -euo pipefail
 pushd "$(dirname "$0")/../.." >/dev/null
-python ./qflex load --interactive-tmux -c $1
+./clean_up.sh
 popd >/dev/null

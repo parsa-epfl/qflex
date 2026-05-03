@@ -40,17 +40,25 @@ def test_boot_with_interaction_script_dry_run(multi_context):
     assert "NODE_NUMBER=0" in master.bash
     assert "./drive.exp &" in master.bash
     assert "wait $SCRIPT_PID" in master.bash
-    assert "-serial telnet:127.0.0.1:55600,server,nowait" in master.bash
-    assert "-monitor telnet:127.0.0.1:55558,server,nowait" in master.bash
+    # Path A routes serial+monitor through `-chardev socket,...,logfile=...` so
+    # qemu mirrors all I/O to disk in addition to the telnet endpoint.
+    assert "port=55600,server=on,wait=off,telnet=on" in master.bash
+    assert "logfile=" in master.bash and "/qemu_serial.log" in master.bash
+    assert "-serial chardev:qflex_serial" in master.bash
+    assert "port=55558,server=on,wait=off,telnet=on" in master.bash
+    assert "/qemu_monitor.log" in master.bash
+    assert "-monitor chardev:qflex_monitor" in master.bash
     assert "-serial mon:stdio" not in master.bash
     assert "-serial file:" not in master.bash
+    assert "-serial telnet:" not in master.bash
+    assert "-monitor telnet:" not in master.bash
 
     # Node 1 → ports 55601 + 55559.
     assert "TELNET_SERIAL_PORT=55601" in follower.bash
     assert "TELNET_MONITOR_PORT=55559" in follower.bash
     assert "NODE_NUMBER=1" in follower.bash
-    assert "-serial telnet:127.0.0.1:55601,server,nowait" in follower.bash
-    assert "-monitor telnet:127.0.0.1:55559,server,nowait" in follower.bash
+    assert "port=55601,server=on,wait=off,telnet=on" in follower.bash
+    assert "port=55559,server=on,wait=off,telnet=on" in follower.bash
 
 
 def test_boot_with_login_ls_script_single_node(mock_mounting_folder, login_ls_script):
@@ -91,11 +99,18 @@ def test_boot_with_login_ls_script_single_node(mock_mounting_folder, login_ls_sc
     assert "NODE_NUMBER=-1" in leaf.bash    # single-node default
     assert "wait $SCRIPT_PID" in leaf.bash
 
-    # QEMU args use telnet endpoints, not stdio multiplexing.
-    assert "-serial telnet:127.0.0.1:55600,server,nowait" in leaf.bash
-    assert "-monitor telnet:127.0.0.1:55558,server,nowait" in leaf.bash
+    # QEMU args use chardev-with-logfile (Path A), not stdio multiplexing or
+    # bare telnet shorthand.
+    assert "port=55600,server=on,wait=off,telnet=on" in leaf.bash
+    assert "/qemu_serial.log" in leaf.bash
+    assert "-serial chardev:qflex_serial" in leaf.bash
+    assert "port=55558,server=on,wait=off,telnet=on" in leaf.bash
+    assert "/qemu_monitor.log" in leaf.bash
+    assert "-monitor chardev:qflex_monitor" in leaf.bash
     assert "-serial mon:stdio" not in leaf.bash
     assert "-serial file:" not in leaf.bash
+    assert "-serial telnet:" not in leaf.bash
+    assert "-monitor telnet:" not in leaf.bash
 
 
 def test_boot_with_login_ls_script_two_nodes(multi_context, login_ls_script):
@@ -119,16 +134,18 @@ def test_boot_with_login_ls_script_two_nodes(multi_context, login_ls_script):
     assert "TELNET_MONITOR_PORT=55558" in master.bash
     assert "NODE_NUMBER=0" in master.bash
     assert login_ls_script in master.bash
-    assert "-serial telnet:127.0.0.1:55600,server,nowait" in master.bash
-    assert "-monitor telnet:127.0.0.1:55558,server,nowait" in master.bash
+    assert "port=55600,server=on,wait=off,telnet=on" in master.bash
+    assert "port=55558,server=on,wait=off,telnet=on" in master.bash
+    assert "/qemu_serial.log" in master.bash
+    assert "/qemu_monitor.log" in master.bash
 
     # Node 1: ports 55601 / 55559, env shows NODE_NUMBER=1.
     assert "TELNET_SERIAL_PORT=55601" in follower.bash
     assert "TELNET_MONITOR_PORT=55559" in follower.bash
     assert "NODE_NUMBER=1" in follower.bash
     assert login_ls_script in follower.bash
-    assert "-serial telnet:127.0.0.1:55601,server,nowait" in follower.bash
-    assert "-monitor telnet:127.0.0.1:55559,server,nowait" in follower.bash
+    assert "port=55601,server=on,wait=off,telnet=on" in follower.bash
+    assert "port=55559,server=on,wait=off,telnet=on" in follower.bash
 
 
 def test_boot_interactive_tmux_dry_run(multi_context):

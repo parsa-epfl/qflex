@@ -32,7 +32,7 @@ def test_run_partition_runs_partitions_in_parallel(multi_context, monkeypatch):
     from commands.run_partition import RunPartitionCommand
     from commands.config import ExperimentContext
     from commands.run_idx import RunIdxCommand
-    from commands.executer import SimpleCMDExecutor
+    from commands.executer import Executor, SimpleCMDExecutor
 
     # Skip leaf prep (would try to copy non-existent QEMU binaries) and shm cleanup.
     monkeypatch.setattr(ExperimentContext, "prepare_for_execution", lambda self: None)
@@ -41,6 +41,11 @@ def test_run_partition_runs_partitions_in_parallel(multi_context, monkeypatch):
     monkeypatch.setattr(RunIdxCommand, "cmd", lambda self: ["sleep 1"])
     # Skip the inter-idx 5s "let the system recover" sleeps and the "rm output_state".
     monkeypatch.setattr(SimpleCMDExecutor, "cmd", lambda self: ":")
+    # Multi-node executor has a 30s post-exit grace before peer cleanup; with
+    # this sub-experiment having neighbor_node_list=[1] each leaf would burn
+    # the full 30s, blowing the wall-clock budget. Zero it for this test —
+    # we're testing dispatch parallelism, not the grace.
+    monkeypatch.setattr(Executor, "POST_EXIT_GRACE_SECONDS", 0)
 
     master = multi_context.sub_experiments[0]
     runner = RunPartitionCommand(experiment_context=master,

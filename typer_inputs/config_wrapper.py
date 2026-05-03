@@ -180,9 +180,17 @@ def data_class_wrap(target: Callable, *, name: str):
 
             if config_path:
                 from dep_injection.builder import build_experiment_context
+                comp_overrides = None
+                if cli_overrides:
+                    target_path = f"{target.__module__}.{target.__qualname__}"
+                    comp_overrides = {
+                        cn: cli_overrides
+                        for cn, c in cfg.get("components", {}).items()
+                        if c.get("_target_") == target_path
+                    }
                 kwargs[name] = build_experiment_context(
                     config_path,
-                    component_overrides={name: cli_overrides} if cli_overrides else None,
+                    component_overrides=comp_overrides,
                 )
             else:
                 kwargs[name] = target(**cli_overrides)

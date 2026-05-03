@@ -1,33 +1,9 @@
+extends: DC_base
+
 components:
   experiment_context:
-    _target_: commands.config.create_experiment_context
-
-
-    # simulation
-    quantum_size: 1000
-    core_count: 1
-    doubled_vcpu: false
-
-    # simulation
-    llc_size_per_tile_mb: 2
-    is_parallel: true
-    network: none
-    memory_gb: 64
-    check_period_quantum_coeff: 5
-
-    # host
-    host_name: ZEN3
-
-    # workload
-    workload_name: data-caching
-    population_seconds: 5
-    is_consolidated: false
-    primary_ipc: 2.0
-    primary_core_start: 0
-
-    # experiment
-    image_folder: /mnt/sdc/data-caching-1c/
-    mounting_folder: /mnt/sdc/data-caching-1c/
+    _base_: _leaf_defaults
+    experiment_name: data-caching-comparison
+    doubled_vcpu: true
+    phantom_cpu_ipc: 2
     image_name: root-single-node.qcow2
-    keep_experiment_unique: false
-    use_image_directly: true

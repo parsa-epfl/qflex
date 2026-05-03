@@ -216,7 +216,7 @@ def mock_mounting_folder(tmp_path):
     mf = str(tmp_path)
     os.makedirs(f"{mf}/images", exist_ok=True)
 
-    for sub_name in ("data-caching_yaml_node_0", "data-caching_yaml_node_1"):
+    for sub_name in ("data-caching-comparison-node-0", "data-caching-comparison-node-1"):
         exp_folder = f"{mf}/experiments/{sub_name}"
         os.makedirs(f"{exp_folder}/run", exist_ok=True)
         os.makedirs(f"{exp_folder}/cfg", exist_ok=True)
@@ -265,9 +265,87 @@ def multi_context(mock_mounting_folder):
 # ============================================================================
 # Real-run helpers — shared by tests/test_real_runs*.py.
 #
-# These tests skip themselves unless QFLEX_REAL_RUN_TESTS=1, but the helpers
-# below are imported by both files (via `from .conftest import ...`).
+# Real-run tests are ENABLED by default (the qcow2 snapshot bootstrapped by
+# tests/test_real_runs_init.py keeps them fast — minutes instead of dozens of
+# minutes). Set QFLEX_SKIP_REAL_RUN=1 to disable them.
+#
+# The init tests under tests/test_real_runs_init.py are gated separately by
+# QFLEX_INIT_TEST=1 because they DO take a full Alpine boot — they only need
+# to be re-run after the qcow2 is reset or QEMU binaries change.
 # ============================================================================
+
+
+def _real_run_disabled() -> bool:
+    return os.environ.get("QFLEX_SKIP_REAL_RUN", "").lower() in ("1", "true", "yes")
+
+
+def _qcow2_has_snapshot(qcow2_path: str, snapshot_name: str) -> bool:
+    """True iff `qemu-img snapshot -l <qcow2>` lists a snapshot tagged
+    `snapshot_name`. Used by the regular real-run tests to skip when the
+    boot-login snapshot hasn't been bootstrapped (init tests not yet run)."""
+    if not os.path.exists(qcow2_path):
+        return False
+    try:
+        r = subprocess.run(
+            ["qemu-img", "snapshot", "-l", qcow2_path],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    if r.returncode != 0:
+        return False
+    # Output columns: ID TAG VM_SIZE DATE VM_CLOCK ICOUNT — match on the TAG column.
+    for line in r.stdout.splitlines():
+        toks = line.split()
+        if len(toks) >= 2 and toks[1] == snapshot_name:
+            return True
+    return False
+
+
+def require_snapshot(qcow2_paths: list[str], snapshot_name: str,
+                     bootstrap_hint: str) -> None:
+    """pytest.skip if any of `qcow2_paths` is missing the named snapshot.
+    Tests call this from the body (after the dev_container fixture) so the skip
+    message can name the missing files concretely."""
+    missing = [p for p in qcow2_paths if not _qcow2_has_snapshot(p, snapshot_name)]
+    if missing:
+        pytest.skip(
+            f"missing {snapshot_name!r} snapshot in: "
+            + ", ".join(missing)
+            + f" — {bootstrap_hint}"
+        )
+
+
+def require_boot_login_snapshot(qcow2_paths: list[str]) -> None:
+    """Convenience wrapper: skip if `boot-login` is missing, with the canonical
+    init-test bootstrap hint."""
+    require_snapshot(
+        qcow2_paths,
+        "boot-login",
+        "bootstrap with `QFLEX_INIT_TEST=1 make test-real-one "
+        "TEST=tests/test_real_runs_init.py`",
+    )
+
+
+def require_boot_login_zstd(experiment_run_dirs: list[str]) -> None:
+    """Skip if `boot-login.zstd` is missing in any of the given experiment
+    `<run/>` dirs. parallel-qemu's savevm writes the actual VM state to an
+    external `<name>.zstd` next to the qemu cwd; the qcow2 internal entry is
+    just a bookkeeping pointer and isn't sufficient on its own — `loadvm`
+    fails with "Not a migration stream" when the data file is missing."""
+    missing = [
+        f"{d}/boot-login.zstd"
+        for d in experiment_run_dirs
+        if not os.path.exists(f"{d}/boot-login.zstd")
+    ]
+    if missing:
+        pytest.skip(
+            "missing boot-login.zstd in: "
+            + ", ".join(missing)
+            + " — bootstrap with `QFLEX_INIT_TEST=1 make test-real-one "
+            "TEST=tests/test_real_runs_init.py`"
+        )
+
 
 def _docker_available() -> bool:
     if shutil.which("docker") is None:
@@ -319,8 +397,8 @@ def dev_container():
     Always `./dep stop-docker` first to clear any leftover container from a
     prior crashed run.
     """
-    if not os.environ.get("QFLEX_REAL_RUN_TESTS"):
-        pytest.skip("set QFLEX_REAL_RUN_TESTS=1 to enable real docker-based runs")
+    if _real_run_disabled():
+        pytest.skip("QFLEX_SKIP_REAL_RUN is set")
     if not _docker_available():
         pytest.skip("docker daemon not reachable")
     if not _qflex_image_present():

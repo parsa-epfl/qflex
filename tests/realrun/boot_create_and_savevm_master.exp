@@ -181,9 +181,15 @@ if {[catch {set f [open $savevm_done_flag "w"]; close $f} err]} {
 #
 # Switch back to the serial connection. The buffer may have stray bytes from
 # the drain pause/resume, so send a `\r` to nudge a clean prompt before ls.
+#
+# Use the checkpointing budget for the post-savevm prompt: under multi-node
+# PDES with sync=false + high latency, the guest can take a while to deliver
+# the `\r` echo back over the telnet/chardev socket once it resumes from the
+# drain. The default 5s budget (matching `BUDGET_DEFAULT_S`) was too short and
+# tripped "ERROR: serial prompt timed out post-savevm" in real runs.
 
 set spawn_id $serial_sid
-set timeout $BUDGET_DEFAULT_S
+set timeout $BUDGET_CHECKPOINTING_S
 
 send "\r"
 expect {

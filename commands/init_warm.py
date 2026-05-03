@@ -1,11 +1,11 @@
 import os
-from commands import Executor
+from commands import SimulationCommand
 from .config import ExperimentContext
 from commands.qemu import QemuCommonArgParser, wrap_with_gdb
 from typing import List
 from .jinja_loaders import wormloader, FlexusCheckpointConfigLoader, TimingLoader, FlexusScriptLoader
 
-class InitWarm(Executor):
+class InitWarm(SimulationCommand):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
@@ -55,6 +55,7 @@ class InitWarm(Executor):
         ]
 
     def cmd(self) -> str:
+        self._assert_syncs_true()
         # Render the cfg files for THIS experiment_context (could be a sub after multi dispatch).
         worm_params_address = self._generate_cfgs()
 

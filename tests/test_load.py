@@ -33,6 +33,12 @@ def test_load_with_interaction_script_dry_run(multi_context):
     for b in leaves:
         assert "./drive_load.exp &" in b.bash
         assert "wait $SCRIPT_PID" in b.bash
-        assert "-serial telnet:" in b.bash
-        assert "-monitor telnet:" in b.bash
+        # Path A: serial+monitor go through chardev with logfile, not the
+        # bare telnet shorthand.
+        assert "-serial chardev:qflex_serial" in b.bash
+        assert "-monitor chardev:qflex_monitor" in b.bash
+        assert "/qemu_serial.log" in b.bash
+        assert "/qemu_monitor.log" in b.bash
+        assert "-serial telnet:" not in b.bash
+        assert "-monitor telnet:" not in b.bash
         assert "-serial mon:stdio" not in b.bash

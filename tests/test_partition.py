@@ -16,7 +16,7 @@ def test_partition_two_nodes(multi_context, mock_mounting_folder):
     remove the pre-existing partition_* dirs first so PartitionCommand doesn't bail
     with 'partitions already exist' (the fixture creates them for the run-* tests;
     they don't belong here)."""
-    for sub_name in ("data-caching_yaml_node_0", "data-caching_yaml_node_1"):
+    for sub_name in ("data-caching-comparison-node-0", "data-caching-comparison-node-1"):
         run = f"{mock_mounting_folder}/experiments/{sub_name}/run"
         for p in os.listdir(run):
             if p.startswith("partition_"):

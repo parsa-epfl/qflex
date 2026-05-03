@@ -84,25 +84,37 @@ set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
 set spawn_id $serial_sid
 
 # loadvm replays the snapshotted serial state — bytes can stream in over
-# multiple seconds, and prompt-regex matching races against partial buffer
-# content. Drain everything for 5s of silence first, then send ls and drain
-# the response. The captured bytes contain ls's echo + the listed files;
-# the test asserts a known filename is in there.
+# many seconds under multi-node PDES, so we use the checkpointing budget here.
+# But: anchor on the SHELL PROMPT regex so we exit as soon as it comes back,
+# not after the full timeout. The previous fixed 5s+2s drain wasn't enough
+# under PDES — the guest's ls echo had only emitted `l` when the drain expired.
 set saved_timeout $timeout
-set timeout 5
-expect { -re {.+} { exp_continue } timeout { } }
+set timeout $BUDGET_CHECKPOINTING_S
 
-send "ls\r"
-sleep 1
-set ls_output ""
-set timeout 2
+# Nudge a fresh prompt (the buffer post-loadvm may have stale telnet/escape
+# bytes) and wait until the shell is responsive again.
+send "\r"
 expect {
-    -re {.+} {
-        append ls_output $expect_out(buffer)
-        exp_continue
-    }
-    timeout { }
+    timeout { puts "ERROR: serial prompt timed out post-loadvm"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
 }
+
+# Two-stage match: first wait for the guest to ECHO `ls\r` back (this consumes
+# any stale prompt redraw still in the buffer from the `\r` nudge above), then
+# wait for the post-ls prompt. Buffer between the two matches is the ls output
+# itself (file listing). Without the first stage, `[\$#] +` matches the
+# leftover redraw prompt before the ls output even arrives, and we capture
+# garbage like `\nqflex:~$ \n`.
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls echo didn't come back"; quit_qemu $monitor_port; exit 1 }
+    "ls\r"
+}
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+set ls_output $expect_out(buffer)
 set timeout $saved_timeout
 
 if {[string length $ls_output] == 0} {

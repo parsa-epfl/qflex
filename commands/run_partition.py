@@ -1,11 +1,11 @@
 import glob
 
-from .executer import Executor
+from .executer import SimulationCommand
 from .config import ExperimentContext, clone_experiment_context
 from .run_single_partition import RunSinglePartitionCommand
 
 
-class RunPartitionCommand(Executor):
+class RunPartitionCommand(SimulationCommand):
     """Per-partition parallelism expressed via sub_experiments + the base Executor's
     multi-experiment dispatch (which uses mp.Process). At the node level the sub_experiments
     aren't set on the YAML context — they're generated here from the on-disk partition_*
@@ -37,6 +37,7 @@ class RunPartitionCommand(Executor):
     def execute(self, to_stdio: bool = False, run_in_background: bool = False,
                 dry_run: bool = False, *,
                 sentinel_dir: str = None, log_path: str = None, err_path: str = None) -> bool:
+        self._assert_syncs_true()
         exp = self.experiment_context
 
         # Already a multi-node group from the YAML — let the base dispatch fan out.

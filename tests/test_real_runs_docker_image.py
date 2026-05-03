@@ -4,10 +4,10 @@ previously applied by hand from multi-node-dc/fixes.sh and docker_fixes.sh.
 Each test asserts one image-baked invariant and is independent of the others —
 if one regresses we want to see exactly which fix dropped out.
 
-Same gate as tests/test_real_runs.py: skipped unless QFLEX_REAL_RUN_TESTS=1, the
-docker daemon is reachable, and at least one ghcr.io/parsa-epfl/qflex image is
-present locally. Reuses the session-scoped `dev_container` fixture from
-tests/conftest.py so every assertion runs against the same long-lived container.
+Same gate as tests/test_real_runs.py: enabled by default; set
+QFLEX_SKIP_REAL_RUN=1 to disable, plus docker reachable + qflex image local.
+Reuses the session-scoped `dev_container` fixture from tests/conftest.py so
+every assertion runs against the same long-lived container.
 """
 import os
 
@@ -17,6 +17,7 @@ from .conftest import (
     _docker_available,
     _exec_in_container,
     _qflex_image_present,
+    _real_run_disabled,
 )
 from commands.docker import _read_host_dns
 
@@ -25,10 +26,7 @@ from commands.docker import _read_host_dns
 _HOST_DNS_SERVERS, _HOST_DNS_SEARCH = _read_host_dns()
 
 pytestmark = [
-    pytest.mark.skipif(
-        not os.environ.get("QFLEX_REAL_RUN_TESTS"),
-        reason="set QFLEX_REAL_RUN_TESTS=1 to enable real docker-based runs",
-    ),
+    pytest.mark.skipif(_real_run_disabled(), reason="QFLEX_SKIP_REAL_RUN is set"),
     pytest.mark.skipif(not _docker_available(), reason="docker daemon not reachable"),
     pytest.mark.skipif(not _qflex_image_present(),
                        reason="ghcr.io/parsa-epfl/qflex image not present locally; "
