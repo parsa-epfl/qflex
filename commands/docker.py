@@ -223,7 +223,8 @@ class DockerBuild(Executor):
                  debug: bool = False,
                  worm: bool = False,
                  worm_only: bool = False,
-                 push: bool = False):
+                 push: bool = False,
+                 no_cache: bool = False):
         self.debug = debug
         self.worm = worm
         if self.worm:
@@ -236,6 +237,7 @@ class DockerBuild(Executor):
             self.build_type = 'debug'
         self.worm_only = worm_only
         self.push = push
+        self.no_cache = no_cache
         self.version = get_version()
         # TODO add checks to prevent overwriting existing images
         print(f"============== Building QFlex version: {self.version} ==============")
@@ -249,10 +251,12 @@ class DockerBuild(Executor):
         local_worm_name = f"{self.docker_image_name_with_worm}:{self.version}"
         ghcr_worm_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
 
+        cache_flag = " --no-cache" if self.no_cache else ""
+
         # TODO do some docker renamig
         dep_image_name = "qflex-dependencies"
         dep_docker_build_cmd = [
-            f"""docker buildx build -t {dep_image_name} . -f Dockerfile
+            f"""docker buildx build{cache_flag} -t {dep_image_name} . -f Dockerfile
             """,
         ]
 
@@ -261,7 +265,7 @@ class DockerBuild(Executor):
         if not self.worm_only:
             base_image_build_cmd = [
                 f"""
-                docker buildx build -t {local_qflex_name} . -f Dockerfile.qemu.{self.build_type} --build-arg BASE_IMAGE={dep_image_name}
+                docker buildx build{cache_flag} -t {local_qflex_name} . -f Dockerfile.qemu.{self.build_type} --build-arg BASE_IMAGE={dep_image_name}
                 """,
                 f"docker tag {local_qflex_name} {ghcr_qflex_name}"
             ]
@@ -278,7 +282,7 @@ class DockerBuild(Executor):
 
         worm_image_cmd = [
             f"""
-            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.WormCacheQFlex .
+            docker buildx build{cache_flag} -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.WormCacheQFlex .
             """,
             f"docker tag {local_worm_name} {ghcr_worm_name}"
         ]

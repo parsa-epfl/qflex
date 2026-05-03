@@ -1,0 +1,16 @@
+# Test fixture used by tests/test_real_runs_savevm.py::test_02 — companion to
+# dc-multi-savevm-create.yaml. Each leaf restores via `-loadvm qflex-makefile-test`
+# and runs the same load+ls driver. All knobs live in YAML; the python test
+# doesn't pass any flags.
+extends: ../../conf/DC/dc-multi
+
+components:
+  experiment_context_node_0:
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/load_verify_ls.exp
+    loadvm_name: qflex-makefile-test
+
+  experiment_context_node_1:
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/load_verify_ls.exp
+    loadvm_name: qflex-makefile-test

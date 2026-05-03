@@ -13,6 +13,11 @@
 
 set timeout 240
 
+# Wall-clock budgets for connect/wait operations (seconds). See expect-scripts skill.
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_CHECKPOINTING_S 1800
+
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
 set exp_folder   $env(EXP_FOLDER)
@@ -24,15 +29,14 @@ catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
 
 # Spawn telnet and verify the connection actually came up — `spawn` succeeds
-# even if telnet immediately fails ("Connection refused"), so we must look at
-# what telnet wrote. Returns the spawn_id on success, or -1 if all retries
-# exhausted.
-proc connect_telnet {host port max_attempts} {
+# even if telnet immediately fails ("Connection refused"). Caller passes the
+# wall-clock deadline; expect's `set timeout` doesn't bound while/sleep loops.
+proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
     set saved_timeout $timeout
     set timeout 5
-    set sid -1
-    for {set i 0} {$i < $max_attempts} {incr i} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
         spawn telnet $host $port
         set this_sid $spawn_id
         set ok 0
@@ -43,33 +47,31 @@ proc connect_telnet {host port max_attempts} {
             eof { }
         }
         if {$ok} {
-            set sid $this_sid
-            break
+            set timeout $saved_timeout
+            return $this_sid
         }
         catch {close -i $this_sid}
         catch {wait -i $this_sid}
         sleep 2
     }
     set timeout $saved_timeout
-    return $sid
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
 }
 
 proc quit_qemu {monitor_port} {
-    # Best-effort QEMU shutdown via the monitor telnet endpoint. We swallow
-    # errors here — the goal is "leave the host's `gdb -ex run --args qemu`
-    # process unstuck", not perfect cleanliness.
-    set sid [connect_telnet 127.0.0.1 $monitor_port 5]
-    if {$sid == -1} {
-        puts "quit_qemu: could not connect to monitor on port $monitor_port"
+    global BUDGET_DEFAULT_S
+    # Best-effort: if the monitor port doesn't accept us, qemu has already
+    # exited — stop polling and return cleanly.
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
         return
     }
-    set timeout 30
+    set timeout $BUDGET_DEFAULT_S
     expect {
         -i $sid
         timeout { puts "quit_qemu: monitor didn't prompt" }
         "(qemu) " {
             send -i $sid "quit\r"
-            expect -i $sid eof
+            catch {expect -i $sid eof}
         }
     }
 }
@@ -77,12 +79,7 @@ proc quit_qemu {monitor_port} {
 set ok 0
 
 # Connect to the guest serial console — retry while QEMU brings the listener up.
-set serial_sid [connect_telnet 127.0.0.1 $serial_port 60]
-if {$serial_sid == -1} {
-    puts "ERROR: could not connect to serial telnet on port $serial_port after retries"
-    quit_qemu $monitor_port
-    exit 1
-}
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
 
 # Make subsequent send/expect operate on the validated serial connection.
 set spawn_id $serial_sid

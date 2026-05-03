@@ -54,13 +54,13 @@ def boot(
     Boot a QEMU virtual machine with specified parameters.
     Once booted, you can log in with username 'root' and no password.
     After installing your desired packages and making changes,
-    you can save the state with Ctrl+A, then C to create a snapshot named 'base' by savevm base, 
+    you can save the state with Ctrl+A, then C to create a snapshot named 'base' by savevm base,
     then exit with Ctrl+C, then quit.
     This is the second step to create the images for an experiment, with all the necessary packages installed.
     """
     boot_executor = Boot(
         experiment_context=experiment_context,
-        vanilla=vanilla
+        vanilla=vanilla,
     )
     boot_executor.execute(to_stdio=True, run_in_background=False)
 
@@ -79,7 +79,7 @@ def load(
     """
     load_executor = Load(
         experiment_context=experiment_context,
-        vanilla=vanilla
+        vanilla=vanilla,
     )
     load_executor.execute(to_stdio=True, run_in_background=False)
 

@@ -123,10 +123,10 @@ def capture_dry_run_stdout():
 
 @pytest.fixture
 def login_ls_script() -> str:
-    """Absolute path to sample_scripts/login_and_ls.exp.
+    """Absolute path to tests/realrun/login_and_ls.exp.
     Used by the Path A interaction-script tests for both single-node and two-node
     boot configurations."""
-    path = os.path.join(REPO_ROOT, "sample_scripts", "login_and_ls.exp")
+    path = os.path.join(REPO_ROOT, "tests", "realrun", "login_and_ls.exp")
     assert os.path.exists(path), f"sample script missing: {path}"
     return path
 
@@ -360,24 +360,15 @@ def dev_container():
             f"stdout:\n{start.stdout}\nstderr:\n{start.stderr}"
         )
 
-    # The published images predate the YAML/DI layer (`injector`, `omegaconf`)
-    # and the libtmux Path B. Best-effort `pip install` of the new deps so any
-    # qflex command that hits the DI loader (anything with `-c <yaml>`) imports
-    # cleanly. Skip rather than fail if pip itself errors.
-    pip = subprocess.run(
+    # Sweep stale qemu processes / `/dev/shm/pdes_*` files left by prior runs
+    # (the user may have been driving qflex-dev manually in parallel; the
+    # container is `--pid=host` so host-level leftovers would otherwise
+    # collide with our test's ports / shm names).
+    subprocess.run(
         ["./dep", "exec", "--container-name", TEST_CONTAINER_NAME,
-         "--command", "pip install --quiet injector 'omegaconf>=2.3' libtmux"],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
+         "--command", "./clean_up.sh"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
     )
-    if pip.returncode != 0:
-        subprocess.run(
-            ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
-            cwd=REPO_ROOT, capture_output=True, timeout=30,
-        )
-        pytest.skip(
-            f"pip install of injector/omegaconf/libtmux failed inside the container "
-            f"(rc={pip.returncode}):\n{pip.stderr[-800:]}"
-        )
 
     try:
         yield mounting

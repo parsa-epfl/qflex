@@ -2,7 +2,7 @@ import math
 
 from commands import Executor
 from .config import ExperimentContext
-from commands.qemu import QemuCommonArgParser
+from commands.qemu import QemuCommonArgParser, wrap_with_gdb
 
 class FunctionalWarming(Executor):
     """
@@ -23,11 +23,12 @@ class FunctionalWarming(Executor):
             (self.experiment_context.workload.population + self.sample_size - 1) / self.sample_size
         )
 
-        fw_cmd = f"""
-            gdb -ex run --args ./qemu-system-aarch64 \
-            {parser.get_qemu_base_args()} \
-            -plugin ../lib/libworm_cache.so,mode=warm,init_threshold={sampling_interval},interval={sampling_interval},count={self.sample_size} \
-        """
+        fw_cmd = wrap_with_gdb(
+            f"./qemu-system-aarch64 {parser.get_qemu_base_args()} "
+            f"-plugin ../lib/libworm_cache.so,mode=warm,"
+            f"init_threshold={sampling_interval},interval={sampling_interval},count={self.sample_size}",
+            self.experiment_context.use_gdb,
+        )
         tock_command = " tock=$(($(date +%s%N) / 1000000)) "
         time_command = ' echo "Elapsed: $((tock - tick)) ms " '
         return [

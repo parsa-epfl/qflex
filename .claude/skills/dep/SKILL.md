@@ -9,8 +9,17 @@ description: Use when working with the host-side `./dep` Typer CLI — the launc
 
 ## CLI surface
 
+**Extend, don't bypass.** When `./dep` lacks a flag you need, add it here and
+to `DockerBuild` / `DockerStarter` in [commands/docker.py](../../../commands/docker.py)
+— never issue raw `docker buildx build` (or `docker run`) from the assistant.
+Same goes for anything the [Makefile](../../../Makefile) already wraps
+(`make test-real-one`, `make qemu-build`, etc.) — extend the target instead of
+hand-rolling the equivalent shell. The `--no-cache` flag below was added this
+way after the assistant initially reached for raw `docker buildx build
+--no-cache`.
+
 ```sh
-./dep build-docker [--debug] [--worm] [--worm-only] [--push]
+./dep build-docker [--debug] [--worm] [--worm-only] [--push] [--no-cache]
 ./dep start-docker --mounting-folder <path> [--debug] [--worm] [--start-directory <dir>] [--background] [--container-name qflex-dev]
 ./dep exec --command "<bash>" [--container-name qflex-dev] [--working-directory /home/dev/qflex]
 ./dep stop-docker [--container-name qflex-dev]
@@ -20,7 +29,7 @@ description: Use when working with the host-side `./dep` Typer CLI — the launc
 
 | Subcommand | What it does | Notes |
 |---|---|---|
-| `build-docker` | `docker buildx` for the dev image (`Dockerfile` → deps + perf/Rust/inferno; `Dockerfile.qemu.{release,debug}` → qemu + parallel-qemu + flexus build; optionally `Dockerfile.WormCacheQFlex`). Tags `ghcr.io/parsa-epfl/qflex:<variant>-<version>`. `--push` pushes to GHCR (auth required). | Implemented by `DockerBuild` in [commands/docker.py](../../../commands/docker.py). |
+| `build-docker` | `docker buildx` for the dev image (`Dockerfile` → deps + perf/Rust/inferno; `Dockerfile.qemu.{release,debug}` → qemu + parallel-qemu + flexus build; optionally `Dockerfile.WormCacheQFlex`). Tags `ghcr.io/parsa-epfl/qflex:<variant>-<version>`. `--push` pushes to GHCR (auth required). `--no-cache` does a from-scratch rebuild — threads `--no-cache` into every `docker buildx build` step. | Implemented by `DockerBuild` in [commands/docker.py](../../../commands/docker.py). |
 | `start-docker` (default) | `docker run -it --entrypoint /bin/bash <image>` with all the QFlex mounts. Drops the user into an interactive bash inside the container. | Implemented by `DockerStarter` ([commands/docker.py](../../../commands/docker.py)). `--mounting-folder` is required — that path is mounted into the container at the same absolute path. |
 | `start-docker --background` | `docker run -d --name qflex-dev --entrypoint /bin/bash <image> -c "tail -f /dev/null"`. Same mounts as the interactive variant, but detached + named + kept alive. Subsequent `./dep exec` calls land inside this container. | The `tail -f /dev/null` keep-alive is the standard "do nothing forever" idiom. The container stays up until `./dep stop-docker`. |
 | `exec` | `docker exec -w /home/dev/qflex <name> /bin/bash -c "<command>"` against the running container. Fast — no per-call container start. **Requires** `start-docker --background` to have been run first. | New `DockerExec` class in [commands/docker.py](../../../commands/docker.py); uses `shlex.quote` so internal quotes / spaces in the command Just Work. |

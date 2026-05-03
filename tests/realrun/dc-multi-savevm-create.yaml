@@ -1,0 +1,16 @@
+# Test fixture used by tests/test_real_runs_savevm.py::test_01.
+# Per the master/non-master split rule, the two leaves use different scripts:
+#   - node 0 (master) drives savevm + writes the savevm-done sentinel.
+#   - node 1 (non-master) waits on the sentinel before quitting.
+# All knobs the test relies on (use_gdb, interaction_script) live in this YAML;
+# the python test file doesn't pass any flags.
+extends: ../../conf/DC/dc-multi
+
+components:
+  experiment_context_node_0:
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/boot_create_and_savevm_master.exp
+
+  experiment_context_node_1:
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/boot_create_and_wait.exp

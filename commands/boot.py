@@ -1,6 +1,6 @@
 from commands import Executor
 from .config import ExperimentContext
-from commands.qemu import QemuCommonArgParser
+from commands.qemu import QemuCommonArgParser, wrap_with_gdb
 # TODO IMPORTANT, remove vanilla option
 
 class Boot(Executor):
@@ -27,7 +27,10 @@ class Boot(Executor):
         # Path A (scripted): drop stdio so the parser emits serial-on-telnet via get_stdio().
         use_stdio = not bool(exp.interaction_script)
         parser = QemuCommonArgParser(exp, use_stdio=use_stdio)
-        gdb_cmd = f"gdb -ex run --args ./qemu-system-aarch64 {parser.get_qemu_base_args()}"
+        gdb_cmd = wrap_with_gdb(
+            f"./qemu-system-aarch64 {parser.get_qemu_base_args()}",
+            exp.use_gdb,
+        )
 
         if not exp.interaction_script:
             return [

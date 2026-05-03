@@ -1,6 +1,13 @@
 import os
 from commands.config import ExperimentContext
 
+
+def wrap_with_gdb(qemu_invocation: str, use_gdb: bool) -> str:
+    if not use_gdb:
+        return qemu_invocation
+    return f"yes | gdb -ex run --args {qemu_invocation}"
+
+
 class QemuCommonArgParser:
     def __init__(self, 
                  experiment_context: ExperimentContext,

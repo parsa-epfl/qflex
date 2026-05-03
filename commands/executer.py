@@ -17,6 +17,9 @@ def _is_dry_run(dry_run: bool) -> bool:
     return os.environ.get(DRY_RUN_ENV_VAR, "").lower() in ("1", "true", "yes")
 
 
+KILLED_BY_PEER_SUFFIX = "killed_by_peer"
+
+
 def _multi_experiment_target(executor: "Executor", sub: ExperimentContext, kw: dict) -> None:
     """mp.Process target. Module-level so it's picklable on all platforms.
 
@@ -56,6 +59,25 @@ class Executor(abc.ABC):
     def _phase_name(self) -> str:
         """Used in sentinel filenames. Default: class name."""
         return self.__class__.__name__
+
+    def _kill_peer_qemus(self, sentinel_dir: str) -> None:
+        # TODO multi-node teardown bug: parallel-qemu's PDES exit handling leaves
+        # peer nodes hanging after one node quits. Fix in
+        # parallel-qemu/net/pdes-engine.c so this workaround can be removed.
+        # Symmetric — every leaf (not just master) pkills its peers on exit so
+        # neither side gets stuck waiting for the other in PDES sync.
+        exp = self.get_experiment()
+        if exp is None or not exp.neighbor_node_list:
+            return
+        partition_str = f"part_{exp.partition_number}_" if exp.partition_number >= 0 else ""
+        idx_str = f"idx_{exp.idx}_" if exp.idx >= 0 else ""
+        for neighbor in exp.neighbor_node_list:
+            shm = f"pdes_{neighbor}_to_{exp.node_number}{partition_str}{idx_str}"
+            subprocess.run(["pkill", "-9", "-f", f"shm-send=/{shm}"], check=False)
+            if sentinel_dir is not None:
+                os.makedirs(sentinel_dir, exist_ok=True)
+                path = f"{sentinel_dir}/{self._sentinel_basename(neighbor)}.{KILLED_BY_PEER_SUFFIX}"
+                open(path, "w").close()
 
     def _sentinel_basename(self, node_number: int) -> str:
         """Sentinel basename includes partition_number and idx when set, so RunIdxCommand
@@ -156,8 +178,12 @@ class Executor(abc.ABC):
         failures = []
         for sub, p in procs:
             p.join()
-            if p.exitcode != 0:
-                failures.append((sub, p.exitcode))
+            if p.exitcode == 0:
+                continue
+            killed_marker = f"{sentinel_dir}/{self._sentinel_basename(sub.node_number)}.{KILLED_BY_PEER_SUFFIX}"
+            if os.path.exists(killed_marker):
+                continue
+            failures.append((sub, p.exitcode))
 
         if failures:
             names = ", ".join(
@@ -262,6 +288,8 @@ class Executor(abc.ABC):
             r = subprocess.run(arg, shell=True, text=True, cwd=cwd)
         else:
             r = subprocess.run(arg, shell=True, text=True, capture_output=True, cwd=cwd)
+        if exp is not None:
+            self._kill_peer_qemus(sentinel_dir)
         self.clean_up()
 
         if r.returncode == 0:

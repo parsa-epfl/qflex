@@ -14,24 +14,35 @@
 
 set timeout 600
 
+# Wall-clock budgets for connect/wait operations (seconds). See expect-scripts skill.
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_CHECKPOINTING_S 1800
+
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
 
-# QEMU's `telnet,server,nowait` listener takes a moment to come up after gdb
-# starts. Retry a handful of times before giving up.
-set max_retries 30
-set connected 0
-for {set i 0} {$i < $max_retries} {incr i} {
-    if {[catch {spawn telnet 127.0.0.1 $serial_port}] == 0} {
-        set connected 1
-        break
+# Poll telnet for the listener — initial qemu-startup case so use the larger budget.
+set saved_timeout $timeout
+set timeout 5
+set deadline [expr {[clock seconds] + $BUDGET_INITIAL_S}]
+while {[clock seconds] < $deadline} {
+    spawn telnet 127.0.0.1 $serial_port
+    set this_sid $spawn_id
+    set ok 0
+    expect {
+        -re "Escape character is" { set ok 1 }
+        -re "Connection refused" { }
+        timeout { }
+        eof { }
     }
-    sleep 1
+    if {$ok} { break }
+    catch {close -i $this_sid}
+    catch {wait -i $this_sid}
+    sleep 2
 }
-if {!$connected} {
-    puts "ERROR: could not connect to serial telnet on port $serial_port"
-    exit 1
-}
+set timeout $saved_timeout
+if {!$ok} { error "could not connect to serial telnet on port $serial_port within ${BUDGET_INITIAL_S}s" }
 
 # Wait for Alpine's login prompt.
 expect {
@@ -62,9 +73,13 @@ expect -re {# $}
 # Done with the guest. Disconnect from serial.
 close
 
-# Snapshot + quit cleanly via the monitor.
+# Snapshot + quit cleanly via the monitor. savevm is checkpointing — needs the
+# large budget; the surrounding monitor prompts use the default short budget.
 spawn telnet 127.0.0.1 $monitor_port
+set timeout $BUDGET_DEFAULT_S
 expect "(qemu) "
+set timeout $BUDGET_CHECKPOINTING_S
 send "savevm base\r"
 expect "(qemu) "
+set timeout $BUDGET_DEFAULT_S
 send "quit\r"

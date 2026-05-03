@@ -1,0 +1,10 @@
+# Test fixture used by tests/test_real_runs.py::test_alpine_login_and_ls_real_run.
+# Single-node alpine boot driven by the login_and_ls.exp script. Every knob the
+# test cares about is in this YAML — the python test just passes -c <this file>.
+extends: ../../conf/DC/dc
+
+components:
+  experiment_context:
+    experiment_name: qflex_real_run_test
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/login_and_ls.exp

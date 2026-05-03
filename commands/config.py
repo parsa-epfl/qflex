@@ -109,6 +109,7 @@ class ExperimentContext(BaseModel):
     keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
+    use_gdb: bool = Field(default=True, description="Wrap the qemu invocation in `gdb -ex run --args ...`. Set to False (e.g. in test YAMLs) to run qemu directly so the leaf doesn't depend on gdb's interactive prompt handling on segfault.")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     seed_image_address: str = Field(default="", description="Full address of the seed image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
@@ -517,6 +518,7 @@ def create_experiment_context(
     keep_experiment_unique: Annotated[bool, Field(description="Whether to keep the experiment folder unique by adding a timestamp.")] = False,
     use_image_directly: Annotated[bool, Field(description="Whether to use the image directly from the image folder or copy it to the experiment folder.")] = False,
     loadvm_name: Annotated[str, Field(description="Name of the loadvm to use in QEMU, optional.")] = "",
+    use_gdb: Annotated[bool, Field(description="Wrap the qemu invocation in `gdb -ex run --args ...`. Set to False (e.g. in test YAMLs) to run qemu directly.")] = True,
     mounting_folder: Annotated[str, Field(description="Mounting directory where the experiment folders will be created.")] = ".",
     check_period_quantum_coeff: Annotated[float, Field(description="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period.")] = 53.0,
     use_cd_rom: Annotated[bool, Field(description="Whether to use a CD-ROM for initial setup.")] = False,
@@ -625,6 +627,7 @@ def create_experiment_context(
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
+        use_gdb=use_gdb,
         include_affinity=include_affinity,
         node_number=node_number,
         neighbor_node_list=neighbor_node_list,

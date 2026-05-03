@@ -94,9 +94,7 @@ def test_01_boot_two_nodes_create_files_and_savevm(dev_container):
         f"(rc={rm_result.returncode}). stderr:\n{rm_result.stderr}"
     )
 
-    cmd = (
-        "./qflex boot -c conf/DC/dc-multi-savevm-create.yaml"
-    )
+    cmd = "./qflex boot -c tests/realrun/dc-multi-savevm-create.yaml"
     # Multi-node Alpine boots are slow under quantum sync; 30 min upper bound.
     r = _exec_in_container(cmd, timeout=1800)
     assert r.returncode == 0, (
@@ -121,9 +119,7 @@ def test_02_load_two_nodes_verify_files(dev_container):
     survived the savevm/loadvm round-trip."""
     mounting = dev_container
 
-    cmd = (
-        "./qflex load -c conf/DC/dc-multi-savevm-verify.yaml"
-    )
+    cmd = "./qflex load -c tests/realrun/dc-multi-savevm-verify.yaml"
     r = _exec_in_container(cmd, timeout=1800)
     assert r.returncode == 0, (
         f"load+verify failed (rc={r.returncode}).\n"

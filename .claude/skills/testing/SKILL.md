@@ -158,6 +158,81 @@ Then assert what your phase-specific bash should contain in `block.bash`, the se
 
 For tmux-mode tests, assert `block.tmux_window == "<Phase>-node<N>"` and that the bash ends with `; touch <done>` (the executor appends this so the Python poll knows when QEMU exits).
 
+## Real-run tests: settings live in YAML, not in python
+
+Real-run tests under `test_real_runs*.py` drive `./dep exec ./qflex <phase> -c <yaml>` against a live dev container. Every knob the test depends on (experiment_name, interaction_script, loadvm_name, use_gdb, …) belongs in the test's YAML, not in a CLI flag the python passes.
+
+The fixture set lives in [tests/realrun/](../../../tests/realrun/):
+
+```
+tests/realrun/
+├── dc-alpine-login.yaml             # used by test_alpine_login_and_ls_real_run
+├── dc-multi-savevm-create.yaml      # used by test_01 (boot+savevm)
+├── dc-multi-savevm-verify.yaml      # used by test_02 (load+verify)
+├── login_and_ls.exp                 # the expect script for the alpine test
+├── boot_create_and_savevm_master.exp
+├── boot_create_and_wait.exp
+└── load_verify_ls.exp
+```
+
+Each YAML `extends: ../../conf/DC/<base>` so production defaults flow through — change `conf/DC/dc-multi.yaml` and every multi-node test follows. The relative path resolves cleanly through [`load_config`](../../../dep_injection/config_loader.py) (it does `path.parent / parent_name.yaml`, which handles `..` segments).
+
+The python test reduces to one line of qflex invocation plus the assertions:
+
+```python
+def test_alpine_login_and_ls_real_run(dev_container):
+    mounting = dev_container
+    r = _exec_in_container("./qflex boot -c tests/realrun/dc-alpine-login.yaml", timeout=900)
+    assert r.returncode == 0, ...
+    ls_path = f"{mounting}/experiments/{ALPINE_EXPERIMENT_NAME}/ls_output.txt"
+    ...
+```
+
+No CLI flag overrides, no `--no-gdb`, no `--interaction-script <path>`, no `--experiment-name <name>`. The only python-side constant is whatever the assertions need to read back (e.g. the experiment_name to locate the captured file) — and it's a single literal that mirrors the YAML.
+
+If you want to set something that isn't a YAML knob today (a constructor flag on a phase class), add the field to `ExperimentContext` (and `create_experiment_context`) first so the YAML can drive it. `use_gdb` followed exactly this path: started as a `Boot/Load/InitWarm/FunctionalWarming` constructor flag + a `--gdb / --no-gdb` CLI flag, then got promoted to a context field so test YAMLs can set `use_gdb: false` and the python doesn't carry the flag.
+
+The container side already has `tests/` mounted at `/home/dev/qflex/tests/` (via [commands/docker.py](../../../commands/docker.py)'s `tests_mount`), so YAML paths like `interaction_script: /home/dev/qflex/tests/realrun/<x>.exp` resolve inside the container without further wiring.
+
+## Multi-node real-run tests: making sure both nodes always exit
+
+Multi-node test YAMLs run a leaf per node in parallel. If one node finishes (cleanly or with a bad capture) and the other doesn't notice, the surviving qemu spins forever in PDES sync waiting for the dead peer — the test then sits through pytest's outer 30-min timeout. Two layers of defense ship together; lean on them and don't try to add per-test cross-node coordination on top.
+
+- **Executor `_kill_peer_qemus` (in [commands/executer.py](../../../commands/executer.py))** — symmetric: every leaf, on bash exit, `pkill -9 -f shm-send=/pdes_<neighbor>_to_<my>[part_<P>_][idx_<I>_]` for each of its neighbors. Match scope is per (peer, partition, idx) so concurrent unrelated experiments are unaffected. A `<basename>.killed_by_peer` sentinel is touched so the parent `_execute_group` doesn't treat the SIGKILL'd peer's non-zero rc as a real failure.
+- **Expect-script side** — every error branch must call `quit_qemu` before `exit 1`, and `quit_qemu` must short-circuit if the monitor is already gone (`catch {connect_telnet …}; return`). With those two in place, whichever leaf exits first drags the other down within ~5s.
+
+Test fixture-wise, [tests/conftest.py](../../../tests/conftest.py)'s `dev_container` runs `./dep exec --command ./clean_up.sh` immediately after `./dep start-docker` so any leftover qemu / `/dev/shm/pdes_*` from the user's parallel manual runs is swept before the test starts. Don't bypass that — host-level `pkill` on the user's environment is rude.
+
+## Don't wait endlessly when running real tests
+
+For a pass case the test is short (~1-2 minutes); for a stuck case it can sit for the full 30-min `_exec_in_container` timeout. Don't wait passively for the runtime's "command completed" notification — actively check whether the test is making progress. The shape that works:
+
+1. Run the test with **foreground** Bash (NOT `run_in_background: true`, NOT `Monitor`) at the longest reasonable timeout the runtime supports. Foreground returns the captured tool output back to you; `run_in_background` and `Monitor` both write their tracking files into `/tmp/claude-291753/...`, which fills the boot disk and bricks bash with `ENOSPC`.
+
+   ```
+   make test-real-one TEST=tests/test_real_runs_savevm.py::test_02_load_two_nodes_verify_files 2>&1 | tail -50
+   ```
+
+2. While the test runs, between iterations of waiting, periodically `Read` the existing log files in the experiment folder — they're being written *as the test runs*, no need to add new redirects:
+   - `/mnt/sdc/data-caching-1c/experiments/<sub>/Load.log` / `Boot.log` (qemu+gdb stdout)
+   - `/mnt/sdc/data-caching-1c/experiments/<sub>/Load.err` / `Boot.err` (qemu+gdb stderr — segfaults land here)
+   - `/mnt/sdc/data-caching-1c/experiments/<sub>/expect_log.txt` (full bidirectional dialogue with telnet)
+   - `/mnt/sdc/data-caching-1c/experiments/<sub>/ls_after_*.txt` (the captures the test asserts on)
+
+3. Cross-check `ps -ef | grep qemu-system | grep -v grep` and `ls /dev/shm/pdes*`. If the captures are written, qemu is still chewing CPU, and the expect logs show no progress — that's stuck. Diagnose immediately rather than waiting another 30 minutes.
+
+4. NEVER bake any of this polling into the python test code. The python should stay one-line-per-step minimal; the polling lives on the Claude side via Bash + Read.
+
+## Don't write to /tmp / boot disk
+
+This is a footgun that bit this session several times: filling `/tmp` (or any boot-disk path) kills bash with `ENOSPC` and the user has to manually free space before any tool call can succeed. Specific things that do this:
+
+- `cmd > /tmp/log` / `pytest > /tmp/out` redirects you've added.
+- `Bash(run_in_background: true)` — the runtime captures the output to `/tmp/claude-291753/...`.
+- `Monitor` — same, plus it polls and writes events.
+
+For real-run tests use **foreground** Bash. If you genuinely need to persist intermediate output, redirect into the experiment folder under the user's mount — and check whether the executor / expect script *already* writes what you want there (it usually does: `Load.log`, `Load.err`, `expect_log.txt` are all there for free).
+
 ## Common pitfalls
 
 - **Embedded newlines in bash break naive parsers.** `RunIdxCommand`'s bash includes a multi-line gdb python block. The dry-run printer collapses these via `.replace("\n", "\\n")` so each `[bash]` marker stays on one line. Don't undo this — the parser depends on it.

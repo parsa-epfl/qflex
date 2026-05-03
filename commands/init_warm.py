@@ -1,7 +1,7 @@
 import os
 from commands import Executor
 from .config import ExperimentContext
-from commands.qemu import QemuCommonArgParser
+from commands.qemu import QemuCommonArgParser, wrap_with_gdb
 from typing import List
 from .jinja_loaders import wormloader, FlexusCheckpointConfigLoader, TimingLoader, FlexusScriptLoader
 
@@ -61,11 +61,11 @@ class InitWarm(Executor):
         parser = QemuCommonArgParser(self.experiment_context)
 
         # TODO check if we need variables for the plugin
-        init_cmd = f"""
-        gdb -ex run --args ./qemu-system-aarch64 \
-        {parser.get_qemu_base_args()} \
-        -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init
-        """
+        init_cmd = wrap_with_gdb(
+            f"./qemu-system-aarch64 {parser.get_qemu_base_args()} "
+            f"-plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init",
+            self.experiment_context.use_gdb,
+        )
 
         return self.build_worm_cache(worm_params_address) + [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",

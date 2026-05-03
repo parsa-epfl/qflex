@@ -1,6 +1,6 @@
 from commands import Executor
 from .config import ExperimentContext
-from commands.qemu import QemuCommonArgParser
+from commands.qemu import QemuCommonArgParser, wrap_with_gdb
 # TODO IMPORTANT, remove vanilla option
 
 
@@ -21,9 +21,9 @@ class Load(Executor):
         parser = QemuCommonArgParser(exp, use_stdio=use_stdio)
 
         if not self.vanilla:
-            load_cmd = (
-                f"gdb -ex run --args ./qemu-system-aarch64 "
-                f"{parser.get_qemu_base_args()}"
+            load_cmd = wrap_with_gdb(
+                f"./qemu-system-aarch64 {parser.get_qemu_base_args()}",
+                exp.use_gdb,
             )
         else:
             load_cmd = (

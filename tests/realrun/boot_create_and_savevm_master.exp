@@ -10,10 +10,12 @@
 # Master flow:
 #   1) login as qflex / qflex on Alpine,
 #   2) `touch test1.txt` (master is node 0 → file index = NODE_NUMBER + 1 = 1),
-#   3) ls and capture to $EXP_FOLDER/ls_after_create.txt,
-#   4) delvm (best effort) + savevm qflex-makefile-test via the QEMU monitor,
-#   5) touch the cross-node sentinel `<dirname $EXP_FOLDER>/savevm_done.flag`
+#   3) delvm (best effort) + savevm qflex-makefile-test via the QEMU monitor,
+#   4) touch the cross-node sentinel `<dirname $EXP_FOLDER>/savevm_done.flag`
 #      so the non-master scripts know they may now quit,
+#   5) ls and capture to $EXP_FOLDER/ls_after_create.txt — taken AFTER savevm
+#      on purpose, so the captured output reflects the snapshotted state. If
+#      `loadvm` later doesn't reproduce this listing, savevm captured too early.
 #   6) `quit` over the monitor.
 #
 # A stale sentinel from a prior run is removed at startup — the per-leaf
@@ -26,6 +28,11 @@
 # bring-up and the userspace initialisation that gets to the login prompt
 # can take many minutes. 900s is a comfortable upper bound.
 set timeout 900
+
+# Wall-clock budgets for connect/wait operations (seconds). See expect-scripts skill.
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_CHECKPOINTING_S 1800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
@@ -53,12 +60,14 @@ log_file -noappend "$exp_folder/expect_log.txt"
 # non-master pollers can't see a stale flag.
 catch {file delete -force $savevm_done_flag}
 
-proc connect_telnet {host port max_attempts} {
+# Poll telnet for the listener. Caller passes the wall-clock deadline; expect's
+# `set timeout` doesn't apply inside Tcl while/sleep loops.
+proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
     set saved_timeout $timeout
     set timeout 5
-    set sid -1
-    for {set i 0} {$i < $max_attempts} {incr i} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
         spawn telnet $host $port
         set this_sid $spawn_id
         set ok 0
@@ -69,24 +78,23 @@ proc connect_telnet {host port max_attempts} {
             eof { }
         }
         if {$ok} {
-            set sid $this_sid
-            break
+            set timeout $saved_timeout
+            return $this_sid
         }
         catch {close -i $this_sid}
         catch {wait -i $this_sid}
         sleep 2
     }
     set timeout $saved_timeout
-    return $sid
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
 }
 
 proc quit_qemu {monitor_port} {
-    set sid [connect_telnet 127.0.0.1 $monitor_port 5]
-    if {$sid == -1} {
-        puts "quit_qemu: could not connect to monitor on port $monitor_port"
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
         return
     }
-    set timeout 30
+    set timeout $BUDGET_DEFAULT_S
     expect {
         -i $sid
         timeout { puts "quit_qemu: monitor didn't prompt" }
@@ -101,12 +109,7 @@ set ok 0
 
 # --- 1. Connect to serial + login ----------------------------------------
 
-set serial_sid [connect_telnet 127.0.0.1 $serial_port 60]
-if {$serial_sid == -1} {
-    puts "ERROR: could not connect to serial telnet on port $serial_port"
-    quit_qemu $monitor_port
-    exit 1
-}
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
 set spawn_id $serial_sid
 
 send "\r"
@@ -136,38 +139,15 @@ expect {
     -re {[\$#] +}
 }
 
-# --- 3. ls and capture output -------------------------------------------
+# --- 3. delvm + savevm via monitor (master only) -------------------------
+#
+# Keep the serial connection open: pause-during-drain doesn't disturb the
+# host-side TCP socket, and we need it again post-savevm for the ls capture.
 
-send "ls\r"
-expect {
-    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-set ls_output $expect_out(buffer)
-
-set out_path "$exp_folder/ls_after_create.txt"
-if {[catch {open $out_path "w"} f]} {
-    puts "ERROR: could not open $out_path for writing: $f"
-} else {
-    puts $f $ls_output
-    close $f
-    puts "wrote ls output to $out_path"
-}
-
-# Disconnect from serial; everything else happens via the monitor.
-catch {close -i $serial_sid}
-catch {wait -i $serial_sid}
-
-# --- 4. delvm + savevm via monitor (master only) -------------------------
-
-set monitor_sid [connect_telnet 127.0.0.1 $monitor_port 30]
-if {$monitor_sid == -1} {
-    puts "ERROR: could not connect to monitor for savevm"
-    exit 1
-}
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
 set spawn_id $monitor_sid
 
-set timeout 120
+set timeout $BUDGET_DEFAULT_S
 
 expect {
     timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
@@ -176,6 +156,7 @@ expect {
 
 # Best-effort cleanup of any prior snapshot with the same tag — savevm refuses
 # to overwrite an existing snapshot, so this guards against repeat test runs.
+set timeout $BUDGET_CHECKPOINTING_S
 send "delvm qflex-makefile-test\r"
 expect {
     timeout { puts "WARN: delvm didn't return; continuing anyway" }
@@ -188,7 +169,7 @@ expect {
     "(qemu) "
 }
 
-# --- 5. signal non-master leaves that the savevm drain is complete -------
+# --- 4. signal non-master leaves that the savevm drain is complete -------
 
 if {[catch {set f [open $savevm_done_flag "w"]; close $f} err]} {
     puts "WARN: could not write $savevm_done_flag: $err"
@@ -196,8 +177,42 @@ if {[catch {set f [open $savevm_done_flag "w"]; close $f} err]} {
     puts "wrote savevm-done sentinel: $savevm_done_flag"
 }
 
+# --- 5. ls AFTER savevm and capture --------------------------------------
+#
+# Switch back to the serial connection. The buffer may have stray bytes from
+# the drain pause/resume, so send a `\r` to nudge a clean prompt before ls.
+
+set spawn_id $serial_sid
+set timeout $BUDGET_DEFAULT_S
+
+send "\r"
+expect {
+    timeout { puts "ERROR: serial prompt timed out post-savevm"; exit 1 }
+    -re {[\$#] +}
+}
+
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return post-savevm"; exit 1 }
+    -re {[\$#] +}
+}
+set ls_output $expect_out(buffer)
+
+set out_path "$exp_folder/ls_after_create.txt"
+if {[catch {open $out_path "w"} f]} {
+    puts "ERROR: could not open $out_path for writing: $f"
+} else {
+    puts $f $ls_output
+    close $f
+    puts "wrote post-savevm ls output to $out_path"
+}
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
 # --- 6. quit -------------------------------------------------------------
 
+set spawn_id $monitor_sid
 send "quit\r"
 catch {expect eof}
 set ok 1

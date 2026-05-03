@@ -1,13 +1,11 @@
 # syntax=docker/dockerfile:1.17-labs
 
-# TODO changed docker version due to mirrors being down, change back to latest when possible
 # First Stage - Build environement
-FROM ubuntu:22.04 AS build
+FROM ubuntu:24.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
-# TODO once mirrors are back change back to gcc-14
-ENV CC=/usr/bin/gcc-13
-ENV CXX=/usr/bin/g++-13
+ENV CC=/usr/bin/gcc-14
+ENV CXX=/usr/bin/g++-14
 
 
 # Update the package list and install prerequisites
@@ -18,7 +16,6 @@ RUN apt install -y --no-install-recommends software-properties-common
 RUN apt install -y --no-install-recommends build-essential
 RUN apt install -y --no-install-recommends gnupg
 RUN apt install -y --no-install-recommends ca-certificates
-RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y
 
 # Need to update after installing the previous dependencies
 RUN apt-get update -y
@@ -37,8 +34,7 @@ RUN apt install -y --no-install-recommends ninja-build
 RUN apt install -y --no-install-recommends cmake
 RUN apt install -y --no-install-recommends meson
 RUN apt install -y --no-install-recommends grep
-# TODO once mirrors are back change back to gcc-14
-RUN apt install -y --no-install-recommends gcc-13 g++-13
+RUN apt install -y --no-install-recommends gcc-14 g++-14
 RUN apt install -y --no-install-recommends libpixman-1-dev
 RUN apt install -y --no-install-recommends python3 python3-venv python3-pip python3-setuptools python3-wheel   
 RUN apt install -y --no-install-recommends zstd
@@ -75,8 +71,7 @@ RUN echo 'export RUSTUP_HOME=/home/dev/rust/rustup' >> /etc/bash.bashrc && \
     echo 'export PATH=/home/dev/rust/cargo/bin:$PATH' >> /etc/bash.bashrc
 RUN cargo install inferno
 
-# --break-system-package for ubuntu 24.04
-RUN pip install conan && pip cache purge
+RUN pip install --break-system-packages conan && pip cache purge
 
 # TODO everything before this, should be in another base image 
 # Copy local dir to container
@@ -96,7 +91,7 @@ WORKDIR /home/dev/qflex
 
 
 COPY ./requirements.txt /home/dev/qflex/requirements.txt
-RUN pip install -r requirements.txt
+RUN pip install --break-system-packages -r requirements.txt
 COPY  ./commands /home/dev/qflex/commands
 COPY ./typer_inputs /home/dev/qflex/typer_inputs
 COPY ./qflex /home/dev/qflex
