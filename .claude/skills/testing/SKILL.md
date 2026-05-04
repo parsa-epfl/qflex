@@ -233,6 +233,34 @@ This is a footgun that bit this session several times: filling `/tmp` (or any bo
 
 For real-run tests use **foreground** Bash. If you genuinely need to persist intermediate output, redirect into the experiment folder under the user's mount — and check whether the executor / expect script *already* writes what you want there (it usually does: `Load.log`, `Load.err`, `expect_log.txt` are all there for free).
 
+## Tests reuse existing components — never reimplement paths/names
+
+Real-run tests are simple: invoke `./qflex <phase> -c tests/realrun/<x>.yaml`, assert `rc == 0`, and (only if needed) inspect artifacts via the existing helpers on the production code.
+
+**Do not rebuild path / folder / sentinel-name conventions inside the test.** If you find yourself writing something like `f"{mounting}/experiments/{sub}/run/partition_{p}"` in a test, that's a bug — `ExperimentContext.get_partition_folder()` already returns exactly that. Tests pulling those paths together themselves means two implementations to keep in sync; when production renames its layout, the test silently keeps working against the old shape.
+
+Concretely:
+
+* Need a partition folder? `experiment_context.get_partition_folder()`.
+* Need the experiment folder? `experiment_context.get_experiment_folder_address()`.
+* Need a per-leaf sentinel path? Use the executor's `_sentinel_path()` / `_sentinel_basename()`, not f-strings.
+* Need to load a YAML the test depends on? `dep_injection.builder.build_experiment_context(path, component_overrides=...)`. Don't read YAML manually.
+* Need to check whether a snapshot exists in a qcow2? `tests/conftest.py::_qcow2_has_snapshot` / `require_snapshot` / `require_boot_login_zstd`. Don't shell out to `qemu-img snapshot -l` from the test body.
+* Driving an end-to-end pipeline phase? `_exec_in_container("./qflex <phase> -c <yaml>", timeout=...)`. The CLI command's body is the source of truth for what that phase does — what folders it produces, what files it writes. The test asserts on rc and on helper-derived artifact paths; it does not duplicate the path math.
+
+```python
+# bad — reinvents production path layout in the test
+def _partition_dir(mounting, sub, p):
+    return f"{mounting}/experiments/{sub}/run/partition_{p}"
+assert os.path.exists(_partition_dir(mounting, sub, 0))
+
+# good — production already knows where partition 0's folder lives
+ctx = build_experiment_context("tests/realrun/dc-multi-run-idx-p0-i0.yaml", ...)
+assert os.path.exists(ctx.sub_experiments[0].get_partition_folder())
+```
+
+Same rule applies to dry-run tests — when you want to assert on a sentinel file or a leaf log path, route it through the executor's existing path-builders rather than f-string'ing one yourself.
+
 ## Common pitfalls
 
 - **Embedded newlines in bash break naive parsers.** `RunIdxCommand`'s bash includes a multi-line gdb python block. The dry-run printer collapses these via `.replace("\n", "\\n")` so each `[bash]` marker stays on one line. Don't undo this — the parser depends on it.

@@ -48,7 +48,7 @@ def test_qflex_help_inside_container(dev_container):
     assert "Usage" in r.stdout or "usage" in r.stdout.lower()
 
 
-# Mirrors `experiment_name` in tests/realrun/dc-alpine-login.yaml — the only
+# Mirrors `experiment_name` in tests/realrun/dc-single.yaml — the only
 # value the python side needs to read back so it can locate the captured file.
 ALPINE_EXPERIMENT_NAME = "qflex_real_run_test"
 
@@ -70,7 +70,7 @@ def test_alpine_login_and_ls_real_run(dev_container):
     # existing folder safely (it cp -u's binaries and only writes core_info.csv
     # if absent; init created it with the correct core_count / doubled_vcpu).
 
-    r = _exec_in_container("./qflex boot -c tests/realrun/dc-alpine-login.yaml", timeout=900)
+    r = _exec_in_container("./qflex boot -c tests/realrun/dc-single.yaml", timeout=900)
     assert r.returncode == 0, (
         f"alpine login + ls failed (rc={r.returncode}).\n"
         f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"

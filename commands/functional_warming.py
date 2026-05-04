@@ -40,5 +40,12 @@ class FunctionalWarming(SimulationCommand):
             # TODO add the proper conditions to only create log and fp_gen_speed at the right time
             "rm -rf fp_gen_speed",
             "mkdir fp_gen_speed",
-            "mv *.log ./fp_gen_speed",
+            # parallel-qemu doesn't emit `.log` files by default, so on a normal
+            # FW run there's nothing to move and `mv *.log` errors out with
+            # "cannot stat '*.log'". `|| true` tolerates that. Without it, the
+            # bash group exits with mv's rc=1, which then races the executor's
+            # symmetric peer-kill marker (parent joins fast-finisher before
+            # slow-finisher writes the killed_by_peer marker) and surfaces as
+            # a non-deterministic test failure.
+            "mv *.log ./fp_gen_speed 2>/dev/null || true",
         ]

@@ -457,3 +457,61 @@ def dev_container():
         )
 
 
+# ============================================================================
+# Per-test summary table — markdown style (Test / Time / Status). Prints at
+# the very bottom of every `make test` run so wall-clock per real-run test is
+# visible at a glance without scrolling back through pytest's verbose output.
+# ============================================================================
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    m, s = divmod(int(seconds), 60)
+    if m < 60:
+        return f"{m}:{s:02d}"
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}"
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Markdown-style table of every collected test (name | time | status).
+    Aggregates per nodeid using the `call`-phase duration when present, falling
+    back to whatever phase the report was emitted from (setup-phase reports
+    are what skipif emits, for example)."""
+    status_map = {"passed": "PASS", "failed": "FAIL",
+                  "skipped": "SKIP", "error": "ERROR"}
+    rows: dict[str, tuple[float, str]] = {}
+    for category, reports in terminalreporter.stats.items():
+        if category not in status_map:
+            continue
+        for report in reports:
+            nid = getattr(report, "nodeid", None)
+            if not nid:
+                continue
+            duration = getattr(report, "duration", 0.0)
+            existing = rows.get(nid)
+            # Prefer the `call`-phase report (real test body duration) over
+            # setup/teardown reports for the same nodeid.
+            if existing is None or getattr(report, "when", None) == "call":
+                rows[nid] = (duration, status_map[category])
+
+    if not rows:
+        return
+
+    name_w = max(len("Test"), max(len(n) for n in rows))
+    time_strs = {n: _format_duration(d) for n, (d, _) in rows.items()}
+    time_w = max(len("Time"), max(len(t) for t in time_strs.values()))
+    status_w = max(len("Status"), max(len(s) for _, s in rows.values()))
+
+    tw = terminalreporter
+    tw.write_sep("=", "per-test summary")
+    tw.write_line(f"| {'Test':<{name_w}} | {'Time':<{time_w}} | {'Status':<{status_w}} |")
+    tw.write_line(f"|{'-' * (name_w + 2)}|{'-' * (time_w + 2)}|{'-' * (status_w + 2)}|")
+    for nid in sorted(rows):
+        duration, status = rows[nid]
+        tw.write_line(
+            f"| {nid:<{name_w}} | {time_strs[nid]:<{time_w}} | {status:<{status_w}} |"
+        )
+

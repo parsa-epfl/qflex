@@ -5,10 +5,12 @@ from .config import ExperimentContext
 class PartitionCommand(Executor):
 
     def __init__(self,
-                 experiment_context: ExperimentContext,
-                 partition_count: int):
+                 experiment_context: ExperimentContext):
         self.experiment_context = experiment_context
-        self.partition_count = partition_count
+
+    @property
+    def partition_count(self) -> int:
+        return self.experiment_context.partition_count
 
     @property
     def experiment_folder(self) -> str:

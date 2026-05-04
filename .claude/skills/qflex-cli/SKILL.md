@@ -48,17 +48,45 @@ QFLEX_CONFIG=conf/dc.yaml ./qflex boot
 ./qflex boot -c conf/dc.yaml --core-count 32 --no-doubled-vcpu
 ```
 
-## Precedence rule (highest to lowest)
+## Precedence rule (low → high; later wins)
 
-For any `ExperimentContext` field, the final value is resolved in this order:
+For any `ExperimentContext` field, the final value resolves in this order:
 
-1. **Explicit CLI flag** (e.g. `--core-count 32`). A flag is "explicit" only when the user actually typed it — Typer's `[factory default: X]` in `--help` is documentation, not a value applied as an override.
-2. **YAML value** under `components.experiment_context.<field>` from the file resolved via `-c <path>` or `$QFLEX_CONFIG` (flag wins over env).
-3. **YAML extends chain.** `extends: <name>` loads parent first; child wins on conflict. Recursive.
-4. **Factory default** — the `= default` on `create_experiment_context`'s parameter. Visible in `--help` as `[factory default: X]`.
-5. **Required-with-no-source** → `typer.BadParameter` listing every missing flag. The check runs **once** after merging YAML keys (if any) with CLI override keys, so the same friendly error fires whether the gap is in pure-CLI, pure-YAML, or a YAML+CLI mix. The hint is path-aware: pure-CLI points at `--config` / `$QFLEX_CONFIG`; YAML path points at the loaded YAML file.
+1. **Factory default** — the `= default` on `create_experiment_context`'s parameter. Visible in `--help` as `[factory default: X]`.
+2. **YAML extends chain.** `extends: <name>` loads parent first; child wins on conflict. Recursive — `extends` is followed all the way up.
+3. **`_leaf_defaults` (via `_base_:` resolution).** Each component with `_base_: _leaf_defaults` (or any other top-level base block) gets that base merged in. Resolution happens **once at the outermost `load_config` call**, so a child YAML's `_leaf_defaults: { memory_gb: 4 }` propagates into components declared in a parent YAML.
+4. **Per-component overrides** in `components.experiment_context.<field>` (or `components.experiment_context_node_0.<field>`, etc.). Wins over `_leaf_defaults`.
+5. **Command-scoped section: top-level `<func_name>: { ... }` block.** Only applied when this command runs (matched by the wrapped function's Python name — `fw`, `run_idx`, `partition_cleanup`). Overrides every component matching the factory `_target_`. One YAML, multiple commands, different per-command behaviour.
+6. **Explicit CLI flag** (`--core-count 32`, `--memory-gb 8`, …). A flag is "explicit" only when the user actually typed it — Typer's `[factory default: X]` in `--help` is documentation, not a value applied as an override. data_class_wrap auto-generates a flag per factory param.
+
+If a factory-required param has no value from any tier → `typer.BadParameter` listing every missing flag. The check runs **once** after merging YAML keys (extends + `_leaf_defaults` + component block + `<func_name>` section) with CLI override keys, so the same friendly error fires whether the gap is in pure-CLI, pure-YAML, or a YAML+CLI mix. The hint is path-aware: pure-CLI points at `--config` / `$QFLEX_CONFIG`; YAML path points at the loaded YAML file.
 
 Resolution precedence for *which* YAML to load: explicit `-c <path>` > `$QFLEX_CONFIG` env var > no YAML. There is no implicit `./config.yaml` lookup.
+
+### Command-scoped section example
+
+```yaml
+extends: test-base-multi
+components:
+  experiment_context:
+    experiment_name: shared_exp
+
+# Each top-level key matches the python name of a `@app.command()` function in
+# qflex. Keys inside override the same field name on every component matching
+# the factory's _target_, FOR THIS COMMAND ONLY. CLI flags still win.
+fw:
+  loadvm_name: init_warmed
+  population_seconds: 2
+
+partition:
+  partition_count: 5
+
+run_idx:
+  partition_number: 0
+  idx: 0
+```
+
+Same YAML drives `./qflex fw`, `./qflex partition`, `./qflex run-idx` — each picks up its matching section. Avoids forking `dc-multi-fw.yaml` / `dc-multi-partition.yaml` / `dc-multi-run-idx.yaml` per phase.
 
 ## How `data_class_wrap` works ([typer_inputs/config_wrapper.py](../../../typer_inputs/config_wrapper.py))
 

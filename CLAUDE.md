@@ -20,6 +20,7 @@ Keep edits minimal. The shortest correct version wins.
 - **Comments are rare and short.** Hard cap: **one line**, occasionally **two** if the *why* genuinely needs the extra clause. Never write a multi-line comment block above a function body, a step-by-step "what this section does" preamble, a stacked rationale (`# X. … # Y. … # Z. …`), or the same explanation repeated across files. Code should be readable on its own; a wall of text above is a smell that the code itself isn't clear. Comments belong inline at the surprise — only when the WHY isn't visible from the code (a hidden constraint, a workaround for a specific upstream bug, a non-obvious invariant). The only allowed multi-line form is a docstring on a public function/class signature describing args/returns/contract — and even there, keep it tight; the PR description is where prose belongs, not the source.
 - **DRY > WET, but rule of three.** Don't repeat yourself: when the same logic appears in two files (e.g. `gdb -ex run --args …` across boot/load/init_warm/fw), pull it into one helper that the call sites parameterise. Conversely, don't pre-abstract on the first occurrence — wait until you have at least two real call sites before factoring out, otherwise the abstraction shape is a guess.
 - **DRY also applies to YAML.** The whole point of `extends:` and the YAML schema is to keep values in one place. Never re-declare the same `_leaf_defaults` block (or any literal value list) across two YAMLs.
+- **In YAML, override the exception, not the rule.** When a value is the same in most contexts and only differs in one or two, let the common value stay implicit (inherited from `extends:` / `_leaf_defaults` / the per-component base) and write the override ONLY in the section that's the actual exception. Don't restate the same `latencies_ns_list` / `syncs_list` across seven command sections — leave them inherited, and override just the `boot:` section that differs.
 - **Run things the way the user would.** When invoking anything that already has a make target / `./dep` subcommand / `./qflex` subcommand, use that surface as-is. Don't shell out to `pytest …` when `make test-real-one TEST=…` exists; don't issue raw `docker run`/`docker exec` when `./dep start-docker`/`./dep exec` exists. No extra files written, no debug-only flags, no env shims that wouldn't be there for the user. If the surface is missing a flag you need, add the flag to the surface — don't bypass it.
 - **Real-run test settings live in YAML, not in python.** Every knob a real-run test depends on (experiment_name, interaction_script, loadvm_name, use_gdb, …) belongs in a per-test YAML under [tests/realrun/](tests/realrun/), not as a CLI override in the test code. The python test should be reduced to `_exec_in_container("./qflex <phase> -c tests/realrun/<x>.yaml")` plus the assertions on the captured output. Test-specific expect scripts (`*.exp`) live next to their YAMLs in [tests/realrun/](tests/realrun/) so the fixture file set is self-contained. The YAMLs `extends: ../../conf/DC/<base>` to inherit production defaults — change the production base, every test follows. Knobs that aren't already on `ExperimentContext` (`use_gdb` was the recent one) need to be added there so YAML can set them.
 - **Multi-node leaves: make sure they all die together.** The PDES exit handling in parallel-qemu has a known bug where a peer node doesn't exit when its neighbor dies — surviving qemus spin forever in sync, blocking pytest / `./qflex` for the full 30-min outer timeout. The defense already shipping is the symmetric `Executor._kill_peer_qemus` in [commands/executer.py](commands/executer.py): every multi-node leaf, on bash exit, `pkill -9 -f shm-send=/pdes_<neighbor>_to_<my>[part_<P>_][idx_<I>_]` for each of its neighbors (scope is unique to the (peer, partition, idx) tuple, so unrelated experiments aren't touched), then writes a `<basename>.killed_by_peer` sentinel so the parent `_execute_group` doesn't count the SIGKILL'd peer as a real failure. Don't undo that; don't paper over it with `sleep` calls in expect; don't add cross-node coordination on top. If a multi-node test starts hanging, the first thing to check is whether one leaf exited prematurely and the peer-kill sentinel is missing — the `./clean_up.sh` script run inside the dev container at fixture startup ([tests/conftest.py](tests/conftest.py)) sweeps any stale `qemu-system-aarch64` / `/dev/shm/pdes_*` from prior runs.
@@ -115,6 +116,28 @@ A pytest suite lives under [tests/](tests/), one file per pipeline component (`t
 
 **TESTS MUST EXERCISE THE CODE UNDER TEST.** Never invoke binaries (qemu, flexus, kraken libs) or other artifacts directly from a test to assert behaviour or "probe" capabilities — that duplicates logic that already lives in the CLI / [commands/](commands/) classes and gives a separate, can-disagree path. Real-run tests drive `./qflex <subcommand>` (or `./dep exec ...`) so they walk the same `data_class_wrap → create_experiment_context → Executor.execute → cmd()` pipeline production does. Dry-run / unit tests import the command class (`Boot`, `RunIdxCommand`, …) or factory directly. If a real-run test fails because a binary is stale or missing, that's the *correct* failure signal — surface the actual error from the real code path, don't paper over it with a hand-rolled check. Same applies to fixtures: a fixture that subprocess-runs a binary to gate skip behaviour is a smell; gate on env / docker availability / repo state instead.
 
+**Real-run tests pass NO CLI flags. Every knob comes from the YAML.** A real-run test invocation is exactly `./qflex <phase> -c tests/realrun/<x>.yaml` — no `--core-count`, no `--memory-gb`, no `--sample-size`, etc. If a knob is missing from the YAML schema, add it to `create_experiment_context` (or a per-command field) and override it in the YAML, never hard-code it in the python test body. Example:
+
+```python
+# bad
+_exec_in_container("./qflex boot -c tests/realrun/x.yaml --memory-gb 4")
+# good
+# tests/realrun/x.yaml:
+#   components:
+#     experiment_context:
+#       memory_gb: 4
+_exec_in_container("./qflex boot -c tests/realrun/x.yaml")
+```
+
+## Open TODOs
+
+These are tracked here so they don't get lost between sessions. Update / strike through as they land.
+
+- ~~**Executor race: parent join vs killed-by-peer marker write.**~~ FIXED. `commands/executer.py:_execute_group` (and `commands/run_partition.py:_execute_partitions`) now do TWO passes — join every child first, then in a separate pass check exit codes against the `killed_by_peer` markers. By the time the marker pass runs, every leaf's `_kill_peer_qemus` has already executed, so a fast-finisher's exit code is no longer evaluated against a marker the slow-finisher hasn't written yet.
+- **FW skip-last-snapshot bug.** `./qflex fw` with `mode=warm` may fail to write the last per-sample state file (`snapshot_<N-1>.state.zstd`) on one of the nodes, even though the plugin itself prints "Generate N snapshots. Quit." and `std::process::exit(0)` correctly. The current test_05 tolerates this by asserting on `len(sample_files) >= N-1` rather than `>= N`. Real fix lives in WormCacheQFlex / parallel-qemu.
+- **`init-warm` `mode=pure_fill` has no early-exit handshake on multi-node.** Once master finishes `init_warmed` savevm, it `pdes_engine_destroy` → `exit(0)` — followers stay blocked in PDES sync until our 30 s `_post_exit_grace` + `_kill_peer_qemus` SIGKILLs them. Works (tolerated via `killed_by_peer`) but cleaner would be a `notify_fully_warmed_complete` round-trip so all nodes exit themselves.
+- **Older savevm flow still uses single global `savevm_done.flag`.** `tests/realrun/boot_create_and_savevm_master.exp` + `boot_create_and_wait.exp` haven't been migrated to the deterministic per-node-flag handshake the init flow uses (`node<N>_savevm_done.flag` + master polls). The savevm-create test currently relies on a `BUDGET_CHECKPOINTING_S` post-savevm prompt timeout to paper over the resulting timing fragility. See the `node-coordination` skill for the canonical pattern to migrate to.
+
 ## Pipeline (the `./qflex` subcommands)
 
 Every pipeline command builds the same `ExperimentContext` and accepts the same options for doing so: a YAML config via `-c <path>` (or `$QFLEX_CONFIG`), and/or per-field flags (`--core-count`, `--workload-name`, `--neighbor-node-list`, …). Plus a few command-specific flags that aren't part of the context (`--sample-size`, `--warming-ratio`, `--vanilla`, …). The per-field flags are auto-derived from `create_experiment_context`'s signature by `data_class_wrap`; for the full precedence rules and concrete invocations, see [Architecture](#configuration-factory-function-as-the-single-source-of-truth). The phases map onto the four-part flow described above:
@@ -201,13 +224,37 @@ Each command also takes its own command-specific flags (not part of `ExperimentC
 
 #### Where each field's value comes from (precedence)
 
-For any field of `ExperimentContext`, the final value is resolved in this order (highest priority first):
+For any field of `ExperimentContext`, the final value is resolved in this order (lowest priority → highest, later wins):
 
-1. **Explicit CLI flag** (e.g. `--core-count 32`). A flag is "explicit" only when the user actually typed it — Typer's auto-rendered `[factory default: X]` is documentation, not a value that gets applied as an override.
-2. **YAML value** under `components.experiment_context.<field>` in the file resolved via `-c <path>` or `$QFLEX_CONFIG` (flag wins over env).
-3. **YAML extends chain.** When the YAML has `extends: <name>`, the parent doc loads first and the child merges over it. Recursive. Child keys win on conflict.
-4. **Factory default** — the `= default` on `create_experiment_context`'s parameter. Visible in `./qflex <cmd> --help` as `[factory default: X]`.
-5. **Required-with-no-source.** A factory-required param (no default) that comes from neither CLI nor YAML produces a `typer.BadParameter` listing every missing flag and pointing at `--config` / `$QFLEX_CONFIG`.
+1. **Factory default** — the `= default` on `create_experiment_context`'s parameter. Visible in `./qflex <cmd> --help` as `[factory default: X]`.
+2. **YAML extends chain.** When the YAML has `extends: <name>`, the parent doc loads first and the child merges over it. Recursive — `extends` is followed all the way up.
+3. **`_leaf_defaults` (via `_base_:`).** Each component with `_base_: _leaf_defaults` (or any other top-level base block) gets that base merged into it, with the component's own keys winning. Resolution happens **once at the outermost `load_config` call**, so a child YAML's `_leaf_defaults: { memory_gb: 4 }` correctly propagates into components that were declared with `_base_:` in a parent YAML.
+4. **Per-component overrides** in the component's own block (e.g. `experiment_context.memory_gb: 4` or `experiment_context_node_0.loadvm_name: boot-login`).
+5. **Command-scoped section: top-level `<func_name>: { ... }` block in the YAML.** Only applied when this command runs (matched by the wrapped function's Python name — `fw`, `run_idx`, `partition_cleanup`, etc.). Overrides every component matching the factory `_target_`. Use this to keep one YAML across multiple pipeline phases instead of forking a YAML per command. Example:
+
+   ```yaml
+   extends: test-base-multi
+   components:
+     experiment_context:
+       experiment_name: shared_exp
+       memory_gb: 4
+
+   fw:
+     loadvm_name: init_warmed
+     population_seconds: 2
+
+   partition:
+     partition_count: 5
+
+   run_idx:
+     partition_number: 0
+     idx: 0
+   ```
+
+   `./qflex fw -c shared.yaml` sees `loadvm_name: init_warmed` and `population_seconds: 2`; `./qflex boot -c shared.yaml` doesn't (no `boot:` section).
+6. **Explicit CLI flag** (e.g. `--core-count 32`, `--memory-gb 8`). A flag is "explicit" only when the user actually typed it — Typer's auto-rendered `[factory default: X]` is documentation, not a value that gets applied as an override. Auto-generated flags from `data_class_wrap` cover every factory param.
+
+If a factory-required param has no value from any tier, the wrapper raises `typer.BadParameter` listing every missing flag and pointing at `--config` / `$QFLEX_CONFIG`.
 
 Resolution precedence for *which* YAML to load: explicit `-c <path>` > `$QFLEX_CONFIG` env var > no YAML (fall back to pure CLI). There is no implicit `./config.yaml` lookup.
 

@@ -23,8 +23,10 @@ def test_partition_two_nodes(multi_context, mock_mounting_folder):
                 shutil.rmtree(f"{run}/{p}")
 
     from commands.partition import PartitionCommand
+    from .conftest import pin_per_sub
+    pinned = pin_per_sub(multi_context, partition_count=4)
     with capture_dry_run_stdout() as buf:
-        PartitionCommand(experiment_context=multi_context, partition_count=4).execute()
+        PartitionCommand(experiment_context=pinned).execute()
     blocks = parse_dry_run_blocks(buf.getvalue())
     assert_two_node_master_first(blocks, "PartitionCommand", "PartitionCommand_node")
 

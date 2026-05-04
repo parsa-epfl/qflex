@@ -1,0 +1,73 @@
+# SINGLE multi-node real-run YAML — drives every non-init multi-node test phase
+# via top-level command sections. The python tests just `./qflex <phase> -c
+# tests/realrun/dc-multi.yaml`; no CLI flags. (Init bootstrap of `boot-login`
+# is separately gated by QFLEX_INIT_TEST and lives in tests/realrun/dc-multi-init.yaml
+# — that flow's per-leaf interaction_script is asymmetric in a way command
+# sections can't express, so it stays separate.)
+#
+# Per-leaf base = production defaults (inherits dc-multi.yaml's sync=true /
+# latency=100us via test-base-multi) + the boot-scenario interaction_scripts
+# and `loadvm boot-login`. Each command section below ONLY lists the
+# exceptions it needs (CLAUDE.md "Override exceptions, not rules").
+extends: test-base-multi
+
+components:
+  experiment_context:
+    experiment_name: qflex_test_multi
+
+  experiment_context_node_0:
+    experiment_name: qflex_test_multi-node-0
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/ping_savevm_master.exp
+    serial_telnet_port: 55681
+    telnet_port: 55781
+    loadvm_name: boot-login
+
+  experiment_context_node_1:
+    experiment_name: qflex_test_multi-node-1
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/ping_wait.exp
+    serial_telnet_port: 55682
+    telnet_port: 55782
+    loadvm_name: boot-login
+
+# Exception: Alpine boot freezes under sync=true / 100us; relax to 1ms / no sync.
+boot:
+  latencies_ns_list: [1000000]
+  syncs_list: ["false"]
+
+# Exception: load uses one uniform script + the loaded-test snapshot.
+load:
+  interaction_script: /home/dev/qflex/tests/realrun/load_verify_ls.exp
+  loadvm_name: loaded-test
+
+# Pipeline phases — different loadvm_name per command. interaction_script must
+# be cleared: leaving it set auto-enables `use_telnet_monitor`, which makes
+# QEMU bind a -chardev port. For run-partition specifically the per-node fan-
+# out launches N qemus in parallel and they'd all collide on the same port.
+initialize:
+  interaction_script: ""
+  loadvm_name: loaded-test
+
+fw:
+  interaction_script: ""
+  loadvm_name: init_warmed
+
+partition:
+  interaction_script: ""
+  partition_count: 5
+
+run_idx:
+  interaction_script: ""
+  partition_number: 0
+  idx: 0
+
+run_single_partition:
+  interaction_script: ""
+  partition_number: 0
+
+run_partition:
+  interaction_script: ""
+
+result:
+  interaction_script: ""

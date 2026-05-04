@@ -7,7 +7,7 @@ Two tests:
     Single-node: boot Alpine in root-single-node.qcow2, wait for the login
     prompt, savevm the running guest as `boot-login`, quit. The driver expect
     is tests/realrun/boot_login_savevm.exp; YAML lives at
-    tests/realrun/dc-alpine-boot-login-init.yaml.
+    tests/realrun/dc-single-init.yaml.
 
   test_init_multi_boot_login_savevm
     Two-node: boot both nodes (after wiping the per-node qcow2s so cp -u
@@ -95,7 +95,7 @@ def test_init_alpine_boot_login_savevm(dev_container):
     )
 
     r = _exec_in_container(
-        "./qflex boot -c tests/realrun/dc-alpine-boot-login-init.yaml",
+        "./qflex boot -c tests/realrun/dc-single-init.yaml",
         timeout=1800,  # full Alpine boot can take a few minutes
     )
     assert r.returncode == 0, (
@@ -148,7 +148,7 @@ def test_init_multi_boot_login_savevm(dev_container):
     )
 
     r = _exec_in_container(
-        "./qflex boot -c tests/realrun/dc-multi-boot-login-init.yaml",
+        "./qflex boot -c tests/realrun/dc-multi-init.yaml",
         timeout=1800,  # multi-node Alpine boot is much slower than single-node
     )
     assert r.returncode == 0, (

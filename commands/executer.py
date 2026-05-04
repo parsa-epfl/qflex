@@ -195,9 +195,19 @@ class Executor(abc.ABC):
             procs.append((sub, p))
             p.start()
 
+        # Two passes on purpose: each child's `_kill_peer_qemus` (which writes
+        # the OTHER child's `.killed_by_peer` marker) only runs after that
+        # child's own `_post_exit_grace`. If we joined-and-checked in a single
+        # loop, the fast-finisher would be evaluated before the slow-finisher
+        # had a chance to write the fast-finisher's marker, and a non-zero
+        # exit caused entirely by the symmetric SIGKILL would surface as a
+        # real failure. Joining ALL children first means by the time we look
+        # for any marker, every leaf's `_kill_peer_qemus` has already run.
+        for _, p in procs:
+            p.join()
+
         failures = []
         for sub, p in procs:
-            p.join()
             if p.exitcode == 0:
                 continue
             killed_marker = f"{sentinel_dir}/{self._sentinel_basename(sub.node_number)}.{KILLED_BY_PEER_SUFFIX}"

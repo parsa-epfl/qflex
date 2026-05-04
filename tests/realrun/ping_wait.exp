@@ -1,0 +1,233 @@
+#!/usr/bin/env expect
+# Follower driver for the `loaded-test` snapshot creation. Mirror of
+# ping_savevm_master.exp:
+#   * login as qflex, set 192.168.100.2 on the PDES NIC,
+#   * `ping 192.168.100.1 -c 1000000 -W 2000 -i 0.001` in the background,
+#   * wait for the first incoming ICMP echo from .1,
+#   * touch node<N>_at_first_echo.flag (master polls this),
+#   * tail OWN Boot.log for `savevm log 7` (deterministic per-node savevm
+#     completion signal — same trick boot_login_wait.exp uses),
+#   * touch node<N>_savevm_done.flag,
+#   * quit_qemu.
+#
+# Refuses to run on node 0 / single-node — that branch uses ping_savevm_master.exp.
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_FIRST_ECHO_S    600
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+set node_number  $env(NODE_NUMBER)
+
+set group_folder           [file dirname $exp_folder]
+set my_at_first_echo_flag  "$group_folder/node${node_number}_at_first_echo.flag"
+set my_savevm_done_flag    "$group_folder/node${node_number}_savevm_done.flag"
+set my_boot_log            "$exp_folder/Boot.log"
+
+if {$node_number == 0 || $node_number == -1} {
+    puts "ERROR: ping_wait.exp ran on node $node_number — only multi-node followers (node_number > 0) should run this script. Master/single-node use ping_savevm_master.exp"
+    exit 1
+}
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+# Clear stale sentinels from a prior run.
+catch {file delete -force $my_at_first_echo_flag}
+catch {file delete -force $my_savevm_done_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+# Poll a file for a literal substring with a wall-clock budget. Used to wait
+# for our own per-node savevm to complete by tailing the bash-redirected
+# Boot.log for qemu's `savevm log 7` printf — see boot_login_wait.exp for
+# the matching pattern.
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]
+            set content [read $fh]
+            close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
+# --- 1. Connect serial + login ---------------------------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "ERROR: login prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }
+}
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: password prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Pp]assword: }
+}
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# --- 1b. Touch test2.txt + capture ls_after_create -------------------------
+# Bakes a known file into the upcoming `loaded-test` snapshot so a later
+# `loadvm loaded-test` can verify this node's file persistence.
+send "touch test2.txt && ls\r"
+expect {
+    timeout { puts "ERROR: ls echo didn't come back"; quit_qemu $monitor_port; exit 1 }
+    "ls\r"
+}
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+set ls_output $expect_out(buffer)
+set out_path "$exp_folder/ls_after_create.txt"
+if {[catch {open $out_path "w"} f]} {
+    puts "ERROR: could not open $out_path for writing: $f"
+} else {
+    puts $f $ls_output
+    close $f
+    puts "wrote $out_path"
+}
+
+# --- 2. Configure 192.168.100.2 on the PDES NIC ----------------------------
+#
+# Follower (node 1, i=0) → MAC 52:54:00:aa:bb:0a (per setup_nic_args).
+
+send "MAC=52:54:00:aa:bb:0a; IFACE=\$(ip -o link | grep -i \"\$MAC\" | awk -F': ' '{print \$2}'); echo IFACE=\$IFACE\r"
+expect {
+    timeout { puts "ERROR: iface lookup timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {IFACE=([A-Za-z0-9]+)} {
+        set iface $expect_out(1,string)
+        puts "found PDES iface: $iface"
+    }
+}
+expect -re {[\$#] +}
+
+# See ping_savevm_master.exp for the IPSETUP_RC$? marker rationale.
+send "doas ip addr add 192.168.100.2/24 dev $iface && doas ip link set $iface up; echo IPSETUP_RC\$?\r"
+expect {
+    timeout { puts "ERROR: ip configuration timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {doas \([^)]+\) password: } { send "qflex\r"; exp_continue }
+    -re {Authentication failed} {
+        puts "ERROR: doas authentication failed (qflex pw rejected)"
+        quit_qemu $monitor_port; exit 1
+    }
+    -re {doas: not found|not permitted|Operation not permitted} {
+        puts "ERROR: doas not usable for ip — switch the script to root login"
+        quit_qemu $monitor_port; exit 1
+    }
+    "IPSETUP_RC0" { puts "configured 192.168.100.2 on $iface" }
+    -re {IPSETUP_RC[1-9]} {
+        puts "ERROR: ip addr add / ip link set returned non-zero"
+        quit_qemu $monitor_port; exit 1
+    }
+}
+expect -re {[\$#] +}
+
+# --- 3. Start ping in background, watch for first echo --------------------
+
+send "ping 192.168.100.1 -c 1000000 -W 2000 -i 0.001 > /tmp/ping.out 2>&1 &\r"
+expect {
+    timeout { puts "ERROR: backgrounding ping timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+set timeout $BUDGET_FIRST_ECHO_S
+send "tail -F /tmp/ping.out\r"
+expect {
+    timeout { puts "ERROR: never saw first echo from 192.168.100.1"; quit_qemu $monitor_port; exit 1 }
+    -re {bytes from 192\.168\.100\.1} {
+        puts "saw first echo from 192.168.100.1"
+    }
+}
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect -re {[\$#] +}
+
+# Touch our own at_first_echo flag — master polls for this before savevm.
+if {[catch {set f [open $my_at_first_echo_flag w]; close $f} err]} {
+    puts "WARN: could not write $my_at_first_echo_flag: $err"
+} else {
+    puts "wrote $my_at_first_echo_flag"
+}
+
+# --- 4. Wait for our own per-node savevm to complete -----------------------
+#
+# Master will issue `savevm loaded-test` once it sees our at_first_echo flag.
+# That fires the PDES drain; our qemu does its per-node savevm too. `savevm log 7`
+# is the last printf inside save_snapshot() (see migration/savevm.c) — the
+# deterministic signal that our local savevm finalised. Boot.log is where
+# qemu's stdout lands (via the bash group's `> Boot.log` redirect).
+
+wait_for_substring $my_boot_log "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "saw 'savevm log 7' in $my_boot_log; per-node savevm completed"
+
+# Tell master we're done so it can stop waiting and quit.
+if {[catch {set f [open $my_savevm_done_flag w]; close $f} err]} {
+    puts "WARN: could not write $my_savevm_done_flag: $err"
+} else {
+    puts "wrote per-node savevm-done sentinel: $my_savevm_done_flag"
+}
+
+# --- 5. quit ---------------------------------------------------------------
+
+quit_qemu $monitor_port
+exit 0

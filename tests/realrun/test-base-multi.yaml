@@ -1,0 +1,13 @@
+# Test base for multi-node real-run YAMLs. Same shape as conf/DC/dc-multi.yaml
+# but with `_leaf_defaults.memory_gb` shrunk to 4 GB on every leaf. See
+# test-base-single.yaml for the rationale.
+extends: ../../conf/DC/dc-multi
+
+_leaf_defaults:
+  memory_gb: 4
+  # Shorten the FW population from the dc.yaml 5 s default to 1 s so
+  # `./qflex fw` finishes faster in test_05 — 30 samples × 33 ms virtual
+  # time each instead of 30 × 167 ms, a 5× speedup on the FW wall-clock. Other
+  # multi-node tests do not consume `population_seconds` (boot/init-warm/
+  # savevm-* read other fields).
+  population_seconds: 1
