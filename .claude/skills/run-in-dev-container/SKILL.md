@@ -123,7 +123,7 @@ Default to dry-run when adding tests; default to real runs only when the user as
 
 ## Wiring this into a test
 
-The pytest suite stays dry-run-only by default (fast, hermetic). Real-run tests live in [tests/test_real_runs.py](../../../tests/test_real_runs.py), gated behind `QFLEX_REAL_RUN_TESTS=1` so default `make test` skips them.
+The pytest suite stays dry-run-only by default (fast, hermetic). Real-run tests live in [tests/test_dev_container_smoke.py](../../../tests/test_dev_container_smoke.py), gated behind `QFLEX_REAL_RUN_TESTS=1` so default `make test` skips them.
 
 The session-scoped `dev_container` fixture there is the canonical pattern:
 
@@ -151,8 +151,8 @@ def test_something_real(dev_container):
 Run with `QFLEX_REAL_RUN_TESTS=1 make test` to run *every* test (real-run files included), or use `make test-real-one TEST=<nodeid>` to run a single file or single test under the same env-var:
 
 ```bash
-make test-real-one TEST=tests/test_real_runs_docker_image.py
-make test-real-one TEST=tests/test_real_runs.py::test_dev_container_exec_smoke
+make test-real-one TEST=tests/test_dev_image_contents.py
+make test-real-one TEST=tests/test_dev_container_smoke.py::test_dev_container_exec_smoke
 ```
 
 Override the mounting folder via `QFLEX_REAL_RUN_MOUNTING=<path>`, the image variant via `QFLEX_REAL_RUN_WORM=0|1` and `QFLEX_REAL_RUN_DEBUG=0|1` (both default to `1` — i.e. `qflex-worm-debug-<ver>`, the user's canonical local image).
@@ -161,7 +161,7 @@ Override the mounting folder via `QFLEX_REAL_RUN_MOUNTING=<path>`, the image var
 
 - [./dep](../../../dep) — `start-docker`, `exec`, `stop-docker` subcommands.
 - [commands/docker.py](../../../commands/docker.py) — `DockerStarter` (with `background=` flag), `DockerExec`, `DockerStop`. The `DEFAULT_CONTAINER_NAME = "qflex-dev"` constant lives at module top.
-- [tests/test_real_runs.py](../../../tests/test_real_runs.py) — the smoke + alpine-login test, plus the `dev_container` fixture pattern.
+- [tests/test_dev_container_smoke.py](../../../tests/test_dev_container_smoke.py) — the smoke + alpine-login test, plus the `dev_container` fixture pattern.
 - [.claude/skills/dep/SKILL.md](../dep/SKILL.md) — full reference for the host-side CLI.
 - [.claude/skills/testing/SKILL.md](../testing/SKILL.md) — the dry-run-based test pattern (default for new tests).
 - [.claude/skills/boot-load-interactive/SKILL.md](../boot-load-interactive/SKILL.md) — Path A and Path B for boot/load, relevant when the user is asking for a real run that includes guest interaction.

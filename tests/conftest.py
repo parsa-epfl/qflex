@@ -4,7 +4,7 @@
   `mock_mounting_folder`, `multi_context`, `pin_per_sub`, `assert_two_node_master_first`.
 * The real-run side: `dev_container` session fixture (start/stop the
   `qflex_test` container via `./dep`) plus `_docker_available`, `_qflex_image_present`
-  and `_exec_in_container` so test_real_runs*.py files can share them.
+  and `_exec_in_container` so test_chained_pipeline.py / test_dev_*.py / test_boot_login_bootstrap.py files can share them.
 """
 import io
 import os
@@ -263,13 +263,13 @@ def multi_context(mock_mounting_folder):
 
 
 # ============================================================================
-# Real-run helpers — shared by tests/test_real_runs*.py.
+# Real-run helpers — shared by tests/test_chained_pipeline.py / test_dev_*.py / test_boot_login_bootstrap.py.
 #
 # Real-run tests are ENABLED by default (the qcow2 snapshot bootstrapped by
-# tests/test_real_runs_init.py keeps them fast — minutes instead of dozens of
+# tests/test_boot_login_bootstrap.py keeps them fast — minutes instead of dozens of
 # minutes). Set QFLEX_SKIP_REAL_RUN=1 to disable them.
 #
-# The init tests under tests/test_real_runs_init.py are gated separately by
+# The init tests under tests/test_boot_login_bootstrap.py are gated separately by
 # QFLEX_INIT_TEST=1 because they DO take a full Alpine boot — they only need
 # to be re-run after the qcow2 is reset or QEMU binaries change.
 # ============================================================================
@@ -323,7 +323,7 @@ def require_boot_login_snapshot(qcow2_paths: list[str]) -> None:
         qcow2_paths,
         "boot-login",
         "bootstrap with `QFLEX_INIT_TEST=1 make test-real-one "
-        "TEST=tests/test_real_runs_init.py`",
+        "TEST=tests/test_boot_login_bootstrap.py`",
     )
 
 
@@ -343,7 +343,7 @@ def require_boot_login_zstd(experiment_run_dirs: list[str]) -> None:
             "missing boot-login.zstd in: "
             + ", ".join(missing)
             + " — bootstrap with `QFLEX_INIT_TEST=1 make test-real-one "
-            "TEST=tests/test_real_runs_init.py`"
+            "TEST=tests/test_boot_login_bootstrap.py`"
         )
 
 
@@ -369,6 +369,18 @@ def _qflex_image_present() -> bool:
     if r.returncode != 0:
         return False
     return any("parsa-epfl/qflex" in line for line in r.stdout.splitlines())
+
+
+def _container_running(name: str) -> bool:
+    """True if a docker container with this exact name is currently running."""
+    try:
+        r = subprocess.run(
+            ["docker", "ps", "-q", "-f", f"name=^{name}$"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return r.returncode == 0 and r.stdout.strip() != ""
 
 
 def _exec_in_container(command: str, timeout: int = 60) -> subprocess.CompletedProcess:
@@ -415,28 +427,35 @@ def dev_container():
     use_worm = _envflag("QFLEX_REAL_RUN_WORM", "1")
     use_debug = _envflag("QFLEX_REAL_RUN_DEBUG", "1")
 
-    subprocess.run(
-        ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
-        cwd=REPO_ROOT, capture_output=True, timeout=30,
-    )
+    # If `qflex_test` is already running (e.g. left up by `make test-iterate`
+    # so the recompiled qemu/parallel-qemu binaries inside it are used by
+    # this real-run session), REUSE it: don't tear down at start, don't tear
+    # down at end. Otherwise: fresh start, fresh stop, as before.
+    pre_existing = _container_running(TEST_CONTAINER_NAME)
 
-    start_cmd = [
-        "./dep", "start-docker", "--mounting-folder", mounting,
-        "--background", "--container-name", TEST_CONTAINER_NAME,
-    ]
-    if use_worm:
-        start_cmd.append("--worm")
-    if use_debug:
-        start_cmd.append("--debug")
-    start = subprocess.run(
-        start_cmd,
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
-    )
-    if start.returncode != 0:
-        pytest.skip(
-            f"./dep start-docker --background failed (rc={start.returncode}):\n"
-            f"stdout:\n{start.stdout}\nstderr:\n{start.stderr}"
+    if not pre_existing:
+        subprocess.run(
+            ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
+            cwd=REPO_ROOT, capture_output=True, timeout=30,
         )
+
+        start_cmd = [
+            "./dep", "start-docker", "--mounting-folder", mounting,
+            "--background", "--container-name", TEST_CONTAINER_NAME,
+        ]
+        if use_worm:
+            start_cmd.append("--worm")
+        if use_debug:
+            start_cmd.append("--debug")
+        start = subprocess.run(
+            start_cmd,
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
+        )
+        if start.returncode != 0:
+            pytest.skip(
+                f"./dep start-docker --background failed (rc={start.returncode}):\n"
+                f"stdout:\n{start.stdout}\nstderr:\n{start.stderr}"
+            )
 
     # Sweep stale qemu processes / `/dev/shm/pdes_*` files left by prior runs
     # (the user may have been driving qflex-dev manually in parallel; the
@@ -451,10 +470,11 @@ def dev_container():
     try:
         yield mounting
     finally:
-        subprocess.run(
-            ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
-            cwd=REPO_ROOT, capture_output=True, timeout=30,
-        )
+        if not pre_existing:
+            subprocess.run(
+                ["./dep", "stop-docker", "--container-name", TEST_CONTAINER_NAME],
+                cwd=REPO_ROOT, capture_output=True, timeout=30,
+            )
 
 
 # ============================================================================

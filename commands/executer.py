@@ -121,7 +121,8 @@ class Executor(abc.ABC):
                 *,
                 sentinel_dir: str = None,
                 log_path: str = None,
-                err_path: str = None) -> bool:
+                err_path: str = None,
+                log_append: bool = False) -> bool:
         exp = self.get_experiment()
         if exp is not None and exp.has_sub_experiments():
             return self._execute_group(to_stdio=to_stdio,
@@ -133,7 +134,8 @@ class Executor(abc.ABC):
                                   dry_run=dry_run,
                                   sentinel_dir=sentinel_dir,
                                   log_path=log_path,
-                                  err_path=err_path)
+                                  err_path=err_path,
+                                  log_append=log_append)
 
     def _execute_group(self, to_stdio: bool, run_in_background: bool, dry_run: bool,
                        outer_sentinel_dir: str = None) -> bool:
@@ -251,13 +253,17 @@ class Executor(abc.ABC):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         open(path, "w").close()
 
-    def _build_bash(self, log_path: str, err_path: str, *, tee_to_stdio: bool = False) -> str:
+    def _build_bash(self, log_path: str, err_path: str,
+                    *, tee_to_stdio: bool = False, log_append: bool = False) -> str:
         """Join self.cmd() into a single bash string, optionally wrapping with an
         output redirect. The sentinel wait/touch is done in Python (see _execute_leaf),
         not embedded here. tee_to_stdio=True keeps the live terminal stream while
         also persisting to file — needed when the leaf runs foreground so the user
-        sees QEMU progress and the log survives if the run dies. Uses bash process
-        substitution; the leaf invokes via `bash -c` (not /bin/sh) to make it work."""
+        sees QEMU progress and the log survives if the run dies. log_append=True
+        switches `>`/`2>` to `>>`/`2>>` so several leaves can share one log file
+        without clobbering each other (used by SequentialGroupExecutor, which
+        wipes the file once before iterating). Uses bash process substitution;
+        the leaf invokes via `bash -c` (not /bin/sh) to make it work."""
         args = self.cmd()
         if isinstance(args, str):
             args = [args]
@@ -266,8 +272,12 @@ class Executor(abc.ABC):
         if not (log_path and err_path):
             return inner
         if tee_to_stdio:
-            return f"( {inner} ) > >(tee {log_path}) 2> >(tee {err_path} >&2)"
-        return f"( {inner} ) > {log_path} 2> {err_path}"
+            tee_flag = "-a" if log_append else ""
+            return (f"( {inner} ) > >(tee {tee_flag} {log_path}) "
+                    f"2> >(tee {tee_flag} {err_path} >&2)")
+        op = ">>" if log_append else ">"
+        err_op = "2>>" if log_append else "2>"
+        return f"( {inner} ) {op} {log_path} {err_op} {err_path}"
 
     def _execute_leaf(self,
                       to_stdio: bool,
@@ -275,7 +285,8 @@ class Executor(abc.ABC):
                       dry_run: bool,
                       sentinel_dir: str,
                       log_path: str,
-                      err_path: str) -> bool:
+                      err_path: str,
+                      log_append: bool = False) -> bool:
         cwd = os.getcwd()
         exp = self.get_experiment()
 
@@ -327,7 +338,8 @@ class Executor(abc.ABC):
         # (its wait_for_nodes contains our node_number) can proceed.
         self._touch_sentinel(sentinel_dir, "started")
 
-        arg = self._build_bash(log_path, err_path, tee_to_stdio=to_stdio)
+        arg = self._build_bash(log_path, err_path, tee_to_stdio=to_stdio,
+                               log_append=log_append)
 
         # Force bash (not /bin/sh / dash) so process substitution `>(tee ...)` works.
         if to_stdio:
@@ -342,6 +354,21 @@ class Executor(abc.ABC):
         if r.returncode == 0:
             self._touch_sentinel(sentinel_dir, "done")
             return True
+
+        # rc != 0: a peer's `_kill_peer_qemus` may have SIGKILL'd our qemu —
+        # that's the documented PDES exit workaround, not a real failure.
+        # Each peer writes a `killed_by_peer` marker named after this leaf
+        # (using the leaf's own node_number) before returning, so the check
+        # is "does my own killed_by_peer marker exist?". After our 30s
+        # `_post_exit_grace` above the marker has had ample time to land.
+        if exp is not None and sentinel_dir is not None:
+            own_killed_marker = (
+                f"{sentinel_dir}/"
+                f"{self._sentinel_basename(exp.node_number)}.{KILLED_BY_PEER_SUFFIX}"
+            )
+            if os.path.exists(own_killed_marker):
+                self._touch_sentinel(sentinel_dir, "done")
+                return True
         return False
 
     def _execute_in_tmux(self, sentinel_dir: str, log_path: str, err_path: str) -> bool:
@@ -500,7 +527,8 @@ class SequentialGroupExecutor(Executor):
         self.children = children
 
     def execute(self, to_stdio = True, run_in_background = False, dry_run: bool = False,
-                *, sentinel_dir: str = None, log_path: str = None, err_path: str = None):
+                *, sentinel_dir: str = None, log_path: str = None, err_path: str = None,
+                log_append: bool = False):
         # If this orchestrator's experiment_context has sub-experiments, recurse via the
         # multi-experiment dispatch (the same mechanism that replaced ParallelExecutor).
         # Each sub gets its own mp.Process; in the child, the heterogeneous children
@@ -516,6 +544,16 @@ class SequentialGroupExecutor(Executor):
         # overriding _build_children() — empty default for the base class.
         self.children = self._build_children()
 
+        # Wipe the shared log/err files ONCE, then have each child append to them.
+        # Without this, every child's `_build_bash` redirect would truncate the
+        # file and only the last child's output would survive — losing the per-idx
+        # logs and errors of every prior idx in the partition.
+        if not _is_dry_run(dry_run):
+            for path in (log_path, err_path):
+                if path:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    open(path, "w").close()
+
         # One by one execute the children and stop if any of them fails.
         # Sentinel_dir/log_path/err_path are forwarded so leaves down the tree
         # (e.g. RunIdxCommand) can do their own per-(partition,idx) sentinel touch.
@@ -525,7 +563,8 @@ class SequentialGroupExecutor(Executor):
                                    dry_run=dry_run,
                                    sentinel_dir=sentinel_dir,
                                    log_path=log_path,
-                                   err_path=err_path)
+                                   err_path=err_path,
+                                   log_append=True)
             if not result:
                 # read output and error for debugging
                 err_f = child.get_err_file_address()

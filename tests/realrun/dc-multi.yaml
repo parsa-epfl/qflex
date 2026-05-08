@@ -18,7 +18,7 @@ components:
   experiment_context_node_0:
     experiment_name: qflex_test_multi-node-0
     use_gdb: false
-    interaction_script: /home/dev/qflex/tests/realrun/ping_savevm_master.exp
+    interaction_script: /home/dev/qflex/tests/realrun/loaded_test_create_master.exp
     serial_telnet_port: 55681
     telnet_port: 55781
     loadvm_name: boot-login
@@ -26,7 +26,7 @@ components:
   experiment_context_node_1:
     experiment_name: qflex_test_multi-node-1
     use_gdb: false
-    interaction_script: /home/dev/qflex/tests/realrun/ping_wait.exp
+    interaction_script: /home/dev/qflex/tests/realrun/loaded_test_create_follower.exp
     serial_telnet_port: 55682
     telnet_port: 55782
     loadvm_name: boot-login
@@ -36,9 +36,12 @@ boot:
   latencies_ns_list: [1000000]
   syncs_list: ["false"]
 
-# Exception: load uses one uniform script + the loaded-test snapshot.
+# Exception: load uses one uniform script + the loaded-test snapshot. The
+# script also re-savevms loaded-test with a long-running urandom→TCP-echo→cmp
+# workload running, so init/fw resume from a snapshot where the workload is
+# already churning (their warming phases see real CPU+network activity).
 load:
-  interaction_script: /home/dev/qflex/tests/realrun/load_verify_ls.exp
+  interaction_script: /home/dev/qflex/tests/realrun/loaded_test_verify_and_swap_workload.exp
   loadvm_name: loaded-test
 
 # Pipeline phases — different loadvm_name per command. interaction_script must

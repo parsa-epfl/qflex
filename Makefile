@@ -7,12 +7,18 @@ serve-docs:
 build-docs:
 	mkdocs build --clean
 
+# Set QFLEX_RECOMPILE=1 to recompile qemu + parallel-qemu + flexus inside the
+# qflex_test container before pytest runs (starts the container if needed).
+# Useful when an iteration on submodule C source needs to reach real-run tests.
 test:
+ifeq ($(QFLEX_RECOMPILE),1)
+	python -m tests.container_compiler --include-flexus
+endif
 	python -m pytest tests/ -v
 
 # Same as `test` but with -s (don't capture stdout — see prints / dry-run output
 # / the alpine ls output live) and longer tracebacks. Combine with QFLEX_REAL_RUN_TESTS=1
-# to actually run the docker-based tests in tests/test_real_runs.py:
+# to actually run the docker-based tests in tests/test_dev_container_smoke.py:
 #     QFLEX_REAL_RUN_TESTS=1 make test-verbose
 test-verbose:
 	python -m pytest tests/ -v -s --tb=long
@@ -20,13 +26,20 @@ test-verbose:
 # Run a single real-mode test (or file). Sets QFLEX_REAL_RUN_TESTS=1 so the
 # real-run gate opens, then runs the pytest nodeid you pass via TEST=...
 # Example:
-#     make test-real-one TEST=tests/test_real_runs_docker_image.py
-#     make test-real-one TEST=tests/test_real_runs_docker_image.py::test_iputils_ping_installed
+#     make test-real-one TEST=tests/test_dev_image_contents.py
+#     make test-real-one TEST=tests/test_dev_image_contents.py::test_iputils_ping_installed
 test-real-one:
 ifndef TEST
-	$(error TEST is not set. Usage: make test-real-one TEST=tests/test_real_runs_docker_image.py[::test_name])
+	$(error TEST is not set. Usage: make test-real-one TEST=tests/test_dev_image_contents.py[::test_name])
 endif
 	QFLEX_REAL_RUN_TESTS=1 python -m pytest -v -s --tb=long $(TEST)
+
+# Recompile qemu/ + parallel-qemu/ inside a dedicated long-lived
+# `qflex-test-iterate` container. Reuses the prebuilt -saved/ trees baked into
+# the image, so only changed files recompile — much faster than rebuilding the
+# whole docker image. Use during iteration on PDES / QEMU source.
+test-iterate:
+	QFLEX_ITERATE=1 python -m pytest -v -s --tb=long tests/container_compiler.py
 
 bump-major:
 	bump-my-version bump major --allow-dirty

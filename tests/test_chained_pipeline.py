@@ -3,7 +3,7 @@ guest state on top of `boot-login` so each subsequent stage skips the slow
 setup it doesn't need.
 
 Chain:
-    boot-login (from tests/test_real_runs_init.py)
+    boot-login (from tests/test_boot_login_bootstrap.py)
         ↓
     loaded-test     (test_03 — guest logged in + 192.168.100.0/24 net + ping running)
         ↓
@@ -16,7 +16,7 @@ so a missing earlier step shows up as a SKIP rather than a misleading FAIL.
 
 Same gating as the rest of the real-run suite: enabled by default, set
 `QFLEX_SKIP_REAL_RUN=1` to disable. Init bootstrap (boot-login) lives in
-test_real_runs_init.py and is gated separately by `QFLEX_INIT_TEST=1`.
+test_boot_login_bootstrap.py and is gated separately by `QFLEX_INIT_TEST=1`.
 """
 import os
 
@@ -55,7 +55,7 @@ def _node_qcow2(mounting: str, n: int) -> str:
     return f"{mounting}/root-single-node-node{n}.qcow2"
 
 
-def test_03_loaded_savevm_with_pings(dev_container):
+def test_03_boot_creates_loaded_test_with_workload(dev_container):
     """Boot from boot-login → log in → touch testN.txt → set 192.168.100.{1,2}
     on the PDES NIC → bidirectional ping → master savevm `loaded-test` once
     both sides see first echoes → exit.
@@ -74,7 +74,7 @@ def test_03_loaded_savevm_with_pings(dev_container):
         [_node_qcow2(mounting, n) for n in range(len(NODE_SUB_NAMES))],
         "boot-login",
         "bootstrap with `QFLEX_INIT_TEST=1 make test-real-one "
-        "TEST=tests/test_real_runs_init.py::test_init_multi_boot_login_savevm`",
+        "TEST=tests/test_boot_login_bootstrap.py::test_init_multi_boot_login_savevm`",
     )
 
     # No experiment-folder wipe: the per-node folders are shared with the
@@ -119,7 +119,7 @@ def test_03_loaded_savevm_with_pings(dev_container):
         )
 
 
-def test_03b_load_verify_files(dev_container):
+def test_03b_load_verifies_files_and_swaps_workload(dev_container):
     """`./qflex load` from `loaded-test` and run load_verify_ls.exp on both
     leaves (via the YAML's `load:` command section). Verifies that the
     testN.txt files baked into `loaded-test` by test_03 survived the
@@ -131,7 +131,7 @@ def test_03b_load_verify_files(dev_container):
     require_snapshot(
         [_node_qcow2(mounting, n) for n in range(len(NODE_SUB_NAMES))],
         LOADED_TEST_SNAPSHOT,
-        "run tests/test_real_runs_pipeline.py::test_03_loaded_savevm_with_pings first",
+        "run tests/test_chained_pipeline.py::test_03_boot_creates_loaded_test_with_workload first",
     )
 
     r = _exec_in_container(
@@ -159,7 +159,7 @@ def test_03b_load_verify_files(dev_container):
         )
 
 
-def test_04_initialize_from_loaded_test(dev_container):
+def test_04_init_warm_creates_init_warmed_snapshot(dev_container):
     """Run `./qflex initialize` against the loaded-test snapshot. WormCacheQFlex
     `mode=pure_fill` warms the cache hierarchy and, when the warm ratio hits
     1.0, fires `qemu_plugin_notify_fully_warmed` → savevm `init_warmed` →
@@ -172,7 +172,7 @@ def test_04_initialize_from_loaded_test(dev_container):
     require_snapshot(
         [_node_qcow2(mounting, n) for n in range(len(NODE_SUB_NAMES))],
         LOADED_TEST_SNAPSHOT,
-        "run tests/test_real_runs_pipeline.py::test_03_loaded_savevm_with_pings first",
+        "run tests/test_chained_pipeline.py::test_03_boot_creates_loaded_test_with_workload first",
     )
 
     # 30 minute wall budget. The user originally suggested 20, but empirically
@@ -214,7 +214,7 @@ def test_04_initialize_from_loaded_test(dev_container):
         )
 
 
-def test_05_fw_from_init_warmed(dev_container):
+def test_05_fw_creates_per_sample_snapshots(dev_container):
     """Run `./qflex fw` against the init_warmed snapshot. WormCacheQFlex
     `mode=warm` takes `--sample-size` periodic per-sample snapshots over the
     `population_seconds` window, then prints `Generate N snapshots. Quit.`
@@ -232,7 +232,7 @@ def test_05_fw_from_init_warmed(dev_container):
     require_snapshot(
         [_node_qcow2(mounting, n) for n in range(len(NODE_SUB_NAMES))],
         INIT_WARMED_SNAPSHOT,
-        "run tests/test_real_runs_pipeline.py::test_04_initialize_from_loaded_test first",
+        "run tests/test_chained_pipeline.py::test_04_init_warm_creates_init_warmed_snapshot first",
     )
 
     r = _exec_in_container(
@@ -281,7 +281,7 @@ def test_05_fw_from_init_warmed(dev_container):
     )
 
 
-def test_06_partition_5_chunks(dev_container):
+def test_06_partition_splits_samples_into_chunks(dev_container):
     """Run `./qflex partition` to split the FW per-sample checkpoints into 5
     partitions per node. partition.py is purely file-juggling — no qemu
     launches — so this is fast (seconds).
@@ -300,7 +300,7 @@ def test_06_partition_5_chunks(dev_container):
     if not os.path.exists(fw_marker):
         pytest.skip(
             f"missing FW per-sample state file {fw_marker} — run "
-            f"tests/test_real_runs_pipeline.py::test_05_fw_from_init_warmed first"
+            f"tests/test_chained_pipeline.py::test_05_fw_creates_per_sample_snapshots first"
         )
 
     # PartitionCommand fails if any node's run/partition_0 already exists.
@@ -345,7 +345,7 @@ def test_06_partition_5_chunks(dev_container):
         )
 
 
-def test_07_run_idx_part0_idx0_both_nodes(dev_container):
+def test_07_run_idx_single_sample(dev_container):
     """Drive `./qflex run-idx` for (partition 0, idx 0) on both nodes via the
     dc-multi-run-idx-p0-i0.yaml fixture. Same `RunIdxCommand` the
     `run-single-partition` and `run-partition` phases compose, just executed
@@ -360,7 +360,7 @@ def test_07_run_idx_part0_idx0_both_nodes(dev_container):
                           f"partition_0/snapshot_0.state.zstd"):
         pytest.skip(
             "missing partition_0/snapshot_0 state — run "
-            "tests/test_real_runs_pipeline.py::test_06_partition_5_chunks first"
+            "tests/test_chained_pipeline.py::test_06_partition_splits_samples_into_chunks first"
         )
 
     r = _exec_in_container(
@@ -374,11 +374,98 @@ def test_07_run_idx_part0_idx0_both_nodes(dev_container):
     )
 
 
-def test_08_run_single_partition_part0_both_nodes(dev_container):
+def _assert_idx_outputs(mounting: str, sub: str, partition_number: int,
+                        aggregated_log_text: str) -> list[str]:
+    """For one node `sub` and one partition, walk every `result_<i>` dir under
+    `<run>/partition_<P>/` and assert the Flexus-side per-idx artifacts exist
+    and are non-empty. These are the actual signals that the timing run did
+    real work — without them rc=0 alone is meaningless.
+
+    `aggregated_log_text` is the stdout/log text that should aggregate output
+    from every idx in the partition. For `run-single-partition` (direct CLI)
+    this is `r.stdout` (no per-partition log file is written). For
+    `run-partition` it's the contents of `<part>/run-partition.log`.
+    SequentialGroupExecutor wipes the per-partition log file once at the
+    start and each child's bash redirect appends — so if the aggregated text
+    is missing earlier idxs, the overwrite-instead-of-append regression is back.
+
+    The `all.measurement.end.log` file is allowed to be missing on individual
+    idxs (the peer-kill race in commands/executer.py + parallel-qemu PDES exit
+    can SIGKILL the lagging node mid-flush — see the "PDES peer-kill end.log"
+    TODO in CLAUDE.md). This function does NOT assert on it directly; instead
+    it returns the list of missing-end.log paths so the caller can apply a
+    single global "at most one missing per test" budget across all checked
+    (node, partition) pairs.
+    """
+    part_dir = f"{mounting}/experiments/{sub}/run/partition_{partition_number}"
+    assert os.path.isdir(part_dir), f"missing partition dir {part_dir}"
+
+    result_dirs = sorted(
+        d for d in os.listdir(part_dir)
+        if d.startswith("result_") and os.path.isdir(os.path.join(part_dir, d))
+    )
+    assert result_dirs, (
+        f"no result_<idx> directories under {part_dir} — run-* phase produced "
+        "no per-idx output"
+    )
+
+    missing_end_log: list[str] = []
+    for rd in result_dirs:
+        idx_dir = os.path.join(part_dir, rd)
+        qemu_timing = os.path.join(idx_dir, "qemu-timing.log")
+        assert os.path.exists(qemu_timing) and os.path.getsize(qemu_timing) > 0, (
+            f"{qemu_timing} missing or empty — timing-phase qemu didn't produce log"
+        )
+        end_log = os.path.join(idx_dir, "all.measurement.end.log")
+        if not (os.path.exists(end_log) and os.path.getsize(end_log) > 0):
+            missing_end_log.append(end_log)
+        meas_logs = [
+            f for f in os.listdir(idx_dir)
+            if f.startswith("all.measurement.") and f != "all.measurement.end.log"
+        ]
+        assert meas_logs, (
+            f"no all.measurement.<NNN>.log files in {idx_dir} — Flexus emitted no "
+            "per-checkpoint stats"
+        )
+
+    expected_idxs = sorted(int(d.removeprefix("result_")) for d in result_dirs)
+    # RunIdxCommand emits banners containing `qflex idx <i>:` in three places:
+    # the setup echo (lands in run-partition.log), and the gdb stdout/stderr
+    # banners (land in partition_<P>/log and /err respectively). Aggregated
+    # log MUST contain one such marker per idx — if any are missing, an idx
+    # either never ran or its output was truncated by a later idx (the
+    # overwrite regression).
+    missing = [
+        i for i in expected_idxs
+        if f"qflex idx {i}:" not in aggregated_log_text
+    ]
+    assert not missing, (
+        f"node {sub} partition_{partition_number}: aggregated log is missing "
+        f"the per-idx banner for idx(s) {missing}. "
+        f"Either earlier idxs were truncated by a later idx (the overwrite "
+        f"regression) or those idxs never ran. expected_idxs={expected_idxs}"
+    )
+    return missing_end_log
+
+
+# Global budget for missing all.measurement.end.log files in a single test.
+# The follower-side END_OF_EMULATION → libqflex_stop → exit(0) race that used
+# to drop end.log on lagging idxs is fixed in qemu-pdes/net/pdes-engine.c
+# (the END_OF_EMULATION arm of process_message no longer calls
+# pdes_engine_destroy directly — it just unblocks sync and grants exit
+# permission, letting local Flexus finish its measurement and flush end.log
+# before qemu's natural shutdown). With that fix in place, EVERY idx must
+# produce all.measurement.end.log; budget is zero.
+MAX_MISSING_END_LOG_PER_TEST = 0
+
+
+def test_08_run_single_partition_sequential_idxs(dev_container):
     """Drive `./qflex run-single-partition` for partition 0 on both nodes via
     dc-multi-run-single-partition-p0.yaml. RunSinglePartitionCommand iterates
     the partition's idxs sequentially (with the in-source `sleep 5` between
-    them), per node in parallel via the multi-node group dispatch.
+    them), per node in parallel via the multi-node group dispatch. Asserts
+    that every idx in partition 0 produced its Flexus per-idx output on both
+    nodes.
     """
     mounting = dev_container
 
@@ -386,7 +473,7 @@ def test_08_run_single_partition_part0_both_nodes(dev_container):
                           f"partition_0/snapshot_0.state.zstd"):
         pytest.skip(
             "missing partition_0/snapshot_0 state — run "
-            "tests/test_real_runs_pipeline.py::test_06_partition_5_chunks first"
+            "tests/test_chained_pipeline.py::test_06_partition_splits_samples_into_chunks first"
         )
 
     r = _exec_in_container(
@@ -399,13 +486,40 @@ def test_08_run_single_partition_part0_both_nodes(dev_container):
         f"stderr (last 2k):\n{r.stderr[-2000:]}"
     )
 
+    # `run-single-partition` (use_stdio=True) tees its bash output to both
+    # stdout and `<exp>/RunSinglePartitionCommand.log` per node. We read the
+    # file rather than r.stdout because the tee → docker-exec → subprocess
+    # capture path is flakey on buffering; the file is the authoritative
+    # source. The file must contain every idx's banner, else the wipe-then-
+    # append regression is back.
+    missing_end_log: list[str] = []
+    for sub in NODE_SUB_NAMES:
+        node_log = f"{mounting}/experiments/{sub}/RunSinglePartitionCommand.log"
+        assert os.path.exists(node_log) and os.path.getsize(node_log) > 0, (
+            f"{node_log} missing or empty — run-single-partition produced no "
+            f"aggregate per-node log on this node"
+        )
+        with open(node_log, errors="replace") as f:
+            aggregated = f.read()
+        missing_end_log += _assert_idx_outputs(
+            mounting, sub, partition_number=0, aggregated_log_text=aggregated,
+        )
+    missing_end_log = sorted(set(missing_end_log))
+    assert len(missing_end_log) <= MAX_MISSING_END_LOG_PER_TEST, (
+        f"more than {MAX_MISSING_END_LOG_PER_TEST} all.measurement.end.log "
+        f"file(s) missing — exceeds the budget for the known PDES peer-kill "
+        f"race. Missing: {missing_end_log}"
+    )
 
-def test_09_run_partition_all_partitions_both_nodes(dev_container):
+
+def test_09_run_partition_full_fanout(dev_container):
     """Drive `./qflex run-partition` (all partitions, both nodes) via
     dc-multi-run-partition.yaml. Exercises the cross-node handshake added in
     commands/run_partition.py (node 1 waits for node 0's
     RunPartitionCommand_node0.started before fanning out its own partitions)
     and the per-partition log routing to <run>/partition_<P>/run-partition.{log,err}.
+    Asserts that every idx in every partition produced its Flexus per-idx
+    output on both nodes.
     """
     mounting = dev_container
 
@@ -413,7 +527,7 @@ def test_09_run_partition_all_partitions_both_nodes(dev_container):
                           f"partition_0/snapshot_0.state.zstd"):
         pytest.skip(
             "missing partition_0/snapshot_0 state — run "
-            "tests/test_real_runs_pipeline.py::test_06_partition_5_chunks first"
+            "tests/test_chained_pipeline.py::test_06_partition_splits_samples_into_chunks first"
         )
 
     # All 5 partitions × ~6 idxs each × 2 nodes (parallel). At a few minutes
@@ -428,8 +542,42 @@ def test_09_run_partition_all_partitions_both_nodes(dev_container):
         f"stderr (last 2k):\n{r.stderr[-2000:]}"
     )
 
+    # `run-partition` fans out one mp.Process per partition, each redirecting
+    # its bash stream to `<exp>/run/partition_<P>/run-partition.log`. Read each
+    # partition's three aggregate logs and verify they each contain output
+    # from every idx in that partition:
+    #   * `run-partition.log` — outer redirect, written by _build_bash with >>
+    #     (wipe-once + append, see SequentialGroupExecutor)
+    #   * `log` and `err` — inner redirect from RunIdxCommand's gdb command,
+    #     written with >>/2>> (wipe-once via RunSinglePartitionCommand,
+    #     append-per-idx with `===== gdb stdout/stderr for idx N =====` banner)
+    missing_end_log: list[str] = []
+    for sub in NODE_SUB_NAMES:
+        for p in range(PARTITION_COUNT):
+            part_dir = f"{mounting}/experiments/{sub}/run/partition_{p}"
+            for fname in ("run-partition.log", "log", "err"):
+                path = f"{part_dir}/{fname}"
+                assert os.path.exists(path) and os.path.getsize(path) > 0, (
+                    f"{path} missing or empty — run-partition produced no aggregate "
+                    f"{fname} for this partition"
+                )
+                with open(path, errors="replace") as f:
+                    aggregated = f.read()
+                missing_end_log += _assert_idx_outputs(
+                    mounting, sub, partition_number=p, aggregated_log_text=aggregated,
+                )
+    # _assert_idx_outputs is called 3× per (node, partition) pair (once for
+    # each of run-partition.log / log / err) so the same end.log file can
+    # appear up to 3× in `missing_end_log`. Dedupe before checking the budget.
+    missing_end_log = sorted(set(missing_end_log))
+    assert len(missing_end_log) <= MAX_MISSING_END_LOG_PER_TEST, (
+        f"more than {MAX_MISSING_END_LOG_PER_TEST} all.measurement.end.log "
+        f"file(s) missing — exceeds the budget for the known PDES peer-kill "
+        f"race. Missing: {missing_end_log}"
+    )
 
-def test_10_result_new_ipc_and_uipc_both_nodes(dev_container):
+
+def test_10_result_aggregates_to_core_info_csv(dev_container):
     """Drive `./qflex result` for both nodes. Each node's `result.py` aggregates
     per-(partition, idx) Flexus stats and computes new per-core IPC + U-IPC.
     Verifies for BOTH nodes that:

@@ -1,21 +1,23 @@
 ---
 name: testing
-description: Use when adding to or debugging the pytest suite under [tests/](../../../tests/), or when the user asks how to verify a behaviour change in the dispatch / sentinel / boot-load-interactive paths. Covers the `make test` Makefile target, the per-component file layout (one `test_<phase>.py` per pipeline phase), the dry-run-stdout-parser approach in [tests/conftest.py](../../../tests/conftest.py) (`parse_dry_run_blocks`, `DryRunBlock`, `capture_dry_run_stdout`, `mock_mounting_folder`, `multi_context`, `login_ls_script` fixtures + the shared `pin_per_sub` and `assert_two_node_master_first` helpers), the `[py-wait]`/`[py-touch]`/`[bash]`/`[tmux]`/`[py-poll]` markers the executor's dry-run printer emits, the wall-clock parallelism test pattern, and the real-run test class in [tests/test_real_runs.py](../../../tests/test_real_runs.py) (gated behind `QFLEX_REAL_RUN_TESTS=1`, drives `./dep` for actual docker-based execution). TRIGGER when the user asks about the test suite, how to write a new test, how to assert master-first ordering, the dry-run parser, the partition-axis parallelism test (real subprocess + monkeypatched leaves), `assert_two_node_master_first`, or how to add a real-run test. SKIP for the executor dispatch internals themselves (executor skill), what specific commands do (qflex-commands skill), or how `./dep` itself works (dep skill).
+description: Use when adding to or debugging the pytest suite under [tests/](../../../tests/), or when the user asks how to verify a behaviour change in the dispatch / sentinel / boot-load-interactive paths. Covers the `make test` Makefile target, the per-component file layout (one `test_<phase>.py` per pipeline phase), the dry-run-stdout-parser approach in [tests/conftest.py](../../../tests/conftest.py) (`parse_dry_run_blocks`, `DryRunBlock`, `capture_dry_run_stdout`, `mock_mounting_folder`, `multi_context`, `login_ls_script` fixtures + the shared `pin_per_sub` and `assert_two_node_master_first` helpers), the `[py-wait]`/`[py-touch]`/`[bash]`/`[tmux]`/`[py-poll]` markers the executor's dry-run printer emits, the wall-clock parallelism test pattern, and the real-run test class in [tests/test_dev_container_smoke.py](../../../tests/test_dev_container_smoke.py) (gated behind `QFLEX_REAL_RUN_TESTS=1`, drives `./dep` for actual docker-based execution). TRIGGER when the user asks about the test suite, how to write a new test, how to assert master-first ordering, the dry-run parser, the partition-axis parallelism test (real subprocess + monkeypatched leaves), `assert_two_node_master_first`, or how to add a real-run test. SKIP for the executor dispatch internals themselves (executor skill), what specific commands do (qflex-commands skill), or how `./dep` itself works (dep skill).
 ---
 
 # Testing — pytest + dry-run output parser
+
+**Update this skill whenever you change a test file.** Anything that lands in [tests/](../../../tests/) — including the `tests/realrun/*.exp` expect scripts and `tests/realrun/*.yaml` fixtures — must be reflected here in the same edit. If a test grows a new fixture file, a new assertion class, or a new pre-flight step in an expect script, the relevant section below grows with it. Out-of-sync skill = the next session looks at stale guidance.
 
 Tests live under [tests/](../../../tests/), one file per pipeline phase. They're driven by a parser that consumes the executor's dry-run stdout and asserts on the structured markers it prints. Run with `make test` (or directly: `python -m pytest tests/ -v`).
 
 The whole strategy hinges on the dry-run printer in [`Executor._print_dry_run_actions`](../../../commands/executer.py) emitting one structured block per leaf. Tests don't actually invoke QEMU — they capture the stdout, parse the markers, and assert the dispatch order / sentinel basenames / bash content match expectations.
 
-A separate set of **real-run** test files (`tests/test_real_runs*.py`) bring up the dev container via `./dep` and exec real commands inside it. Those are gated behind `QFLEX_REAL_RUN_TESTS=1` so the default `make test` skips them.
+A separate set of **real-run** test files (`tests/test_chained_pipeline.py / test_dev_*.py / test_boot_login_bootstrap.py`) bring up the dev container via `./dep` and exec real commands inside it. Those are gated behind `QFLEX_REAL_RUN_TESTS=1` so the default `make test` skips them.
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| [Makefile](../../../Makefile) | `test:` → all tests; `test-verbose:` → `-v -s --tb=long`; `test-real-one TEST=<nodeid>` → single test/file with `QFLEX_REAL_RUN_TESTS=1` set. |
+| [Makefile](../../../Makefile) | `test:` → all tests (set `QFLEX_RECOMPILE=1` to recompile qemu + parallel-qemu + flexus in the `qflex_test` container before pytest runs — see [Recompiling submodules before tests](#recompiling-submodules-before-tests-qflex_recompile1)); `test-verbose:` → `-v -s --tb=long`; `test-real-one TEST=<nodeid>` → single test/file with `QFLEX_REAL_RUN_TESTS=1` set. |
 | [tests/__init__.py](../../../tests/__init__.py) | Empty — makes `tests` a package. |
 | [tests/conftest.py](../../../tests/conftest.py) | Dry-run parser (`parse_dry_run_blocks`, `DryRunBlock`), stdout capture (`capture_dry_run_stdout`), fixtures (`mock_mounting_folder`, `multi_context`, `login_ls_script`), shared helpers (`pin_per_sub`, `assert_two_node_master_first`). Also the **real-run helpers**: `_docker_available`, `_qflex_image_present`, `_exec_in_container`, and the session-scoped `dev_container` fixture (start `qflex_test` in background, yield mounting folder, stop on teardown). |
 | [tests/test_boot.py](../../../tests/test_boot.py) | Boot phase: vanilla two-node, Path A (interaction_script) for single-node + two-node, Path B (interactive_tmux). |
@@ -27,9 +29,9 @@ A separate set of **real-run** test files (`tests/test_real_runs*.py`) bring up 
 | [tests/test_run_idx.py](../../../tests/test_run_idx.py) | RunIdxCommand — per-(partition, idx) sentinel coordination at the leaf. |
 | [tests/test_run_single_partition.py](../../../tests/test_run_single_partition.py) | RunSinglePartitionCommand — sequential idxs within a partition. |
 | [tests/test_run_partition.py](../../../tests/test_run_partition.py) | RunPartitionCommand — full multi-node × per-partition × per-idx tree, plus the wall-clock parallelism test. |
-| [tests/test_real_runs.py](../../../tests/test_real_runs.py) | Real docker-based runs (skipped by default). Smoke + `./qflex --help` + alpine-login-and-ls. |
-| [tests/test_real_runs_savevm.py](../../../tests/test_real_runs_savevm.py) | Real two-node `boot` (savevm-create) → `load` (savevm-verify). Skipped by default. |
-| [tests/test_real_runs_docker_image.py](../../../tests/test_real_runs_docker_image.py) | Real assertions on the dev image itself: `iputils-ping`, `perf` shim, `rustc`/`cargo`, both `inferno-*` binaries, and that every host-discovered DNS server / search domain (via `commands.docker._read_host_dns`) propagates into the container's `/etc/resolv.conf`. Skipped by default. |
+| [tests/test_dev_container_smoke.py](../../../tests/test_dev_container_smoke.py) | Real docker-based runs (skipped by default). Smoke + `./qflex --help` + alpine-login-and-ls. |
+| [tests/test_chained_pipeline.py](../../../tests/test_chained_pipeline.py) | Real two-node `boot` (savevm-create) → `load` (savevm-verify). Skipped by default. |
+| [tests/test_dev_image_contents.py](../../../tests/test_dev_image_contents.py) | Real assertions on the dev image itself: `iputils-ping`, `perf` shim, `rustc`/`cargo`, both `inferno-*` binaries, and that every host-discovered DNS server / search domain (via `commands.docker._read_host_dns`) propagates into the container's `/etc/resolv.conf`. Skipped by default. |
 
 **One file per phase / component.** When adding tests for a new phase, create a new `test_<phase>.py` rather than appending to an existing one — keeps each file focused and easy to scan.
 
@@ -160,7 +162,7 @@ For tmux-mode tests, assert `block.tmux_window == "<Phase>-node<N>"` and that th
 
 ## Real-run tests: settings live in YAML, not in python
 
-Real-run tests under `test_real_runs*.py` drive `./dep exec ./qflex <phase> -c <yaml>` against a live dev container. Every knob the test depends on (experiment_name, interaction_script, loadvm_name, use_gdb, …) belongs in the test's YAML, not in a CLI flag the python passes.
+Real-run tests under `test_chained_pipeline.py / test_dev_*.py / test_boot_login_bootstrap.py` drive `./dep exec ./qflex <phase> -c <yaml>` against a live dev container. Every knob the test depends on (experiment_name, interaction_script, loadvm_name, use_gdb, …) belongs in the test's YAML, not in a CLI flag the python passes.
 
 The fixture set lives in [tests/realrun/](../../../tests/realrun/):
 
@@ -172,7 +174,7 @@ tests/realrun/
 ├── login_and_ls.exp                 # the expect script for the alpine test
 ├── boot_create_and_savevm_master.exp
 ├── boot_create_and_wait.exp
-└── load_verify_ls.exp
+└── loaded_test_verify_and_swap_workload.exp
 ```
 
 Each YAML `extends: ../../conf/DC/<base>` so production defaults flow through — change `conf/DC/dc-multi.yaml` and every multi-node test follows. The relative path resolves cleanly through [`load_config`](../../../dep_injection/config_loader.py) (it does `path.parent / parent_name.yaml`, which handles `..` segments).
@@ -203,6 +205,31 @@ Multi-node test YAMLs run a leaf per node in parallel. If one node finishes (cle
 
 Test fixture-wise, [tests/conftest.py](../../../tests/conftest.py)'s `dev_container` runs `./dep exec --command ./clean_up.sh` immediately after `./dep start-docker` so any leftover qemu / `/dev/shm/pdes_*` from the user's parallel manual runs is swept before the test starts. Don't bypass that — host-level `pkill` on the user's environment is rude.
 
+## Recompiling submodules before tests (`QFLEX_RECOMPILE=1`)
+
+Set `QFLEX_RECOMPILE=1` on `make test` to recompile qemu + parallel-qemu + flexus inside the `qflex_test` container before pytest runs. The Makefile target shells out to `python -m tests.container_compiler --include-flexus`, which is the same `compile_in_container(...)` function `test-iterate` calls — `test-iterate` passes `include_flexus=False` (qemu/parallel-qemu only, optimised for fast PDES iteration); the `--include-flexus` script entry adds `make flexus-config && make flexus-build MODE=$QFLEX_ITERATE_MODE`. The container is started (background) if it isn't already running and is left running afterwards so subsequent `QFLEX_REAL_RUN_TESTS=1` invocations reuse the freshly-built `-saved/` and `kraken_out/` trees inside it.
+
+`QFLEX_RECOMPILE=1` is independent of `QFLEX_REAL_RUN_TESTS=1`; combine them when an iteration on submodule C source needs to reach real-run tests:
+
+```
+QFLEX_RECOMPILE=1 QFLEX_REAL_RUN_TESTS=1 make test
+```
+
+Without `QFLEX_RECOMPILE`, `make test` keeps its existing fast hermetic dry-run-only behaviour. The recompile step is opt-in, never implicit.
+
+## Load-stage ping pre-flight (`loaded_test_verify_and_swap_workload.exp`)
+
+The load-side script runs in the load phase (sync-on PDES — `syncs_list=["true"]` per [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml); `boot:` overrides to `false`, but no override exists in `load:`). Before capturing the post-loadvm `ls`, it asserts the sync-on PDES wire is healthy with a bounded foreground ping:
+
+1. Each leaf reads `NODE_NUMBER` from the executor-injected env and computes the peer IP (node 0 → `192.168.100.2`, node 1 → `192.168.100.1`). The IPs themselves were baked into `loaded-test` by the boot-phase savevm-create scripts.
+2. Each leaf touches `<group_folder>/node<N>_ping_ready.flag` and waits for the peer's. This gate is what makes the `-c 100 -i 0.001` burst meaningful — without it, whichever side finishes its loadvm replay first races the peer's serial settling and the timing-sensitive sync-on wire drops early packets.
+3. Each leaf sends `ping <peer_ip> -c 100 -W 2000 -i 0.001` in the **foreground** and parses the busybox/iputils summary line `(\d+) packets transmitted, (\d+)[ ,]`. The script asserts both numbers equal 100; on mismatch (or expect timeout) it `quit_qemu`s and exits 1.
+4. Only then does the existing two-stage `ls` capture (`ls_after_load.txt`) run.
+
+The boot-side scripts ([loaded_test_create_master.exp](../../../tests/realrun/loaded_test_create_master.exp) / [loaded_test_create_follower.exp](../../../tests/realrun/loaded_test_create_follower.exp)) are unchanged — they run with sync **off** (boot's per-leaf `syncs_list=["false"]`), so a 100/100 assertion there would only exercise the no-sync path, which doesn't tell us anything about the simulation-phase wire.
+
+If you add another peer-connectivity-style precondition to a multi-node expect script, follow the same pattern: per-node sentinel under `<group_folder>/`, cleared at script startup, touched after the local prerequisite, waited on by the peer.
+
 ## Don't wait endlessly when running real tests
 
 For a pass case the test is short (~1-2 minutes); for a stuck case it can sit for the full 30-min `_exec_in_container` timeout. Don't wait passively for the runtime's "command completed" notification — actively check whether the test is making progress. The shape that works:
@@ -210,7 +237,7 @@ For a pass case the test is short (~1-2 minutes); for a stuck case it can sit fo
 1. Run the test with **foreground** Bash (NOT `run_in_background: true`, NOT `Monitor`) at the longest reasonable timeout the runtime supports. Foreground returns the captured tool output back to you; `run_in_background` and `Monitor` both write their tracking files into `/tmp/claude-291753/...`, which fills the boot disk and bricks bash with `ENOSPC`.
 
    ```
-   make test-real-one TEST=tests/test_real_runs_savevm.py::test_02_load_two_nodes_verify_files 2>&1 | tail -50
+   make test-real-one TEST=tests/test_chained_pipeline.py::test_02_load_two_nodes_verify_files 2>&1 | tail -50
    ```
 
 2. While the test runs, between iterations of waiting, periodically `Read` the existing log files in the experiment folder — they're being written *as the test runs*, no need to add new redirects:

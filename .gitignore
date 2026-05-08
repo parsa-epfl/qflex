@@ -8,6 +8,7 @@ KeenKraken/
 KnottyKraken/
 images/
 qemu-*
+!qemu-pdes
 .vscode/
 **/.vscode
 experiments/

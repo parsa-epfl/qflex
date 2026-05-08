@@ -156,6 +156,7 @@ class DockerStarter(Executor):
         -v {cwd}/multi-node-scripts/:/home/dev/qflex/multi-node-scripts \
         -v {cwd}/parallel-qemu/:/home/dev/qflex/parallel-qemu \
         -v {cwd}/qemu/:/home/dev/qflex/qemu \
+        -v {cwd}/qemu-pdes/:/home/dev/qflex/qemu-pdes \
         -v {cwd}/multi-node-web-search/:/home/dev/qflex/multi-node-web-search \
         -v {cwd}/WormCacheQFlex:/home/dev/qflex/WormCacheQFlex \
         -v {cwd}/clean_up.sh:/home/dev/qflex/clean_up.sh\

@@ -26,8 +26,8 @@ class RunSinglePartitionCommand(SequentialGroupExecutor, SimulationCommand):
         self._assert_syncs_true()
 
     def _build_children(self):
-        snapshots = glob.glob("snapshot_*.loc",
-                              root_dir=self.experiment_context.get_partition_folder())
+        partition_folder = self.experiment_context.get_partition_folder()
+        snapshots = glob.glob("snapshot_*.loc", root_dir=partition_folder)
         idxs = sorted(int(f.removeprefix("snapshot_").removesuffix(".loc")) for f in snapshots)
         if len(idxs) == 0:
             return []
@@ -35,10 +35,20 @@ class RunSinglePartitionCommand(SequentialGroupExecutor, SimulationCommand):
             if i not in idxs:
                 raise ValueError(
                     f"Missing snapshot for index {i} in partition "
-                    f"{self.experiment_context.get_partition_folder()}. Found {idxs}."
+                    f"{partition_folder}. Found {idxs}."
                 )
 
-        children = [SimpleCMDExecutor("rm -rf output_state")]
+        # Wipe the per-partition log/err once before the first idx runs. Each
+        # RunIdxCommand below appends (>>/2>>) so all idxs accumulate into
+        # one shared log/err with per-idx banners (see run_idx.py). Without
+        # this wipe, leftover content from a prior partition run would mix
+        # with the new run's output.
+        children = [
+            SimpleCMDExecutor("rm -rf output_state"),
+            SimpleCMDExecutor(
+                f': > "{partition_folder}/log" && : > "{partition_folder}/err"'
+            ),
+        ]
         for idx in idxs:
             sub_ctx = clone_experiment_context(self.experiment_context, idx=idx)
             children.append(

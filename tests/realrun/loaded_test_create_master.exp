@@ -117,6 +117,30 @@ expect {
     -re {[\$#] +}
 }
 
+# --- 1b. Touch test1.txt + capture ls_after_create -------------------------
+# Bakes a known file into the upcoming `loaded-test` snapshot so a later
+# `loadvm loaded-test` can verify per-node file persistence (savevm/loadvm
+# round-trip). Two-stage match: first the `ls\r` echo, then the prompt — so
+# expect_out(buffer) is the listing, not a stale prompt redraw.
+send "touch test1.txt && ls\r"
+expect {
+    timeout { puts "ERROR: ls echo didn't come back"; quit_qemu $monitor_port; exit 1 }
+    "ls\r"
+}
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+set ls_output $expect_out(buffer)
+set out_path "$exp_folder/ls_after_create.txt"
+if {[catch {open $out_path "w"} f]} {
+    puts "ERROR: could not open $out_path for writing: $f"
+} else {
+    puts $f $ls_output
+    close $f
+    puts "wrote $out_path"
+}
+
 # --- 2. Configure 192.168.100.1 on the PDES NIC ----------------------------
 #
 # The PDES NIC is the virtio-net-pci with MAC 52:54:00:aa:bb:00 (master = node 0,

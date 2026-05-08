@@ -77,7 +77,7 @@ When QEMU resumes from `-loadvm`, the serial output that was in flight at savevm
 
 ## Drain-based capture is the robust pattern (the one that ships)
 
-Don't try to anchor `expect` on a fresh prompt to delimit a command's output — that race is unwinnable when the kernel echoes the typed command back as `qflex:~$ <cmd>` (the `[\$#] +` regex will happily match the `$ ` *inside* that echo before `<cmd>` runs). The shipping pattern in [tests/realrun/load_verify_ls.exp](../../../tests/realrun/load_verify_ls.exp) skips prompt anchoring entirely:
+Don't try to anchor `expect` on a fresh prompt to delimit a command's output — that race is unwinnable when the kernel echoes the typed command back as `qflex:~$ <cmd>` (the `[\$#] +` regex will happily match the `$ ` *inside* that echo before `<cmd>` runs). The shipping pattern in [tests/realrun/loaded_test_verify_and_swap_workload.exp](../../../tests/realrun/loaded_test_verify_and_swap_workload.exp) skips prompt anchoring entirely:
 
 ```tcl
 # Drain anything queued from loadvm replay first.
@@ -178,5 +178,5 @@ The bash wrapper that's `wait`-ing on this script should never sit there for ext
 
 If the bash wrapper runs `gdb -ex run --args qemu …`, gdb's stdin is /dev/null (no terminal). When QEMU segfaults on quit-time PDES teardown, gdb prompts `Quit anyway? (y or n)` and your script can't answer. Two options:
 
-- **Don't use gdb in tests** — the qflex CLI exposes `--no-gdb` on `boot`/`load`/`initialize`/`fw`. Tests in [tests/test_real_runs*.py](../../../tests/test_real_runs.py) pass it.
+- **Don't use gdb in tests** — the qflex CLI exposes `--no-gdb` on `boot`/`load`/`initialize`/`fw`. Tests in [tests/test_chained_pipeline.py / test_dev_*.py / test_boot_login_bootstrap.py](../../../tests/test_dev_container_smoke.py) pass it.
 - **If you need gdb**, the [wrap_with_gdb](../../../commands/qemu.py) helper emits `yes | gdb -ex run --args …` so the prompt auto-answers.
