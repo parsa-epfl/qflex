@@ -203,6 +203,8 @@ Multi-node test YAMLs run a leaf per node in parallel. If one node finishes (cle
 - **Executor `_kill_peer_qemus` (in [commands/executer.py](../../../commands/executer.py))** — symmetric: every leaf, on bash exit, `pkill -9 -f shm-send=/pdes_<neighbor>_to_<my>[part_<P>_][idx_<I>_]` for each of its neighbors. Match scope is per (peer, partition, idx) so concurrent unrelated experiments are unaffected. A `<basename>.killed_by_peer` sentinel is touched so the parent `_execute_group` doesn't treat the SIGKILL'd peer's non-zero rc as a real failure.
 - **Expect-script side** — every error branch must call `quit_qemu` before `exit 1`, and `quit_qemu` must short-circuit if the monitor is already gone (`catch {connect_telnet …}; return`). With those two in place, whichever leaf exits first drags the other down within ~5s.
 
+**Peer-kill is the safety net, not the primary sync.** It fires whether or not your per-node savevm has finalised. For a multi-node `boot` that ends in `savevm`, the master implicitly sees its own `save_snapshot()` complete via the `(qemu) ` prompt returning, but the follower has no such signal — relying on `expect eof` (which fires when peer-kill closes the follower's serial telnet) is timing-dependent and can SIGKILL the follower mid-finalise → corrupt qcow2. The deterministic completion marker is the literal string `savevm log 7` (the last `printf` inside `migration/savevm.c`'s `save_snapshot()`). Have the follower poll its own `Boot.log` for that needle via the `wait_for_substring` proc; let peer-kill stay an unused safety net. See the `expect-scripts` skill for the script-side pattern.
+
 Test fixture-wise, [tests/conftest.py](../../../tests/conftest.py)'s `dev_container` runs `./dep exec --command ./clean_up.sh` immediately after `./dep start-docker` so any leftover qemu / `/dev/shm/pdes_*` from the user's parallel manual runs is swept before the test starts. Don't bypass that — host-level `pkill` on the user's environment is rude.
 
 ## Recompiling submodules before tests (`QFLEX_RECOMPILE=1`)
@@ -314,7 +316,7 @@ For very large logs (>~50 KB), `head -200` + `tail -200` is enough to show the p
 - `Warning:` / `WARN` / `warning:` lines that look like they should have been errors (especially in `*.err`).
 - `failed to`, `could not`, `unable to`, `error:` substrings that the test ignored because `rc == 0`.
 - Empty or near-empty log files where the phase should have produced content (e.g. `Boot.log` < 1 KB after a successful boot is suspicious).
-- Truncated tail (last bytes don't include the phase's natural end marker — `savevm log 7` for Path A snapshots, `Generate N snapshots. Quit.` for FW, etc.).
+- Truncated tail (last bytes don't include the phase's natural end marker — `savevm log 7` for Path A snapshots, `Generate N snapshots. Quit.` for FW, etc.). For multi-node savevm specifically: `savevm log 7` should appear in **every** node's `Boot.log` if the master issued `savevm`. Master-only is fine; follower-missing means the follower's per-node save was killed before finalising (often `_kill_peer_qemus` racing the follower) → that node's qcow2 won't have a usable snapshot.
 - Workload-side logs (`/tmp/corruption.log` exfiltrated as `corruption_log_pre_savevm.txt`, `workload_state.txt` rcs) showing irregularities the test's parsing didn't catch.
 - PDES-side anomalies in qemu's stdout: `inflight messages` count > 0 at savevm time when the test expects 0, late `Connection closed` after the test's real work completed but before the script's `quit`, etc.
 

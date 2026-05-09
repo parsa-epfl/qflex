@@ -7,19 +7,139 @@ description: Use when writing or debugging expect scripts under [sample_scripts/
 
 These are the gotchas you have to know to write expect scripts that don't hang or capture garbage. Most of them surfaced from real bugs and have direct fixes already deployed under [sample_scripts/](../../../sample_scripts/) (general samples) and [tests/realrun/](../../../tests/realrun/) (test-only) — if you're tempted to ignore one, grep the script that already learned it.
 
+## Sleeps default to HOST wall-clock, not the guest
+
+A `send "sleep 3\r"` inside the script types `sleep 3` *into the guest shell*, so that 3 seconds runs in **guest virtual time**. Under PDES `sync=true` with low `latencyns` (the simulation default of 100µs), guest virtual time can advance many orders of magnitude slower than wall-clock — `send "sleep 3\r"` has been observed to take 10+ minutes wall-clock to return, and pytest times out long before it does.
+
+Whenever you reach for a delay, the default must be **host wall-clock**, expressed as Tcl `sleep N` (script-internal proc only — never `send` it) or, if there's any chance the guest is producing output during the wait, `drain_for N` (the canonical proc that actively drains the chardev for N wall-clock seconds — see [tests/realrun/loaded_test_verify_and_swap_workload.exp](../../../tests/realrun/loaded_test_verify_and_swap_workload.exp)). The reason: most "sleep" calls in an expect script exist to give the two emulated nodes' workloads a moment to settle / produce data, not to advance guest time. A `drain_for 3` between "start workload" and "probe pids" is sufficient because the workload's iterations run at qemu's emulation rate, not the wall clock.
+
+**Only send `sleep` to the guest if the user has explicitly asked for guest-side timing** (e.g. "wait 10 guest seconds before X" or "the workload's heartbeat sidecar should sleep 5 between prints"). When in doubt, ask before typing `sleep N` into a `send`. Inside workload bodies installed via heredoc — `echo_server.sh`'s sidecar heartbeat, `sender.sh`'s `usleep` — the sleep is intentionally guest-side because the workload itself is part of the simulation; that's an expected exception, not a counterexample to the default.
+
+Equivalents to use, by intent:
+
+| Intent | Use |
+|---|---|
+| Pause the script for N wall-clock seconds, no chardev to drain | Tcl `sleep N` (e.g. inside a polling proc between iterations) |
+| Pause for N wall-clock seconds AND keep draining qemu's chardev so the TCP buffer doesn't backpressure the guest | `drain_for N` (the canonical proc) |
+| Genuinely wait for N seconds of guest time | `send "sleep N\r"; expect -re {[\$#] +}` — and only after explicitly checking with the user that guest-side timing is what they want |
+
+## Don't blind-sleep waiting for a guest prompt — gate on the prompt itself
+
+A pattern that looks reasonable but isn't:
+
+```tcl
+send "su\r"
+sleep 1
+send "\r"        ; # the empty password
+sleep 1
+send "\r"        ; # spare \r in case the image asks for both user and password
+expect { ... -re {# +} }
+```
+
+The fixed `sleep 1` is gambling that the guest's `getpass()` has entered its
+read loop within 1 s wall-clock. Under PDES `sync=true` (load / fw / init /
+run-* phases) the guest's virtual time advances variably vs wall-clock, so
+the `\r` can land before `getpass()` is ready — the kernel tty line
+discipline folds it into the typed-echo of `su` instead of treating it as the
+password answer. `su` then sits waiting for input that never comes; the
+script times out at `BUDGET_PROMPT_S` with no `Authentication failure` and
+no `#` ever appearing in `qemu_serial.log`.
+
+Manual interaction works because your eyes are the gate — you wait to see
+`Password:` before pressing Enter. The script needs the equivalent: gate on
+the *actual prompt event*, not a wall-clock proxy.
+
+```tcl
+send "su\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
+    -re {[Aa]uthentication failure|incorrect password} {
+        puts "ERROR: su rejected creds"
+        quit_qemu $monitor_port; exit 1
+    }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
+}
+```
+
+`exp_continue` re-enters the same `expect` block after a match, so the
+script answers each prompt as it arrives — works for images that prompt for
+just `Password:` and for ones that prompt for `Login:` then `Password:`.
+The explicit auth-failure arm fails fast (within seconds) instead of
+masquerading as a `BUDGET_PROMPT_S = 60 s` timeout — important because
+"timed out at 60 s" looks like an image / config / network bug; "auth
+failed" tells you exactly what's wrong.
+
+Same shape for any other interactive prompt (sshpass, dialog-style
+installers, etc.): pattern-match each prompt, `exp_continue`, fail-fast on
+the visible error string, fall through on the success terminator. Don't
+fight tty line-discipline timing with `sleep` — let `expect` block until the
+event you actually need.
+
+## Bringing up the PDES NIC inside the guest
+
+A multi-node guest sees two NICs on the PCI bus, ordered by PCI address:
+
+| Linux iface | QEMU device | PCI addr | Role |
+|---|---|---|---|
+| `eth0` | virtio-net-pci | 0x10 | PDES inter-node wire (no DHCP server) |
+| `eth1` | e1000 | 0x11 | user-mode NAT (DHCP, internet egress) |
+
+OpenRC's networking script tries DHCP on `eth0` at boot and times out —
+that's expected: there's no DHCP server on the PDES wire. Your script has
+to assign a static IP before any peer-pinging can work. Failure manifests as
+`ping: sendto: Network unreachable` in the guest serial — the kernel has no
+route to `192.168.100.0/24`.
+
+Pattern (after a post-loadvm settle so OpenRC has finished its initial pass):
+
+```tcl
+send "su\r"
+# ... prompt-aware expect with empty-cred answers (see "Don't blind-sleep") ...
+send "ip link show\r";                                        expect {-re {# +}}
+send "ip link set eth0 down\r";                               expect {-re {# +}}
+send "ip link set eth0 address 52:54:00:aa:bb:00\r";          expect {-re {# +}}
+send "ip link set eth0 up\r";                                 expect {-re {# +}}
+send "ip addr add 192.168.100.1/24 dev eth0\r";               expect {-re {# +}}
+send "ip addr show eth0\r";                                   expect {-re {# +}}
+send "su qflex\r";                                            expect {-re {\$ +}}
+```
+
+The MAC mirrors qflex's per-node default — `commands/config.py:373` derives
+`mac=52:54:00:aa:bb:<node*10+i>` per (node, neighbour-index). For node 0
+neighbour 0 that's `52:54:00:aa:bb:00`; for node 1 neighbour 0 it's
+`52:54:00:aa:bb:0a`. The IPs `192.168.100.1` / `.2` are the convention used
+by the project's reference tests under [tests/realrun/](../../../tests/realrun/).
+
+`eth0` here is contextual — Alpine probes PCI in addr order, so the
+lower-addr device (0x10 = PDES) becomes eth0 in this layout. If you change
+`pdes_net_devs` ordering or add more NICs, look up the iface by MAC instead
+(see [tests/realrun/loaded_test_create_master.exp](../../../tests/realrun/loaded_test_create_master.exp)
+for the BY-MAC pattern using `ip -o link | awk` against the expected MAC).
+
+The bring-up belongs in the **load** phase script, not boot — boot's snapshot
+captures pre-OpenRC state, and the OpenRC pass that runs on every loadvm
+re-resume re-tries DHCP and may stomp our static IP. Configuring after the
+post-loadvm settle, before `savevm loaded`, bakes the configured eth0 into
+the `loaded` snapshot, which is what the simulation phases re-resume from.
+
 ## Outer `set timeout` does NOT bound Tcl while/sleep loops
 
 Expect's `set timeout 900` only fires inside an `expect { … }` block. A bare Tcl `while {true}` with `sleep 2` between iterations is not affected by it. Same for `wait_for_savevm_done`-style file-watching loops. Without a separate wall-clock deadline, a polling loop spins forever the moment its target transitions from "not yet alive" to "dead" — e.g. you're polling QEMU's monitor port via telnet, a peer process kills QEMU, every subsequent attempt gets `Connection refused`, and the loop keeps retrying.
 
 This is the **only** place inside an expect script where a wall-clock budget is justified (per the project's no-cap rule in CLAUDE.md). Use it; the outer `set timeout` and `_exec_in_container(timeout=…)` legitimately don't apply.
 
-## The three named budgets
+## The four named budgets
 
-Every expect script under [sample_scripts/](../../../sample_scripts/) declares the same trio at the top — no magic numbers, no fresh budgets per call site:
+Every expect script under [sample_scripts/](../../../sample_scripts/) declares the same set at the top — no magic numbers, no fresh budgets per call site:
 
 ```tcl
 set BUDGET_INITIAL_S        10    ; # first connect to qemu (listener may not be up yet)
 set BUDGET_DEFAULT_S         5    ; # anything else — qemu was alive, past 5s = dead
+set BUDGET_PROMPT_S         60    ; # post-login shell/password/monitor prompts (kernel up, fast)
+set BUDGET_BOOT_LOGIN_S   1800    ; # fresh-boot login prompt — kernel boot under PDES is minutes
 set BUDGET_CHECKPOINTING_S 1800   ; # savevm/loadvm/any drain-coordinated op
 ```
 
@@ -29,9 +149,11 @@ Pick by what the call is waiting for, not by what feels generous:
 |---|---|---|
 | First `connect_telnet` to serial/monitor at script start | `$BUDGET_INITIAL_S` | qemu's `telnet,server,nowait` listener takes a moment to come up after qemu starts; the script and qemu race. |
 | `connect_telnet` later in the script (e.g. inside `quit_qemu`) | `$BUDGET_DEFAULT_S` | If we got this far, qemu was alive at some point. Repeated `Connection refused` past 5s ⇒ qemu is dead, fail fast. |
+| **Fresh-boot** wait for `[Ll]ogin: ` (no `loadvm`) | `$BUDGET_BOOT_LOGIN_S` | UEFI + GRUB + kernel boot under multi-node PDES (`quantum size=10000` + WWT sync) runs orders of magnitude slower than wall-clock. 60 s is not enough; observed ~30 s wall-clock to get GRUB countdown from `2s` → `0s`, then much more for the kernel to reach the getty banner. Same class as `BUDGET_CHECKPOINTING_S`. |
+| Post-login waits: password, shell prompt, monitor `(qemu) ` not after a checkpoint | `$BUDGET_PROMPT_S` | Once the kernel is up, guest interaction is fast. Keep a tight cap so a wedged shell fails fast. |
 | `expect` block waiting for `(qemu) ` after `savevm` / `loadvm` / `delvm` | `$BUDGET_CHECKPOINTING_S` | Distributed savevm drains across all nodes and serialises CPU+memory state — minutes, not seconds. |
-| Polling for the multi-node `savevm_done.flag` sentinel | `$BUDGET_CHECKPOINTING_S` | Same — non-master is waiting on master's checkpointing. |
-| Login prompts, `expect`-ing shell prompts, monitor `(qemu) ` prompts not following a checkpoint op | `$BUDGET_DEFAULT_S` | Standard guest interaction is fast. |
+| Polling the follower's own `Boot.log` for `savevm log 7` | `$BUDGET_CHECKPOINTING_S` | Per-node savevm finalisation; same class as the master's `(qemu) ` wait. |
+| Login prompts on a `loadvm`-resumed run | `$BUDGET_DEFAULT_S` | The snapshot already captured the guest at the prompt — there's no kernel to boot. |
 
 The canonical `connect_telnet` proc taking the budget as an argument:
 
@@ -66,6 +188,12 @@ Default is `$BUDGET_DEFAULT_S` (`5`) so call sites that omit the argument fail f
 ## `spawn telnet` does not fail when telnet fails
 
 `spawn telnet 127.0.0.1 9999` returns success even if the port is dead. `telnet` prints `Connection refused` to its stdout and exits. You have to *read what telnet wrote* via an `expect` block matching `Escape character is` (success) vs `Connection refused` (fail). Don't gate on `[catch {spawn …}]`.
+
+## A freshly-`Write`n `.exp` file isn't executable — the failure is silent and lands on the wrong leaf
+
+The executor's bash wrapper invokes the script directly: `<interaction_script> & SCRIPT_PID=$!`. If the file came in as `-rw-r--r--` (e.g. it was created via the assistant's `Write` tool, which doesn't set the executable bit), bash dies on launch with `Permission denied`, no expect ever runs against that QEMU, and the visible failure is the **other** leaf SIGKILL'ing this leaf's QEMU via `_kill_peer_qemus` once it finishes. That looks like a peer-coordination bug — it isn't.
+
+After every `Write` of a new expect script, `chmod +x` it. Confirm with `ls -la` once before the first run. The `Edit` tool preserves modes (so updating an existing executable script is fine); only freshly-created files are at risk.
 
 ## Busybox's prompt sends ESC[6n
 
@@ -167,14 +295,62 @@ Multi-node tests pair an expect-driven leaf on each node. If one node finishes (
 
 Don't try to add cross-node coordination at the script level (e.g. "wait for sibling capture sentinel before quitting"). The peer-kill pattern is already in place; layering more sentinels on top tends to introduce the very deadlocks you're trying to avoid.
 
-## Multi-node `savevm` is master-only
+## Multi-node `savevm` is master-only — and the deterministic completion signal is `savevm log 7`
 
-PDES `savevm` issues `DRAIN_START` / `DRAIN_END` across every node — it's a distributed snapshot. The script that runs on **node 0** (master) issues the savevm; non-master scripts must STAY ALIVE during the drain (their QEMU processes have to participate) until the master signals completion. The standard wiring under [sample_scripts/](../../../sample_scripts/) is:
+PDES `savevm` issues `DRAIN_START` / `DRAIN_END` across every node — it's a distributed snapshot. The drain side-effect is that **every** node serialises its own CPU+memory into its own per-node qcow2; only the master issues the monitor command, but every node writes a snapshot. So:
 
-- master → [boot_create_and_savevm_master.exp](../../../sample_scripts/boot_create_and_savevm_master.exp): does work, issues `savevm`, **writes a sentinel file** (`<group_folder>/savevm_done.flag`), then quits.
-- non-master → [boot_create_and_wait.exp](../../../sample_scripts/boot_create_and_wait.exp): does work, **polls the sentinel** (`while {![file exists $flag]} {sleep 2}`), then quits.
+- **Wire two different scripts in the YAML.** Master leaf gets a script that issues `savevm`. Follower leaves get a script that does NOT issue `savevm`. If both issue it, the drain is double-driven → corrupt snapshot. The [conf/DC/dc-multi-savevm-create.yaml](../../../conf/DC/dc-multi-savevm-create.yaml) fixture is the reference for per-leaf `interaction_script` wiring.
+- **Don't branch a single script on `NODE_NUMBER` if you can avoid it** — keep two files. Each script can refuse to run on the wrong node with an early `if {$node_number > 0} { exit 1 }` (or the master's mirror).
 
-If you wire the same script to both leaves, you double-drive the drain and produce a corrupt snapshot. If you forget to keep non-master alive past savevm, the drain tears down mid-coordination. The [conf/DC/dc-multi-savevm-create.yaml](../../../conf/DC/dc-multi-savevm-create.yaml) fixture is the reference for how to wire two different `interaction_script` values per leaf.
+The deterministic "per-node savevm finished" signal is the literal string `savevm log 7` in the bash-redirected `Boot.log` — that's the last `printf` inside QEMU's `save_snapshot()` (`migration/savevm.c`). Use it for sync, **not** sentinel files written from the script (those don't tell you whether the per-node save itself returned) and **not** `expect eof` on the serial spawn (eof reactively waits for `_kill_peer_qemus` to SIGKILL the peer, which is timing-dependent and can land *before* the per-node save has finalised).
+
+### Master script
+
+The master's `(qemu) ` prompt comes back from `savevm` *after* `save_snapshot()` returns, which is *after* `log 7` has been printed. So master gets log 7 implicitly — no explicit poll needed. After the prompt:
+
+```tcl
+send "savevm booted\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return"; exit 1 }
+    "(qemu) "
+}
+sleep 5            ; # host wall-clock, gives followers' per-node saves room to finalise
+send "quit\r"
+```
+
+The 5 s settle is NOT a polled handshake — it's a buffer between master's drain returning and master's `quit` tearing down PDES, so followers have a beat to finish their own `save_snapshot()`. If you need stronger guarantees, the master can poll for each follower's `node<N>_savevm_done.flag` (the reference test [tests/realrun/boot_login_savevm.exp](../../../tests/realrun/boot_login_savevm.exp) does this) — but for the boot phase the 5 s + the executor's 30 s `_post_exit_grace` is usually enough.
+
+### Follower script
+
+The follower must wait for *its own* `savevm log 7` in *its own* Boot.log — that's the bash-redirected stdout the executor sets up at `$exp_folder/Boot.log`. The canonical proc:
+
+```tcl
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]; set content [read $fh]; close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
+# ... after login + ls + 5 s settle:
+wait_for_substring "$exp_folder/Boot.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
+exit 0
+```
+
+When `wait_for_substring` returns, the follower's per-node save is genuinely done; `exit 0` lets bash exit cleanly. The executor's `_kill_peer_qemus` running 30 s later is then a no-op (the peer's QEMU is already gone).
+
+### Symmetric peer-kill is the safety net, not the primary sync
+
+`_kill_peer_qemus` (in [commands/executer.py](../../../commands/executer.py)) catches the case where one leaf hangs — within ~5 s of one bash exiting, the peer's QEMU is SIGKILL'd. **Don't rely on that for snapshot correctness.** It fires whether or not your per-node save finished. Use `savevm log 7` polling on the follower so each leaf exits cleanly on its own terms; let peer-kill remain the unused safety net.
+
+### Settle pauses between guest interactions: Tcl `sleep N`, NOT `send "sleep N\r"`
+
+Symmetric `sleep 5` (host wall-clock) on **both** master and follower after the post-login shell prompt and after the `ls` prompt gives the guest a beat to settle before the next step (master before opening the monitor for `savevm`; follower before starting the `wait_for_substring` poll). It also keeps the two leaves' wall-clock progress roughly in lockstep so their per-node saves start close together. This is *the* legitimate use of an explicit pause in a sync flow — see "Sleeps default to HOST wall-clock" at the top.
 
 ## Capture order matters for what you're testing
 
@@ -217,6 +393,23 @@ proc quit_qemu {monitor_port} {
 ```
 
 The bash wrapper that's `wait`-ing on this script should never sit there for extra minutes after the captures are written. If you find yourself adding a `sleep N` before `quit_qemu` to "give siblings time to finish", question whether you're working around a missing short-circuit somewhere else — usually the right fix is to make the cleanup path silently return when the resource is gone, not to globally pad with seconds.
+
+## Diagnosing a stuck or failed expect run: three logs tell the truth
+
+When a real-run boot/load is hung or just produced surprising output, read these three files in this order — each answers a different question:
+
+| File | What it tells you |
+|---|---|
+| `$exp_folder/Boot.err` (or `Load.err`, etc.) | Tcl errors (`send: spawn id … not open`, `wait_for_substring: needle never appeared`), bash error lines (`Permission denied`), and PDES exit notes from QEMU (`Core0 Quantum Count`, `PDES Comm invalid parameters in send`). If this is empty and the run hung, the script is *blocked*, not crashed. |
+| `$exp_folder/expect_log.txt` | Bidirectional dialogue between expect and telnet (post-`log_file -noappend`). Compare its tail against the script's flow to find which `expect` block is waiting. Any `Connection closed by foreign host.` line means the spawned telnet's QEMU end died. |
+| `$exp_folder/qemu_serial.log` | What QEMU itself sent on the serial chardev (logged by `-chardev socket,…,logfile=…`). Independent of expect — proves whether the guest reached `getty` / printed `qflex login: `. If `[Ll]ogin: ` doesn't appear here, no expect script could possibly have matched it. |
+
+Then cross-check the host:
+
+- `ps -ef | grep qemu-system | grep -v grep` — is QEMU still running? `<defunct>` means it exited but its parent (gdb) hasn't reaped — usually because the parent itself is suspended (e.g. you Ctrl+Z'd the run).
+- `ls -la /dev/shm/pdes*` — PDES rings still present? Stale rings from a previous crashed run will collide with a re-run; clean with `./clean_up.sh`.
+
+A specific common pattern: `qemu_serial.log` ends mid-OpenRC, `expect_log.txt` ends at the same point with no error, `Boot.err` is empty → the script is blocked in the login `expect` and just needs more time (or `$BUDGET_BOOT_LOGIN_S` is too tight). Don't read this as "stuck"; read it as "still booting."
 
 ## Don't rely on stdin to gdb
 

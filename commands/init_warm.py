@@ -7,6 +7,22 @@ from .jinja_loaders import wormloader, FlexusCheckpointConfigLoader, TimingLoade
 
 class InitWarm(SimulationCommand):
 
+    # TODO: BUG — init phase only completes cleanly when both nodes use
+    # `is_parallel: true` (PDES quantum mode). With `is_parallel: false`
+    # (icount / sequential mode), when one node finishes warming and is
+    # ready to checkpoint (e.g. node 1 fires `qemu_plugin_notify_fully_warmed`
+    # first), the other node (node 0) never makes the corresponding progress
+    # and the run hangs — a per-node ready signal isn't honored across the
+    # icount boundary. Conversely `is_parallel: true` doesn't deadlock here,
+    # but ignores the play/pause barriers on long runs (the QEMU↔Flexus
+    # pause handshake described in MULTI_NODE.md "Pause is bidirectional"),
+    # so anything that should stall on a sync boundary just runs through.
+    # The test YAML overrides initialize to is_parallel=true to work around
+    # the deadlock at the cost of barrier fidelity. Fix later: either make
+    # icount mode honor the per-node ready handshake (so neither node
+    # deadlocks waiting for the other), or make parallel mode honor the
+    # play/pause barriers on long runs (so timing fidelity is preserved).
+
     def __init__(self,
                  experiment_context: ExperimentContext,
                  skip_generate_cfg: bool = False):
