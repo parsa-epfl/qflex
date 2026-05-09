@@ -1,12 +1,17 @@
 #!/usr/bin/env expect
-# Reusable single-node load template. Pairs with boot_savevm_booted.exp:
+# Reusable SINGLE-NODE load template. Pairs with boot/boot_savevm_booted.exp:
 # the load phase has already done `loadvm booted`, so the guest is back at
 # the logged-in shell prompt — no re-login needed. Runs your INSERT YOUR
 # SETUP HERE block, then `savevm loaded` for the init phase to load from.
 #
 # Wire into a YAML's `load:` section as:
-#   interaction_script: sample_scripts/useful_expects/load_savevm_loaded.exp
+#   interaction_script: sample_scripts/useful_expects/load/load_savevm_loaded.exp
 #   loadvm_name:        booted
+#
+# For MULTI-NODE setups, do NOT use this template on every leaf — `savevm` is
+# master-only on multi-node. Use the paired templates instead:
+#   master leaf  -> sample_scripts/useful_expects/load/load_savevm_loaded_master.exp
+#   follower(s)  -> sample_scripts/useful_expects/load/load_savevm_loaded_wait.exp
 
 set timeout 900
 

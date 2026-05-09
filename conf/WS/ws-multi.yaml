@@ -50,6 +50,15 @@ boot:
       syncs_list: ["false"]
       interaction_script: /home/dev/qflex/conf/WS/expects/boot_savevm_booted_wait.exp
 
+load:
+  components:
+    experiment_context_node_0:
+      interaction_script: /home/dev/qflex/conf/WS/expects/load_savevm_loaded_master.exp
+      loadvm_name: booted
+    experiment_context_node_1:
+      interaction_script: /home/dev/qflex/conf/WS/expects/load_savevm_loaded_wait.exp
+      loadvm_name: booted
+
 
 fw:
   components:

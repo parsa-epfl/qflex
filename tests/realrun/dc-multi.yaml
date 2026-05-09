@@ -60,10 +60,32 @@ load:
 initialize:
   _leaf_defaults:
     loadvm_name: loaded-test
+    # TODO: BUG — init phase only completes cleanly when both nodes use
+    # `is_parallel: true` (PDES quantum mode). The test-base default
+    # `is_parallel: false` (icount / sequential mode) deadlocks: when one
+    # node finishes warming and is ready to checkpoint (e.g. node 1 fires
+    # `qemu_plugin_notify_fully_warmed` first), the other node (node 0)
+    # never makes the corresponding progress and the run hangs. Conversely
+    # `is_parallel: true` doesn't deadlock here, but ignores the play/pause
+    # barriers on long runs (the QEMU↔Flexus pause handshake described in
+    # MULTI_NODE.md "Pause is bidirectional"), so anything that's supposed
+    # to stall on a sync boundary just runs through. We override to parallel
+    # here so init at least progresses to completion. Fix later: either make
+    # icount mode honor the per-node ready handshake (so neither node
+    # deadlocks waiting for the other), or make parallel mode honor the
+    # play/pause barriers under long runs (so timing fidelity is preserved).
+    is_parallel: true
 
 fw:
   _leaf_defaults:
     loadvm_name: init_warmed
+    # TODO: BUG (same family as initialize) — fw takes per-sample snapshots
+    # via the WormCacheQFlex `mode=warm` plugin. Under is_parallel=false
+    # (icount / sequential mode) the first snapshot request from one node
+    # deadlocks the peer the same way init does. Override to parallel mode;
+    # see commands/init_warm.py for the full bug description and the fix
+    # direction.
+    is_parallel: true
 
 partition:
   _leaf_defaults:

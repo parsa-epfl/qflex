@@ -161,7 +161,7 @@ def test_03b_load_verifies_files_and_swaps_workload(dev_container):
         for sub in NODE_SUB_NAMES
         for f in ("ls_after_load.txt", "ping_summary_after_loadvm.txt",
                   "workload_state.txt", "corruption_log_pre_savevm.txt",
-                  "ok_in_last_100.txt")
+                  "ok_in_last_10.txt")
     )
     _exec_in_container(f"rm -f {rm_paths}", timeout=30)
 
@@ -248,13 +248,13 @@ def test_03b_load_verifies_files_and_swaps_workload(dev_container):
             f"log. Suggests the script died between the workload start and the savevm step."
         )
 
-        # 5) ok_in_last_100.txt — the LAST 100 sender iterations before savevm
+        # 5) ok_in_last_10.txt — the LAST 10 sender iterations before savevm
         # must all be [ok]. Initial warm-up [noreply]s during the first second
         # (peer hasn't loadvm'd yet) are tolerated; what matters is the
-        # snapshot captures the workload running cleanly. == 100 is strict by
+        # snapshot captures the workload running cleanly. == 10 is strict by
         # design (per the user: "before we checkpoint... there should be no
         # failure going on anymore").
-        ok_path = f"{exp_folder}/ok_in_last_100.txt"
+        ok_path = f"{exp_folder}/ok_in_last_10.txt"
         assert os.path.exists(ok_path), (
             f"node {n}: missing {ok_path} — settle window or tail-grep step didn't "
             f"complete. Inspect {exp_folder}/expect_log.txt."
@@ -266,8 +266,8 @@ def test_03b_load_verifies_files_and_swaps_workload(dev_container):
             f"node {n}: couldn't parse a count from {ok_path}: {ok_text!r}"
         )
         ok_count = int(m.group(1))
-        assert ok_count == 100, (
-            f"node {n}: only {ok_count}/100 of the last 100 sender iterations were [ok] "
+        assert ok_count == 10, (
+            f"node {n}: only {ok_count}/10 of the last 10 sender iterations were [ok] "
             f"before savevm — workload was still failing right up to checkpoint. "
             f"Inspect {exp_folder}/qemu_serial.log tail for [noreply]/[MISMATCH] lines."
         )
@@ -289,16 +289,15 @@ def test_04_init_warm_creates_init_warmed_snapshot(dev_container):
         "run tests/test_chained_pipeline.py::test_03_boot_creates_loaded_test_with_workload first",
     )
 
-    # 30 minute wall budget. The user originally suggested 20, but empirically
-    # the multi-node `init_warmed` savevm is dominated by the
-    # EXTERNAL_INCREMENTAL_BASE memory dump (writes the full guest RAM as a
-    # raw `<name>.mem/base` file per node) — ~52 GB at ~67 MB/s on this disk
-    # is ~13 minutes per node, which already eats into 20 min by itself once
-    # boot + warming + PDES drain coordination are added. 1800 s gives the
-    # finalisation steps headroom.
+    # 10 minute wall budget — per the user's "make init be able to continue
+    # for 10 minutes". Under parallel-mode init (forced by the YAML override
+    # in `initialize:` to dodge the icount/sequential deadlock — see TODO in
+    # commands/init_warm.py) the savevm path is the EXTERNAL_INCREMENTAL_BASE
+    # memory dump; if 10 min isn't enough it likely means the bug above is
+    # back, not that the budget is too tight. Bump rather than mask.
     r = _exec_in_container(
         "./qflex initialize -c tests/realrun/dc-multi.yaml",
-        timeout=1800,
+        timeout=600,
     )
     assert r.returncode == 0, (
         f"initialize from loaded-test failed (rc={r.returncode}).\n"

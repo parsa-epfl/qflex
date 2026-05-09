@@ -1,16 +1,34 @@
 #!/usr/bin/env expect
-# Reusable single-node boot template. Waits for Alpine login, logs in as
+# MULTI-NODE MASTER (node_number == 0) boot template. Boots Alpine, logs in as
 # qflex/qflex, runs whatever you put in the INSERT YOUR SETUP HERE block, then
-# `savevm booted` — the load phase loads from this name.
+# `savevm booted` over the monitor — the load phase loads from this name.
 #
-# Wire into a YAML's `boot:` section as:
-#   interaction_script: sample_scripts/useful_expects/boot_savevm_booted.exp
+# Pair with sample_scripts/useful_expects/boot/boot_savevm_booted_wait.exp on
+# every non-master leaf. PDES `savevm` is a distributed snapshot — the master
+# issues the monitor command, every node serialises its own per-node qcow2 as
+# part of the drain. If the same script runs on both leaves, the drain is
+# double-driven → corrupt snapshot.
+#
+# Wire into a YAML's `boot:` section per leaf, e.g.:
+#   experiment_context_node_0:
+#     interaction_script: /home/dev/qflex/sample_scripts/useful_expects/boot/boot_savevm_booted_master.exp
+#   experiment_context_node_1:
+#     interaction_script: /home/dev/qflex/sample_scripts/useful_expects/boot/boot_savevm_booted_wait.exp
+#
+# The 5 s settles after login, after ls, and after savevm are host wall-clock
+# (Tcl `sleep`) — they give per-node guest activity room to settle and the
+# follower's per-node `save_snapshot()` time to finalise before `quit` tears
+# down PDES. See the `expect-scripts` skill.
+#
+# For SINGLE-NODE setups, use boot_savevm_booted.exp instead — this template
+# adds multi-node-specific budgets and pauses that aren't useful single-node.
 
 set timeout 900
 
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
+set BUDGET_BOOT_LOGIN_S   1800   ; # fresh boot to login: kernel boot under PDES is minutes
 set BUDGET_CHECKPOINTING_S 1800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
@@ -68,12 +86,14 @@ proc quit_qemu {monitor_port} {
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
 set spawn_id $serial_sid
 
-set timeout $BUDGET_PROMPT_S
+set timeout $BUDGET_BOOT_LOGIN_S
 send "\r"
 expect {
     timeout { puts "ERROR: login prompt timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[Ll]ogin: }
 }
+
+set timeout $BUDGET_PROMPT_S
 send "qflex\r"
 expect {
     timeout { puts "ERROR: password prompt timed out"; quit_qemu $monitor_port; exit 1 }
@@ -84,6 +104,8 @@ expect {
     timeout { puts "ERROR: shell prompt timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}
 }
+
+sleep 5
 
 # =============================================================================
 # INSERT YOUR SETUP HERE
@@ -109,6 +131,14 @@ expect {
 # timeout` before the send.
 #
 # =============================================================================
+
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
 
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}
@@ -136,6 +166,8 @@ expect {
     timeout { puts "ERROR: savevm didn't return"; exit 1 }
     "(qemu) "
 }
+
+sleep 5
 
 send "quit\r"
 catch {expect eof}

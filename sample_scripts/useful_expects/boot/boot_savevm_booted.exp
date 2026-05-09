@@ -1,17 +1,15 @@
 #!/usr/bin/env expect
-# Reusable SINGLE-NODE load template. Pairs with boot/boot_savevm_booted.exp:
-# the load phase has already done `loadvm booted`, so the guest is back at
-# the logged-in shell prompt — no re-login needed. Runs your INSERT YOUR
-# SETUP HERE block, then `savevm loaded` for the init phase to load from.
+# Reusable SINGLE-NODE boot template. Waits for Alpine login, logs in as
+# qflex/qflex, runs whatever you put in the INSERT YOUR SETUP HERE block, then
+# `savevm booted` — the load phase loads from this name.
 #
-# Wire into a YAML's `load:` section as:
-#   interaction_script: sample_scripts/useful_expects/load/load_savevm_loaded.exp
-#   loadvm_name:        booted
+# Wire into a YAML's `boot:` section as:
+#   interaction_script: sample_scripts/useful_expects/boot/boot_savevm_booted.exp
 #
 # For MULTI-NODE setups, do NOT use this template on every leaf — `savevm` is
 # master-only on multi-node. Use the paired templates instead:
-#   master leaf  -> conf/WS/expects/load_savevm_loaded_master.exp
-#   follower(s)  -> conf/WS/expects/load_savevm_loaded_wait.exp
+#   master leaf  -> sample_scripts/useful_expects/boot/boot_savevm_booted_master.exp
+#   follower(s)  -> sample_scripts/useful_expects/boot/boot_savevm_booted_wait.exp
 
 set timeout 900
 
@@ -70,9 +68,7 @@ proc quit_qemu {monitor_port} {
     }
 }
 
-# --- 1. Connect serial + nudge for shell prompt ------------------------------
-# loadvm restored the guest to whatever state `booted` was savevm'd at — for
-# this template, that's a logged-in qflex shell. A bare \r re-renders it.
+# --- 1. Connect serial + login as qflex/qflex --------------------------------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
 set spawn_id $serial_sid
@@ -80,7 +76,17 @@ set spawn_id $serial_sid
 set timeout $BUDGET_PROMPT_S
 send "\r"
 expect {
-    timeout { puts "ERROR: shell prompt timed out after loadvm"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: login prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }
+}
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: password prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Pp]assword: }
+}
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}
 }
 
@@ -88,16 +94,16 @@ expect {
 # INSERT YOUR SETUP HERE
 # =============================================================================
 #
-# Anything you do here gets baked into the `loaded` snapshot — typically the
-# longer-running, workload-side warm-up that the init phase will hand to FW.
-# Each guest command is one `send` followed by an `expect` that waits for the
-# next shell prompt. The regex {[\$#] +} matches both `$ ` (qflex) and `# `
-# (root). Do NOT anchor with `$` at end-of-buffer — Alpine's busybox emits an
-# ESC[6n cursor report after the prompt, so the buffer doesn't end at it.
+# Anything you do here gets baked into the `booted` snapshot — start daemons,
+# configure networking, drop test files, prime the workload, etc. Each guest
+# command is one `send` followed by an `expect` that waits for the next shell
+# prompt. The regex {[\$#] +} matches both `$ ` (qflex) and `# ` (root). Do NOT
+# anchor with `$` at end-of-buffer — Alpine's busybox emits an ESC[6n cursor
+# report after the prompt, so the buffer doesn't end at the prompt.
 #
-# Example — touch a marker file and verify the command returned cleanly:
+# Example — write a marker file and verify the command returned cleanly:
 #
-#   send "touch /home/qflex/loaded_marker.txt\r"
+#   send "echo hello > /home/qflex/marker.txt\r"
 #   expect {
 #       timeout { puts "ERROR: marker write timed out"; quit_qemu $monitor_port; exit 1 }
 #       -re {[\$#] +}
@@ -109,16 +115,10 @@ expect {
 #
 # =============================================================================
 
-send "ls\r"
-expect {
-    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}
 
-# --- 2. savevm loaded via the monitor ----------------------------------------
+# --- 2. savevm booted via the monitor ----------------------------------------
 
 set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
 set spawn_id $monitor_sid
@@ -131,12 +131,12 @@ expect {
 
 # delvm is best-effort — keeps re-runs idempotent (savevm refuses to overwrite).
 set timeout $BUDGET_CHECKPOINTING_S
-send "delvm loaded\r"
+send "delvm booted\r"
 expect {
     timeout { puts "WARN: delvm didn't return; continuing anyway" }
     "(qemu) "
 }
-send "savevm loaded\r"
+send "savevm booted\r"
 expect {
     timeout { puts "ERROR: savevm didn't return"; exit 1 }
     "(qemu) "

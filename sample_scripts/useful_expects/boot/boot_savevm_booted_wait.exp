@@ -1,0 +1,161 @@
+#!/usr/bin/env expect
+# MULTI-NODE FOLLOWER (node_number > 0) boot template. Boots Alpine, logs in
+# as qflex/qflex, runs whatever you put in the INSERT YOUR SETUP HERE block,
+# then waits for THIS node's per-node `save_snapshot()` to finalise (by polling
+# this node's own Boot.log for `savevm log 7` — the last printf inside
+# migration/savevm.c's save_snapshot).
+#
+# DOES NOT issue `savevm` over the monitor. PDES `savevm` is master-only — the
+# master's monitor command drives a distributed drain that automatically writes
+# every node's per-node qcow2; we just have to stay alive long enough for our
+# end of the drain to finalise. See boot_savevm_booted_master.exp on the master.
+#
+# Why poll for `savevm log 7` and not just `expect eof`:
+#   `expect eof` reactively waits for the executor's `_kill_peer_qemus` to
+#   SIGKILL our QEMU after master's `quit` — that's timing-dependent and can
+#   land *before* our per-node save has finalised, leaving our qcow2 with no
+#   `booted` snapshot. The `savevm log 7` marker is the deterministic signal
+#   that our local save_snapshot returned. Peer-kill remains the safety net.
+#
+# Wire into a YAML's `boot:` section per leaf, e.g.:
+#   experiment_context_node_0:
+#     interaction_script: /home/dev/qflex/sample_scripts/useful_expects/boot/boot_savevm_booted_master.exp
+#   experiment_context_node_1:
+#     interaction_script: /home/dev/qflex/sample_scripts/useful_expects/boot/boot_savevm_booted_wait.exp
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_BOOT_LOGIN_S   1800   ; # fresh boot to login: kernel boot under PDES is minutes
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+# Poll a file for a literal substring with a wall-clock budget. Used to wait
+# for our own per-node savevm to complete by tailing the bash-redirected
+# Boot.log for qemu's `savevm log 7` printf — that's the last thing
+# save_snapshot() emits before returning, so seeing it means save finished.
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]
+            set content [read $fh]
+            close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
+# --- 1. Connect serial + login as qflex/qflex --------------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_BOOT_LOGIN_S
+send "\r"
+expect {
+    timeout { puts "ERROR: login prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }
+}
+
+set timeout $BUDGET_PROMPT_S
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: password prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Pp]assword: }
+}
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# =============================================================================
+# INSERT YOUR SETUP HERE
+# =============================================================================
+#
+# Same shape as the master template. Anything you do here gets baked into THIS
+# node's per-node `booted` snapshot. Each guest command is one `send` followed
+# by an `expect` that waits for the next shell prompt.
+#
+# For symmetric workloads, the master and follower SETUP blocks are typically
+# identical (same daemons, same network config, same test files). For
+# asymmetric workloads (e.g. a server on master, a client on follower), they
+# differ — but each leaf's SETUP runs against ITS OWN guest only.
+#
+# =============================================================================
+
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# --- 2. Wait for our OWN per-node savevm to finalise -------------------------
+#
+# Master initiated `savevm booted`; the PDES drain dispatched a per-node savevm
+# to us as well. `savevm log 7` is the last printf inside save_snapshot() (see
+# migration/savevm.c) — it's the deterministic signal that our local savevm
+# finalised. Tail Boot.log (qemu's stdout via the bash redirect) for that marker.
+
+puts "follower: ls done; waiting for our own 'savevm log 7' in Boot.log..."
+wait_for_substring "$exp_folder/Boot.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "follower: saw 'savevm log 7' — per-node savevm complete; exiting."
+exit 0

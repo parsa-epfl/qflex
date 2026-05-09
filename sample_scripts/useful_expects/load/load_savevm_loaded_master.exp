@@ -1,0 +1,225 @@
+#!/usr/bin/env expect
+# MULTI-NODE MASTER (node_number == 0) load template. Pairs with
+# boot/boot_savevm_booted_master.exp + boot/boot_savevm_booted_wait.exp on the
+# boot side. The load phase has already done `loadvm booted`, so the guest is
+# back at the logged-in shell prompt — no re-login needed. Runs your INSERT
+# YOUR SETUP HERE block, then `savevm loaded` over the monitor for the init
+# phase to load from.
+#
+# Pair with sample_scripts/useful_expects/load/load_savevm_loaded_wait.exp on
+# every non-master leaf. PDES `savevm` is a distributed snapshot — the master
+# issues the monitor command, every node serialises its own per-node qcow2 as
+# part of the drain. If the same script runs on both leaves, the drain is
+# double-driven → corrupt snapshot.
+#
+# Wire into a YAML's `load:` section per leaf, e.g.:
+#   experiment_context_node_0:
+#     interaction_script: /home/dev/qflex/sample_scripts/useful_expects/load/load_savevm_loaded_master.exp
+#     loadvm_name:        booted
+#   experiment_context_node_1:
+#     interaction_script: /home/dev/qflex/sample_scripts/useful_expects/load/load_savevm_loaded_wait.exp
+#     loadvm_name:        booted
+#
+# The 5 s settles after the post-loadvm prompt nudge, after ls, and after
+# savevm are host wall-clock (Tcl `sleep`) — they give per-node guest activity
+# room to settle and the follower's per-node `save_snapshot()` time to
+# finalise before `quit` tears down PDES. See the `expect-scripts` skill.
+#
+# For SINGLE-NODE setups, use load_savevm_loaded.exp instead.
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+# --- 1. Connect serial + nudge for shell prompt ------------------------------
+# loadvm restored the guest to the logged-in qflex shell. A bare \r re-renders
+# the prompt. No fresh-boot wait needed (no kernel boot under PDES).
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out after loadvm"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# TODO: replace this fixed 10 s wait with a sentinel-based handshake so the
+# two nodes coordinate on a "loaded" signal instead of guessing wall-clock.
+# Mirror the boot phase's `savevm log 7` pattern: each leaf touches a per-node
+# "loaded" sentinel, peers wait_for_file each other's, then proceed.
+puts "master: post-loadvm settle — waiting 10 s host time before guest config..."
+sleep 10
+
+# =============================================================================
+# INSERT YOUR SETUP HERE
+# =============================================================================
+#
+# Anything you do here gets baked into the `loaded` snapshot — typically the
+# longer-running, workload-side warm-up that the init phase will hand to FW.
+# Each guest command is one `send` followed by an `expect` that waits for the
+# next shell prompt. The regex {[\$#] +} matches both `$ ` (qflex) and `# `
+# (root). Do NOT anchor with `$` at end-of-buffer — Alpine's busybox emits an
+# ESC[6n cursor report after the prompt, so the buffer doesn't end at it.
+#
+# For privileged ops use `doas` (sudo isn't installed); answer the password
+# prompt with `qflex`. For long-running setup, bump the surrounding `set
+# timeout` before the send.
+#
+# =============================================================================
+
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# Bring up the PDES NIC for the simulation phases. eth0 here = the
+# virtio-net-pci PDES NIC at PCI addr 0x10. The MAC mirrors qflex's per-node
+# default (see commands/config.py:373: mac=52:54:00:aa:bb:<node*10+i>); for
+# node 0 with neighbour index 0 that's 52:54:00:aa:bb:00. The IP convention
+# 192.168.100.1 / .2 is what the project's reference tests use. Customise to
+# match your YAML if you've changed `pdes_net_devs` ordering or assigned MACs
+# manually.
+#
+# `su` + empty creds: drive both prompts (Login: / Password:) via expect's
+# exp_continue rather than blind sleeps so we sync on the prompts actually
+# arriving (under PDES sync=true wall-clock vs guest virtual time can drift).
+send "su\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
+    -re {[Aa]uthentication failure|incorrect password} {
+        puts "ERROR: su rejected empty creds — image may not allow empty pw"
+        quit_qemu $monitor_port; exit 1
+    }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
+}
+send "ip link show\r"
+expect {
+    timeout { puts "ERROR: ip link show timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip link set eth0 down\r"
+expect {
+    timeout { puts "ERROR: ip link set eth0 down timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip link set eth0 address 52:54:00:aa:bb:00\r"
+expect {
+    timeout { puts "ERROR: ip link set address timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip link set eth0 up\r"
+expect {
+    timeout { puts "ERROR: ip link set eth0 up timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip addr add 192.168.100.1/24 dev eth0\r"
+expect {
+    timeout { puts "ERROR: ip addr add timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip addr show eth0\r"
+expect {
+    timeout { puts "ERROR: ip addr show timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "su qflex\r"
+expect {
+    timeout { puts "ERROR: didn't get qflex prompt after su qflex"; quit_qemu $monitor_port; exit 1 }
+    -re {\$ +}
+}
+
+sleep 5
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+# --- 2. savevm loaded via the monitor ----------------------------------------
+
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+
+set timeout $BUDGET_DEFAULT_S
+expect {
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    "(qemu) "
+}
+
+# delvm is best-effort — keeps re-runs idempotent (savevm refuses to overwrite).
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm loaded\r"
+expect {
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm loaded\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return"; exit 1 }
+    "(qemu) "
+}
+
+sleep 5
+
+send "quit\r"
+catch {expect eof}
+exit 0
