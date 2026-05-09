@@ -71,6 +71,10 @@ Default is `$BUDGET_DEFAULT_S` (`5`) so call sites that omit the argument fail f
 
 Alpine's busybox shell renders the prompt with a trailing `\e[6n` (cursor-position report request). The prompt regex therefore must NOT anchor to end-of-buffer — `\$ $` never matches. Use `[\$#] +` (no end anchor) instead. The `[6n` bytes still leak into `expect_out(buffer)` and end up in your captured `ls` output; that's expected, not a bug.
 
+## Who the user is at the prompt
+
+The guest's hostname is `qflex` (set during base-image creation), not `alpine`. The shell prompt is `qflex:~$ ` for the unprivileged `qflex` user and `qflex:~#` for `root`. **Don't anchor on `alpine:`** — that string never appears at the prompt. Match `[\$#] +` for "any prompt regardless of user", or `qflex:[^\r\n]*[\$#] +` if you specifically want to confirm you're at this guest's shell (and not in some other tool that also prints a `$`).
+
 ## loadvm replays the queued serial buffer
 
 When QEMU resumes from `-loadvm`, the serial output that was in flight at savevm time gets replayed once you reconnect telnet. The shell's pre-snapshot prompt characters re-emerge in the buffer **alongside** any prompt your post-restore `\r` triggers. Several variations of "drain the buffer first then anchor on a prompt regex" all failed: bytes can stream in slowly enough that drain returns prematurely, then the next expect matches a stale prompt instead of waiting for our command's output. Don't go down that road.
@@ -113,6 +117,46 @@ Why it works:
 - No prompt regex means no race.
 
 Don't do the pre-send drain on a *boot* script (fresh boot has no replay, drain just wastes 5s). Do drain after sending the command — that's universal.
+
+## Marker-based capture (the alternative when drain is too coarse)
+
+When you need *one* capture per command across MULTIPLE commands in sequence (and don't want each capture to pay a 2s drain timeout), the more surgical pattern is to have the guest emit a unique end-of-capture marker — see [tests/realrun/loaded_test_verify_and_swap_workload.exp](../../../tests/realrun/loaded_test_verify_and_swap_workload.exp)'s `capture_to`:
+
+```tcl
+proc capture_to {out_name shell_cmd} {
+    global exp_folder spawn_id
+    send "$shell_cmd; printf '\\nQFLEXEOC%s\\n' \"\$\$\"\r"
+    expect {
+        timeout { puts "ERROR: '$shell_cmd' didn't return end-of-capture marker" }
+        -re {\nQFLEXEOC[0-9]+\r?\n}
+    }
+    set buf $expect_out(buffer)
+    expect { timeout { } -re {[\$#] +} }   ; # drain post-marker prompt
+    # write $buf to $exp_folder/$out_name
+}
+```
+
+Why this works (and why the obvious alternatives don't):
+
+* **`expect -re {[\$#] +}`** alone (one-stage prompt match) races stale prompt bytes already in the buffer — e.g. the post-`\r`-nudge prompt that the previous expect call's match left positioned just before. Single-stage gives a 12-byte capture of `qflex:~$ ` instead of the real output.
+* **Two-stage `"$shell_cmd\r"` then prompt** races busybox's *prompt redraw* on slower setups: when a command is dispatched while the shell is settling (post-`pkill`, post-loadvm), the typed bytes echo back BEFORE the shell prints its prompt. Then the shell prints `qflex:~$ <command>` (a redraw with the typed line). The stage-2 prompt regex then matches the redraw's `$ ` BEFORE the command's actual output streams in — `capture_to` returns with the wrong buffer (the next call captures what should have been here).
+* **The PID-bearing marker** can't appear in the typed echo (the typed bytes have the literal `%s`, not a digit), so the regex `\nQFLEXEOC[0-9]+\r?\n` only matches the printf's actual output. No race.
+
+Pytest tolerates the typed-echo prefix in the captured buffer via regex / `key=value` parsing — see how `tests/test_chained_pipeline.py::test_03b` reads `ping_summary_after_loadvm.txt` and `workload_state.txt`.
+
+Pick one of:
+* **Drain-based** when you have ONE capture (e.g. boot scripts that run a single `ls`) and a 2s post-send wait is acceptable.
+* **Marker-based** when you have a sequence of captures back-to-back and need each one's buffer to be unambiguously its own command's output.
+
+## Sync-on PDES wires don't tolerate fast bursts
+
+`sync=true` + low `latencyns` (the load/init/fw default of 100µs) is fragile under sustained network bursts: `wwt_recivied_callback` will fire its `Received message with timestamp in the past` assertion and abort qemu. The threshold is around `ping -i 0.001` (1ms intervals); `-i 0.1` (100ms) is safe. When designing a workload to bake into a snapshot:
+
+* **Throttle every loop** that talks to the peer over the PDES NIC. The `urandom→nc→cmp` sender in `loaded_test_verify_and_swap_workload.exp` has `sleep 1` between iterations — without it, the WWT race fires within seconds of workload start.
+* **Don't leave a `ping -i 0.001 -c 1000000` running across savevm/loadvm.** When the snapshot is later loaded, the ping process resumes and immediately starts blasting the wire — the WWT race fires before any test logic can step in. The load script `pkill`s any leftover ping as its very first action post-loadvm; mirror that pattern in any script that loads a snapshot known to contain a fast pinger.
+* **The peer-ping verification at script start should also be slow.** Ten packets at 100ms is enough to confirm "the wire works"; 100 at 1ms is a race trigger.
+
+This is a real qemu-pdes bug under heavy load — out of scope to fix from an expect script, but the script can avoid triggering it.
 
 ## Both nodes must exit, or the test hangs forever
 

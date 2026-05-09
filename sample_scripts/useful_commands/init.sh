@@ -2,5 +2,5 @@
 
 set -euo pipefail
 pushd "$(dirname "$0")/../.." >/dev/null
-python ./qflex initialize --syncs-list true -c $1
+python ./qflex initialize -c $1
 popd >/dev/null

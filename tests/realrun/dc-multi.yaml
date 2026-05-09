@@ -5,10 +5,11 @@
 # — that flow's per-leaf interaction_script is asymmetric in a way command
 # sections can't express, so it stays separate.)
 #
-# Per-leaf base = production defaults (inherits dc-multi.yaml's sync=true /
-# latency=100us via test-base-multi) + the boot-scenario interaction_scripts
-# and `loadvm boot-login`. Each command section below ONLY lists the
-# exceptions it needs (CLAUDE.md "Override exceptions, not rules").
+# Phase-specific fields (interaction_script, loadvm_name, partition_count, …)
+# live in the phase blocks below — the leaves only carry what's invariant
+# across phases (experiment_name, telnet ports, use_gdb). Each phase block
+# uses `_leaf_defaults: {...}` for rule-level changes and `components.<name>:`
+# for per-leaf scoping; flat-key broadcast is no longer accepted.
 extends: test-base-multi
 
 components:
@@ -18,59 +19,61 @@ components:
   experiment_context_node_0:
     experiment_name: qflex_test_multi-node-0
     use_gdb: false
-    interaction_script: /home/dev/qflex/tests/realrun/loaded_test_create_master.exp
     serial_telnet_port: 55681
     telnet_port: 55781
-    loadvm_name: boot-login
 
   experiment_context_node_1:
     experiment_name: qflex_test_multi-node-1
     use_gdb: false
-    interaction_script: /home/dev/qflex/tests/realrun/loaded_test_create_follower.exp
     serial_telnet_port: 55682
     telnet_port: 55782
-    loadvm_name: boot-login
 
-# Exception: Alpine boot freezes under sync=true / 100us; relax to 1ms / no sync.
+# Boot: relaxed wire (Alpine freezes under sync=true / 100us), loadvm boot-login,
+# per-node interaction scripts (master/follower differ). latencies_ns_list and
+# syncs_list are hardcoded per-leaf in conf/DC/dc-multi.yaml so the override
+# has to land on the component, not on _leaf_defaults.
 boot:
-  latencies_ns_list: [1000000]
-  syncs_list: ["false"]
+  _leaf_defaults:
+    loadvm_name: boot-login
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+      interaction_script: /home/dev/qflex/tests/realrun/loaded_test_create_master.exp
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+      interaction_script: /home/dev/qflex/tests/realrun/loaded_test_create_follower.exp
 
-# Exception: load uses one uniform script + the loaded-test snapshot. The
-# script also re-savevms loaded-test with a long-running urandom→TCP-echo→cmp
-# workload running, so init/fw resume from a snapshot where the workload is
-# already churning (their warming phases see real CPU+network activity).
+# Load: same script for both leaves; re-savevms loaded-test with a long-running
+# urandom→TCP-echo→cmp workload running, so init/fw resume from a snapshot
+# where the workload is already churning (their warming phases see real
+# CPU+network activity).
 load:
-  interaction_script: /home/dev/qflex/tests/realrun/loaded_test_verify_and_swap_workload.exp
-  loadvm_name: loaded-test
+  _leaf_defaults:
+    interaction_script: /home/dev/qflex/tests/realrun/loaded_test_verify_and_swap_workload.exp
+    loadvm_name: loaded-test
 
-# Pipeline phases — different loadvm_name per command. interaction_script must
-# be cleared: leaving it set auto-enables `use_telnet_monitor`, which makes
-# QEMU bind a -chardev port. For run-partition specifically the per-node fan-
-# out launches N qemus in parallel and they'd all collide on the same port.
+# Pipeline phases — each loads loaded-test or init_warmed; interaction_script
+# is left at the factory default ("") which keeps QEMU on its default
+# (mon:stdio) channels, no auto-telnet-monitor.
 initialize:
-  interaction_script: ""
-  loadvm_name: loaded-test
+  _leaf_defaults:
+    loadvm_name: loaded-test
 
 fw:
-  interaction_script: ""
-  loadvm_name: init_warmed
+  _leaf_defaults:
+    loadvm_name: init_warmed
 
 partition:
-  interaction_script: ""
-  partition_count: 5
+  _leaf_defaults:
+    partition_count: 5
 
 run_idx:
-  interaction_script: ""
-  partition_number: 0
-  idx: 0
+  _leaf_defaults:
+    partition_number: 0
+    idx: 0
 
 run_single_partition:
-  interaction_script: ""
-  partition_number: 0
-
-run_partition:
-  interaction_script: ""
-
-result:
-  interaction_script: ""
+  _leaf_defaults:
+    partition_number: 0

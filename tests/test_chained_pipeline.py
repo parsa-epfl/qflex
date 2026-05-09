@@ -19,6 +19,7 @@ Same gating as the rest of the real-run suite: enabled by default, set
 test_boot_login_bootstrap.py and is gated separately by `QFLEX_INIT_TEST=1`.
 """
 import os
+import re
 
 import pytest
 
@@ -53,6 +54,24 @@ pytestmark = [
 
 def _node_qcow2(mounting: str, n: int) -> str:
     return f"{mounting}/root-single-node-node{n}.qcow2"
+
+
+def _parse_kv(path: str) -> dict[str, str]:
+    """Parse a `key=value` (one-per-line) file. Tolerates blank lines and
+    leading/trailing whitespace from the serial-buffer capture (the file is
+    typically the buffer between an `echo` command and its returning prompt,
+    not a clean one-shot write)."""
+    out: dict[str, str] = {}
+    with open(path) as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k, v = k.strip(), v.strip()
+            if k and " " not in k:
+                out[k] = v
+    return out
 
 
 def test_03_boot_creates_loaded_test_with_workload(dev_container):
@@ -96,6 +115,10 @@ def test_03_boot_creates_loaded_test_with_workload(dev_container):
     # PDES drain persists every node's CPU+memory into its own per-node qcow2).
     # require_snapshot would `pytest.skip` here — for a post-condition check we
     # want a hard FAIL, so call _qcow2_has_snapshot directly.
+    # One verification per phase (per the user): boot's claim is "loaded-test
+    # snapshot exists in each per-node qcow2". The file-persistence check
+    # (`testN.txt` survives savevm/loadvm) belongs to test_03b — it's the
+    # load phase that actually exercises the loadvm path.
     for n, sub in enumerate(NODE_SUB_NAMES):
         qcow2 = _node_qcow2(mounting, n)
         assert _qcow2_has_snapshot(qcow2, LOADED_TEST_SNAPSHOT), (
@@ -103,28 +126,24 @@ def test_03_boot_creates_loaded_test_with_workload(dev_container):
             f"{mounting}/experiments/{sub}/expect_log.txt + Boot.log + qemu_serial.log"
         )
 
-        # Per-node file verification — the enhanced ping scripts touch testN.txt
-        # before the network setup, then capture ls. test_03b reloads `loaded-test`
-        # and asserts the same file still appears (savevm/loadvm round-trip).
-        ls_path = f"{mounting}/experiments/{sub}/ls_after_create.txt"
-        assert os.path.exists(ls_path), (
-            f"node {n}: missing {ls_path} — ping script didn't reach the "
-            f"ls_after_create capture step"
-        )
-        with open(ls_path) as f:
-            ls_text = f.read()
-        expected = f"test{n + 1}.txt"
-        assert expected in ls_text, (
-            f"node {n}: expected {expected!r} in {ls_path}, got:\n{ls_text}"
-        )
-
 
 def test_03b_load_verifies_files_and_swaps_workload(dev_container):
-    """`./qflex load` from `loaded-test` and run load_verify_ls.exp on both
-    leaves (via the YAML's `load:` command section). Verifies that the
-    testN.txt files baked into `loaded-test` by test_03 survived the
-    savevm/loadvm round-trip — the load-side complement to test_03's
-    save-side file capture.
+    """`./qflex load` from `loaded-test` and drive
+    `loaded_test_verify_and_swap_workload.exp` on both leaves (via the YAML's
+    `load:` phase block). Verifies, by reading the script's host-visible
+    artifacts:
+
+      * test{N}.txt baked into `loaded-test` by test_03 survived the savevm/
+        loadvm round-trip (`ls_after_load.txt`).
+      * The peer-ping after loadvm hit 100/100 (`ping_summary_after_loadvm.txt`).
+      * The per-node echo server + sender loops were running before the
+        master's re-savevm (`workload_state.txt` — pids and rc==0).
+      * No cmp-detected byte corruption was logged before re-savevm
+        (`corruption_log_pre_savevm.txt` is empty / size==0).
+
+    The .exp itself is now a thin guest driver: it types commands, captures
+    artifacts, coordinates with the peer via sentinel files, and exits — every
+    "is the system OK?" check happens in this test, not inside Tcl.
     """
     mounting = dev_container
 
@@ -133,6 +152,18 @@ def test_03b_load_verifies_files_and_swaps_workload(dev_container):
         LOADED_TEST_SNAPSHOT,
         "run tests/test_chained_pipeline.py::test_03_boot_creates_loaded_test_with_workload first",
     )
+
+    # Delete prior artifacts before running so a no-op `./qflex load` (qemu
+    # died too early to write any) can't false-pass on a previous run's stale
+    # captures. Done via the container because the artifacts are root-owned.
+    rm_paths = " ".join(
+        f"/mnt/sdc/data-caching-1c/experiments/{sub}/{f}"
+        for sub in NODE_SUB_NAMES
+        for f in ("ls_after_load.txt", "ping_summary_after_loadvm.txt",
+                  "workload_state.txt", "corruption_log_pre_savevm.txt",
+                  "ok_in_last_100.txt")
+    )
+    _exec_in_container(f"rm -f {rm_paths}", timeout=30)
 
     r = _exec_in_container(
         "./qflex load -c tests/realrun/dc-multi.yaml",
@@ -145,17 +176,100 @@ def test_03b_load_verifies_files_and_swaps_workload(dev_container):
     )
 
     for n, sub in enumerate(NODE_SUB_NAMES):
-        ls_path = f"{mounting}/experiments/{sub}/ls_after_load.txt"
+        exp_folder = f"{mounting}/experiments/{sub}"
+
+        # 1) ls_after_load.txt — file persistence across savevm/loadvm.
+        ls_path = f"{exp_folder}/ls_after_load.txt"
         assert os.path.exists(ls_path), (
-            f"node {n}: missing {ls_path} — load_verify_ls.exp didn't reach "
-            f"the capture step"
+            f"node {n}: missing {ls_path} — the .exp didn't reach the ls "
+            f"capture step. Check {exp_folder}/expect_log.txt for where it died."
         )
         with open(ls_path) as f:
             ls_text = f.read()
-        expected = f"test{n + 1}.txt"
-        assert expected in ls_text, (
-            f"node {n}: expected {expected!r} in {ls_path} after savevm/loadvm "
+        expected_file = f"test{n + 1}.txt"
+        assert expected_file in ls_text, (
+            f"node {n}: expected {expected_file!r} in {ls_path} after savevm/loadvm "
             f"round-trip, got:\n{ls_text}"
+        )
+
+        # 2) ping_summary_after_loadvm.txt — peer-ping was 100/100.
+        ping_path = f"{exp_folder}/ping_summary_after_loadvm.txt"
+        assert os.path.exists(ping_path), (
+            f"node {n}: missing {ping_path} — the peer ping never returned. "
+            f"Most likely cause: qemu's serial chardev died mid-ping (peer "
+            f"qemu was killed early, or save_snapshot races); inspect "
+            f"{exp_folder}/expect_log.txt and Load.log."
+        )
+        with open(ping_path) as f:
+            ping_text = f.read()
+        m = re.search(r"(\d+)\s+packets transmitted,\s+(\d+)\s+packets? received", ping_text)
+        assert m is not None, (
+            f"node {n}: no busybox ping summary in {ping_path}. Captured:\n{ping_text}"
+        )
+        tx, rx = int(m.group(1)), int(m.group(2))
+        assert tx > 0 and tx == rx, (
+            f"node {n}: ping after loadvm dropped packets (tx={tx} rx={rx}; "
+            f"need tx>0 and tx==rx). Wire is misconfigured or the peer hadn't "
+            f"caught up. Full ping:\n{ping_text}"
+        )
+
+        # 3) workload_state.txt — echo server + sender loops alive pre-savevm.
+        state_path = f"{exp_folder}/workload_state.txt"
+        assert os.path.exists(state_path), (
+            f"node {n}: missing {state_path} — the workload-state probe never ran "
+            f"(.exp died before line ~190). Check expect_log.txt."
+        )
+        state = _parse_kv(state_path)
+        assert state.get("echo_server_rc") == "0", (
+            f"node {n}: echo server (port-listener for the integrity workload) was NOT "
+            f"running before re-savevm. Full state: {state}. Without it, init/fw will "
+            f"resume from a snapshot where the workload is dead."
+        )
+        assert state.get("sender_rc") == "0", (
+            f"node {n}: sender loop (urandom→nc→cmp) was NOT running before re-savevm. "
+            f"Full state: {state}. Same impact as above — init/fw sees an idle guest."
+        )
+        assert state.get("echo_server_pid", "").isdigit() and int(state["echo_server_pid"]) > 0, (
+            f"node {n}: echo_server_pid is missing or non-numeric in {state_path}: {state}"
+        )
+        assert state.get("sender_pid", "").isdigit() and int(state["sender_pid"]) > 0, (
+            f"node {n}: sender_pid is missing or non-numeric in {state_path}: {state}"
+        )
+        assert state.get("corruption_log_size") == "0", (
+            f"node {n}: cmp logged corruption BEFORE re-savevm "
+            f"(/tmp/corruption.log size={state.get('corruption_log_size')}). "
+            f"See {exp_folder}/corruption_log_pre_savevm.txt for the recorded mismatches."
+        )
+
+        # 4) corruption_log_pre_savevm.txt — must exist (even if empty).
+        corr_path = f"{exp_folder}/corruption_log_pre_savevm.txt"
+        assert os.path.exists(corr_path), (
+            f"node {n}: missing {corr_path} — the .exp didn't capture the corruption "
+            f"log. Suggests the script died between the workload start and the savevm step."
+        )
+
+        # 5) ok_in_last_100.txt — the LAST 100 sender iterations before savevm
+        # must all be [ok]. Initial warm-up [noreply]s during the first second
+        # (peer hasn't loadvm'd yet) are tolerated; what matters is the
+        # snapshot captures the workload running cleanly. == 100 is strict by
+        # design (per the user: "before we checkpoint... there should be no
+        # failure going on anymore").
+        ok_path = f"{exp_folder}/ok_in_last_100.txt"
+        assert os.path.exists(ok_path), (
+            f"node {n}: missing {ok_path} — settle window or tail-grep step didn't "
+            f"complete. Inspect {exp_folder}/expect_log.txt."
+        )
+        with open(ok_path) as f:
+            ok_text = f.read()
+        m = re.search(r"^\s*(\d+)\s*$", ok_text, re.MULTILINE)
+        assert m is not None, (
+            f"node {n}: couldn't parse a count from {ok_path}: {ok_text!r}"
+        )
+        ok_count = int(m.group(1))
+        assert ok_count == 100, (
+            f"node {n}: only {ok_count}/100 of the last 100 sender iterations were [ok] "
+            f"before savevm — workload was still failing right up to checkpoint. "
+            f"Inspect {exp_folder}/qemu_serial.log tail for [noreply]/[MISMATCH] lines."
         )
 
 

@@ -288,6 +288,45 @@ assert os.path.exists(ctx.sub_experiments[0].get_partition_folder())
 
 Same rule applies to dry-run tests — when you want to assert on a sentinel file or a leaf log path, route it through the executor's existing path-builders rather than f-string'ing one yourself.
 
+## Post-pass log smell-test (mandatory after `make test`)
+
+`make test` returning rc 0 is a *necessary* but not *sufficient* signal — the python assertions only check what they were written to check. After it passes, walk the experiment-folder log files yourself, looking for things pytest doesn't.
+
+**How to find the experiment folder(s):** use `./qflex get-experiment-folder -c <yaml>` rather than hand-deriving `<mounting>/experiments/<sub>/`. The command runs the YAML through the same loader (extends → phase overlay → `_base_:`), pure-path-computes the group's folder followed by each sub-experiment's per-node folder, and prints them one per line. Filter to just the paths with `| grep '^/'` (the factory emits some `Node X has neighbors:` debug lines on the same stdout). Pipe into the smell-test loop instead of hard-coding `qflex_test_multi-node-0` etc. — that way the command stays correct as YAMLs change. For YAMLs with `keep_experiment_unique: true`, the printed path includes a fresh timestamp and won't match the run that just finished — for those, glob `<base>-*/` and pick the most recent.
+
+**Coverage**: every phase that the test suite actually ran in this invocation. For the chained pipeline that's `Boot → Load → InitWarm → FunctionalWarming → Partition → RunPartition → RunSinglePartition → RunIdx → Result`. Each phase writes its own logs under `<mounting>/experiments/<sub>/`:
+
+| Phase | Files to inspect (per-node sub-experiment folder) |
+|---|---|
+| Boot | `Boot.log`, `Boot.err`, plus (Path A) `expect_log.txt`, `qemu_serial.log`, `qemu_monitor.log`, captured artifacts (`ls_after_create.txt`, ping summary, etc.) |
+| Load | `Load.log`, `Load.err`, plus (Path A) `expect_log.txt`, `qemu_serial.log`, `qemu_monitor.log`, captured artifacts (`ls_after_load.txt`, `ping_summary_after_loadvm.txt`, `workload_state.txt`, `corruption_log_pre_savevm.txt`, etc.) |
+| InitWarm | `InitWarm.log`, `InitWarm.err` |
+| FunctionalWarming | `FunctionalWarming.log`, `FunctionalWarming.err` |
+| Partition / UnPartition / CleanPartition | typically nothing interesting (filesystem ops) but check the run's stdout for unexpected stderr |
+| RunPartition / RunSinglePartition / RunIdx | per-(partition, idx) leaf logs under `<exp>/run/partition_<P>/RunIdx_p<P>_i<I>.{log,err}` (and the parent `RunPartition_*.{log,err}` / `RunSinglePartition_*.{log,err}` if those phases produce one — confirm by listing the partition dir) |
+| Result | `RunResult.log`, `RunResult.err` |
+
+For very large logs (>~50 KB), `head -200` + `tail -200` is enough to show the phase's transition points (start banner / end banner / final exit). For everything else, read the whole file.
+
+**What to flag to the user** — anything pytest's assertions don't already cover, e.g.:
+
+- `segfault`, `Aborted`, `SIGSEGV`, `SIGBUS`, `core dumped`, `terminated by signal` lines in any `.log` / `.err`.
+- `Warning:` / `WARN` / `warning:` lines that look like they should have been errors (especially in `*.err`).
+- `failed to`, `could not`, `unable to`, `error:` substrings that the test ignored because `rc == 0`.
+- Empty or near-empty log files where the phase should have produced content (e.g. `Boot.log` < 1 KB after a successful boot is suspicious).
+- Truncated tail (last bytes don't include the phase's natural end marker — `savevm log 7` for Path A snapshots, `Generate N snapshots. Quit.` for FW, etc.).
+- Workload-side logs (`/tmp/corruption.log` exfiltrated as `corruption_log_pre_savevm.txt`, `workload_state.txt` rcs) showing irregularities the test's parsing didn't catch.
+- PDES-side anomalies in qemu's stdout: `inflight messages` count > 0 at savevm time when the test expects 0, late `Connection closed` after the test's real work completed but before the script's `quit`, etc.
+
+**The reporting contract**: after the smell test, write one short report to the user listing:
+1. Which phases ran (so they know what coverage you walked).
+2. Which logs were quiet (one line per file: "looks clean — N lines").
+3. Anything surprising, with a 5-line excerpt and the file path. Then **ask** whether to add a regression test for it, rather than silently extending the assertion suite.
+
+**Why this matters**: `rc == 0` plus the existing artifact assertions cover the headline path. They miss "qemu printed `inflight=3` instead of `inflight=0` but the snapshot still landed" or "the FW plugin warned about a stale checkpoint and recovered". Those are the things that turn into next month's "wait, when did this start happening?" — surfacing them while the run is fresh is much cheaper.
+
+**Don't bake the smell test into pytest itself.** Pytest assertions are a contract you're committing to maintain. The smell test is exploratory — anomalies first surface here, get triaged with the user, and *then* graduate into a pytest assertion if it's worth pinning.
+
 ## Common pitfalls
 
 - **Embedded newlines in bash break naive parsers.** `RunIdxCommand`'s bash includes a multi-line gdb python block. The dry-run printer collapses these via `.replace("\n", "\\n")` so each `[bash]` marker stays on one line. Don't undo this — the parser depends on it.

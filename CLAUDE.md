@@ -121,6 +121,10 @@ A pytest suite lives under [tests/](tests/), one file per pipeline component (`t
 
 **TESTS MUST EXERCISE THE CODE UNDER TEST.** Never invoke binaries (qemu, flexus, kraken libs) or other artifacts directly from a test to assert behaviour or "probe" capabilities — that duplicates logic that already lives in the CLI / [commands/](commands/) classes and gives a separate, can-disagree path. Real-run tests drive `./qflex <subcommand>` (or `./dep exec ...`) so they walk the same `data_class_wrap → create_experiment_context → Executor.execute → cmd()` pipeline production does. Dry-run / unit tests import the command class (`Boot`, `RunIdxCommand`, …) or factory directly. If a real-run test fails because a binary is stale or missing, that's the *correct* failure signal — surface the actual error from the real code path, don't paper over it with a hand-rolled check. Same applies to fixtures: a fixture that subprocess-runs a binary to gate skip behaviour is a smell; gate on env / docker availability / repo state instead.
 
+**Use `./qflex get-experiment-folder -c <yaml>` to locate the experiment folder.** Pure path computation — runs the YAML through the loader (extends → phase overlay → `_base_:`), prints the group's folder followed by each sub-experiment's per-node folder, one per line. Filter with `| grep '^/'` (the factory's `Node X has neighbors:` debug lines share stdout). Use this anywhere you'd otherwise hand-write `<mounting>/experiments/<sub>/` — keeps the lookup correct as YAMLs evolve.
+
+**`make test` rc=0 isn't enough — smell-test the experiment-folder logs after every passing run.** The python assertions only check what they were written to check; a passing run can still hide a `Warning:`, a non-zero `inflight=` count at savevm, an `expect_log.txt` that ended on a Tcl error before its quit, or a workload-side script dying mid-run. After `make test` passes, walk the per-phase logs under `<mounting>/experiments/<sub>/` for **every** phase the suite ran: `Boot.log`/`.err`, `Load.log`/`.err`, `InitWarm.log`/`.err`, `FunctionalWarming.log`/`.err`, `RunResult.log`/`.err`, plus per-(partition, idx) `<exp>/run/partition_<P>/RunIdx_p<P>_i<I>.{log,err}` for the run-* phases, plus the Path-A artifacts (`expect_log.txt`, `qemu_serial.log`, `qemu_monitor.log`, captured `*.txt` files) on Boot and Load. For files >50 KB, `head -200` + `tail -200` is enough to see the natural start/end markers; for everything else, read the whole thing. Flag to the user any `segfault` / `Aborted` / `core dumped` / `failed to` / `unable to` / `Warning:` lines pytest didn't catch, plus empty-where-it-shouldn't-be files and missing end markers (`savevm log 7` for Path A snapshots, `Generate N snapshots. Quit.` for FW, etc.) — then **ask** before promoting any of those into a pytest assertion. The smell test is exploratory; pytest is the contract. Don't bake the smell test into the python suite. Full coverage list, what to look for per file type, and the reporting contract live in the testing skill.
+
 **Real-run tests pass NO CLI flags. Every knob comes from the YAML.** A real-run test invocation is exactly `./qflex <phase> -c tests/realrun/<x>.yaml` — no `--core-count`, no `--memory-gb`, no `--sample-size`, etc. If a knob is missing from the YAML schema, add it to `create_experiment_context` (or a per-command field) and override it in the YAML, never hard-code it in the python test body. Example:
 
 ```python
@@ -175,16 +179,21 @@ qflex (@data_class_wrap(create_experiment_context, name="experiment_context"))
    ▼  data_class_wrap wrapper picks one path:
    │
    ├─[a]─ if --config or $QFLEX_CONFIG resolves to a path (flag wins):
-   │        per-field flags the user explicitly passed are collected as
-   │        component_overrides and merged on top of the YAML at the
-   │        OmegaConf level. Flags omitted on the CLI keep their YAML
-   │        values (or the factory default if also absent from YAML).
+   │        the wrapper passes the running command's name to the loader so
+   │        the matching `<cmd_name>:` phase block (if any) is overlaid; per-field
+   │        flags the user explicitly passed are collected as component_overrides
+   │        and merged on top. Flags omitted on the CLI keep their YAML values
+   │        (or the factory default if also absent from YAML).
    │        ▼
-   │     dep_injection/builder.py        build_experiment_context(path, component_overrides={name: cli_overrides})
+   │     dep_injection/builder.py        build_experiment_context(path, cmd_name=cmd, component_overrides={name: cli_overrides})
    │        │
    │        ├─► dep_injection/config_loader.py
-   │        │       load_config(path)        # OmegaConf + recursive extends:
-   │        │       apply_cli_overrides(...) # OmegaConf dotlist merge (empty for now)
+   │        │       load_config(path, cmd_name)
+   │        │           1. _load_raw          — recursive extends:
+   │        │           2. _apply_phase_overlay — pop cfg[cmd_name], deep-merge into cfg
+   │        │           3. _apply_component_bases — resolve _base_:
+   │        │       apply_cli_overrides(...)  # OmegaConf dotlist (rare; library API)
+   │        │       merge component_overrides # CLI flags as per-component overlay
    │        │
    │        ▼
    │     dep_injection/di_loader.py      ConfigDrivenModule(cfg)
@@ -233,32 +242,30 @@ Each command also takes its own command-specific flags (not part of `ExperimentC
 For any field of `ExperimentContext`, the final value is resolved in this order (lowest priority → highest, later wins):
 
 1. **Factory default** — the `= default` on `create_experiment_context`'s parameter. Visible in `./qflex <cmd> --help` as `[factory default: X]`.
-2. **YAML extends chain.** When the YAML has `extends: <name>`, the parent doc loads first and the child merges over it. Recursive — `extends` is followed all the way up.
-3. **`_leaf_defaults` (via `_base_:`).** Each component with `_base_: _leaf_defaults` (or any other top-level base block) gets that base merged into it, with the component's own keys winning. Resolution happens **once at the outermost `load_config` call**, so a child YAML's `_leaf_defaults: { memory_gb: 4 }` correctly propagates into components that were declared with `_base_:` in a parent YAML.
-4. **Per-component overrides** in the component's own block (e.g. `experiment_context.memory_gb: 4` or `experiment_context_node_0.loadvm_name: boot-login`).
-5. **Command-scoped section: top-level `<func_name>: { ... }` block in the YAML.** Only applied when this command runs (matched by the wrapped function's Python name — `fw`, `run_idx`, `partition_cleanup`, etc.). Overrides every component matching the factory `_target_`. Use this to keep one YAML across multiple pipeline phases instead of forking a YAML per command. Example:
+2. **YAML extends chain.** When the YAML has `extends: <name>`, the parent doc loads first and the child merges over it via OmegaConf deep-merge — child wins at every level (including `_leaf_defaults` and any other top-level base block). Recursive — `extends` is followed all the way up before anything else runs.
+3. **Phase overlay: top-level `<func_name>: { ... }` block.** Only applied when this command runs (matched by the wrapped function's Python name — `fw`, `run_idx`, `partition_cleanup`, etc.). The block mirrors the main YAML's shape; only two targets are recognised:
+    - `_leaf_defaults: {...}` — rule-level. Deep-merged into the top-level `_leaf_defaults` block, then propagates to every component that uses `_base_: _leaf_defaults` when bases resolve next.
+    - `components: {<name>: {...}}` — per-component. Deep-merged into the named component before `_base_` resolves, so the override wins over the base AND over the component's own hardcoded fields.
 
-   ```yaml
-   extends: test-base-multi
-   components:
-     experiment_context:
-       experiment_name: shared_exp
-       memory_gb: 4
-
-   fw:
-     loadvm_name: init_warmed
-     population_seconds: 2
-
-   partition:
-     partition_count: 5
-
-   run_idx:
-     partition_number: 0
-     idx: 0
-   ```
-
-   `./qflex fw -c shared.yaml` sees `loadvm_name: init_warmed` and `population_seconds: 2`; `./qflex boot -c shared.yaml` doesn't (no `boot:` section).
+    Flat-key forms like `boot: { latencies_ns_list: [...] }` are **rejected** by the loader (so they don't silently land where you didn't mean them) — write `boot: { _leaf_defaults: {...} }` or `boot: { components: { <name>: {...} } }` instead. See `tests/realrun/dc-multi.yaml` for a YAML that drives every phase from a single doc.
+4. **`_leaf_defaults` (via `_base_:`).** Each component with `_base_: _leaf_defaults` (or any other top-level base block) is replaced by `merge(<base>, comp)`, so component fields still win over the base. Resolution happens **once at the outermost `load_config` call**, after the phase overlay, so a phase block's `_leaf_defaults: {...}` change correctly propagates into every component.
+5. **Per-component overrides** in the component's own block (e.g. `experiment_context.memory_gb: 4` or `experiment_context_node_0.loadvm_name: boot-login`). These win over `_base_` because OmegaConf keeps the component's keys on top of the merged base.
 6. **Explicit CLI flag** (e.g. `--core-count 32`, `--memory-gb 8`). A flag is "explicit" only when the user actually typed it — Typer's auto-rendered `[factory default: X]` is documentation, not a value that gets applied as an override. Auto-generated flags from `data_class_wrap` cover every factory param.
+
+Worked example combining (3) and (5):
+
+```yaml
+extends: test-base-multi
+components:
+  experiment_context_node_0:
+    latencies_ns_list: [100000]   # hardcoded, used by every phase EXCEPT boot
+boot:
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]   # phase overlay wins over the hardcoded value
+```
+
+`./qflex boot -c x.yaml` sees `[1000000]`; `./qflex load -c x.yaml` sees `[100000]`. If you only need a rule-level change (no component is hardcoding the field), prefer `boot: { _leaf_defaults: {...} }` so it flows to every component automatically.
 
 If a factory-required param has no value from any tier, the wrapper raises `typer.BadParameter` listing every missing flag and pointing at `--config` / `$QFLEX_CONFIG`.
 

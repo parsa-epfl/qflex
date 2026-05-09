@@ -14,23 +14,26 @@ The user-facing call is `build_experiment_context` in [dep_injection/builder.py]
 ```python
 def build_experiment_context(
     config_path: str,
+    cmd_name: str | None = None,                         # phase overlay key
     overrides: list[str] | None = None,                  # OmegaConf dotlist
     component_overrides: dict[str, dict] | None = None,  # structured
 ) -> ExperimentContext:
 ```
 
-Pipeline: `load_config(path)` → `apply_cli_overrides(cfg, overrides)` → optional `OmegaConf.merge` of `component_overrides` → `Injector([ConfigDrivenModule(cfg)]).get(ExperimentContext)`.
+Pipeline: `load_config(path, cmd_name)` (which itself does `extends:` → phase overlay → `_base_:`) → `apply_cli_overrides(cfg, overrides)` → optional `OmegaConf.merge` of `component_overrides` → `Injector([ConfigDrivenModule(cfg)]).get(ExperimentContext)`.
 
-The CLI calls this lazily from inside [`data_class_wrap`](../../../typer_inputs/config_wrapper.py); see the qflex-cli skill for that side.
+The CLI calls this lazily from inside [`data_class_wrap`](../../../typer_inputs/config_wrapper.py); the wrapper passes `cmd_name = func.__name__` so the YAML's `<func_name>:` phase block (if any) is overlaid for this command. See the qflex-cli skill for that side.
 
 ## YAML shape
 
-A config file is one OmegaConf document with two recognized top-level keys:
+A config file is one OmegaConf document with three categories of recognized top-level keys:
 
-- `extends: <bare-name>` — optional. Loads sibling `<name>.yaml` first, then merges current doc on top. Recursive. **Bare name only** — `extends: dc` not `extends: dc.yaml` (the loader appends `.yaml` itself; passing `dc.yaml` makes it look up `dc.yaml.yaml`). Sibling lookup only — parent must live in the same directory.
+- `extends: <bare-name>` — optional. Loads sibling `<name>.yaml` first, then deep-merges the current doc on top. Recursive (the parent's `extends:` is resolved first). **Bare name only** — `extends: dc` not `extends: dc.yaml` (the loader appends `.yaml` itself). Sibling lookup only — parent must live in the same directory.
 - `components:` — a map of `<component-name>: { _target_: ..., ...params }`. The component-name is a free-form key used for diagnostics and `_deps_` references; the **actual injection key** is `(return_type, _name_)`.
+- **Top-level base blocks** like `_leaf_defaults: { ... }` (or any other identifier; convention is leading underscore). Referenced by components via `_base_: <key>`. Resolved at the outermost `load_config` call so child YAMLs / phase overlays can mutate them before they get baked in.
+- **Phase overlay blocks** `<func_name>: { ... }` — one per pipeline command (`boot`, `load`, `fw`, `run_idx`, …). Only applied when that command runs; the block mirrors the main YAML's shape (see "Phase overlays" below).
 
-Real examples: [conf/dc.yaml](../../../conf/dc.yaml) (single-node base) and [conf/dc-node-0.yaml](../../../conf/dc-node-0.yaml) (multi-node, extends `dc`).
+Real examples: [conf/DC/DC_base.yaml](../../../conf/DC/DC_base.yaml) (only `_leaf_defaults`, no components — used as a parent), [conf/DC/dc.yaml](../../../conf/DC/dc.yaml) (single-node, extends `DC_base`), [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml) (multi-node fan-out via `_deps_.sub_experiments`), [tests/realrun/dc-multi.yaml](../../../tests/realrun/dc-multi.yaml) (drives every phase from one doc via phase overlays).
 
 ### Reserved keys inside a component
 
@@ -62,9 +65,39 @@ Everything else is passed straight to the target as a kwarg.
 - Factory functions must annotate `-> ReturnType`. Without it, `get_return_type` raises a clear message — don't bypass it by hand-binding.
 - `_unwrap_list` only handles single-arg generics. `list[Union[A, B]]` won't resolve.
 
-## Override mechanisms
+## Phase overlays (`<func_name>: { ... }`)
 
-Two ways to override values on top of a loaded YAML:
+A phase overlay is a top-level block whose key matches the running Typer command's Python name (`boot`, `load`, `fw`, `run_idx`, `partition_cleanup`, …). The wrapper passes `cmd_name` to `load_config`, which pops `cfg[cmd_name]` and deep-merges it onto cfg **between** the `extends:` collapse and `_base_:` resolution. The block's shape mirrors the main YAML — only two targets are recognised:
+
+- **`_leaf_defaults: { ... }`** — rule-level. Deep-merges into the top-level `_leaf_defaults` block. Propagates to every component using `_base_: _leaf_defaults` because base resolution runs after the phase merge. Use this when no component is hardcoding the field.
+- **`components: { <name>: { ... } }`** — per-component. Deep-merges into the named component before `_base_:` resolves, so the override wins over the base AND over the component's own hardcoded fields. Use this when you need to scope strictly (e.g. only `experiment_context_node_1`, not the unnamed group), or when you must beat a per-leaf hardcoded value.
+
+Flat-key forms — `boot: { latencies_ns_list: [...] }` — are **rejected** by [`_apply_phase_overlay`](../../../dep_injection/config_loader.py) so they don't silently no-op or land somewhere unexpected.
+
+Worked example for [conf/WS/ws-multi.yaml](../../../conf/WS/ws-multi.yaml): boot needs a relaxed wire (high latency, sync off) but every other phase keeps the per-leaf default. Each leaf hardcodes `latencies_ns_list: [100000]`, so a phase `_leaf_defaults` change wouldn't beat it — use `components.<name>` instead:
+
+```yaml
+boot:
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+```
+
+When a field isn't already hardcoded per-leaf, prefer `_leaf_defaults` for brevity:
+
+```yaml
+fw:
+  _leaf_defaults:
+    loadvm_name: init_warmed
+```
+
+## Override mechanisms (Python API)
+
+In addition to the YAML-level layers above, `build_experiment_context` accepts two structured overrides applied after the YAML resolves:
 
 1. **`overrides: list[str]`** — OmegaConf dotlists, applied via `apply_cli_overrides` before binding. Library-only; no CLI flag exposes it currently.
    ```python
@@ -76,20 +109,20 @@ Two ways to override values on top of a loaded YAML:
    build_experiment_context("foo.yaml", component_overrides={"experiment_context": {"core_count": 32}})
    ```
 
-Both layer on after `extends:` resolution and before any binding. Either can override `_target_`, `_scope_`, `_name_`, or any param.
+Both layer on after the phase overlay + `_base_:` resolution, and before any DI binding. Either can override `_target_`, `_scope_`, `_name_`, or any param.
 
 ## Final-value precedence (low → high; later wins)
 
 Putting all the YAML/DI/CLI tiers together, this is the order in which any `ExperimentContext` field's value is resolved:
 
 1. **Factory default** on `create_experiment_context`'s parameter.
-2. **`extends:` chain.** Parent doc loads first, child merges over it (recursive). `_apply_component_bases` is deferred to the outermost `load_config` call so a child's overrides reach into parent-defined components.
-3. **`_leaf_defaults` (via `_base_:`).** Each component with `_base_: _leaf_defaults` gets the merged `_leaf_defaults` block injected — child YAML's `_leaf_defaults: { memory_gb: 4 }` wins over parent's, and the result lands on every `_base_:`-using component.
-4. **Per-component overrides** in the component's own block (e.g. `experiment_context_node_0.loadvm_name`).
-5. **Command-scoped section: top-level `<func_name>: { ... }`** (where `<func_name>` is the wrapped Typer command's Python name — `fw`, `run_idx`, `partition_cleanup`). Applied by `data_class_wrap` only when that command runs; gets merged into every component matching the factory `_target_`. Lets one YAML drive multiple commands without forking files. See [typer_inputs/config_wrapper.py](../../../typer_inputs/config_wrapper.py).
-6. **CLI flags** (`--memory-gb 8`, `--core-count 16`, …) — auto-generated by `data_class_wrap` per factory param. Wins over everything.
+2. **`extends:` chain** — recursive deep-merge with the child winning at every level (including `_leaf_defaults` and any other top-level base block). Resolved first, before anything else.
+3. **Phase overlay** — top-level `<func_name>: { ... }` block, popped and deep-merged onto cfg by `_apply_phase_overlay` when the matching command runs. Two recognised forms inside the block: `_leaf_defaults: { ... }` (rule-level — flows through `_base_:` to every component) and `components: { <name>: { ... } }` (per-component — wins over `_base_` AND over per-leaf hardcoded fields). Flat-key forms are rejected.
+4. **`_leaf_defaults` (via `_base_:`)** — each component with `_base_: _leaf_defaults` gets the (possibly phase-modified) base merged underneath via `merge(<base>, comp)` so component fields still win. Resolution happens once at the outermost `load_config` call, after the phase overlay.
+5. **Per-component hardcoded values** in the component's own block (e.g. `experiment_context_node_0.loadvm_name`). Win over `_base_` because OmegaConf.merge keeps the component's keys on top.
+6. **CLI flags** (`--memory-gb 8`, `--core-count 16`, …) — auto-generated by `data_class_wrap` per factory param. Wins over everything via the structured `component_overrides` path.
 
-If a factory-required param has no value from any tier → `typer.BadParameter`. The check inside `data_class_wrap` aggregates yaml_keys (component block + `<func_name>` block) and CLI keys, so the error is consistent across pure-CLI / pure-YAML / mixed.
+If a factory-required param has no value from any tier → `typer.BadParameter`. The check inside `data_class_wrap` reads the **fully resolved** group component (after extends + phase overlay + `_base_`) plus CLI keys, so the error is consistent across pure-CLI / pure-YAML / mixed and stays correct when the phase overlay introduces a field via `_leaf_defaults`.
 
 ## Adding a new component
 
@@ -107,7 +140,8 @@ In both cases, also add `Annotated[T, Field(description="...")] = default` to th
 ## Key files
 
 - [dep_injection/builder.py](../../../dep_injection/builder.py) — `build_experiment_context`. Top-level entry; small.
-- [dep_injection/config_loader.py](../../../dep_injection/config_loader.py) — `load_config` (recursive `extends:`) and `apply_cli_overrides`.
+- [dep_injection/config_loader.py](../../../dep_injection/config_loader.py) — `load_config` (extends → phase overlay → `_base_:`), `_apply_phase_overlay`, `_apply_component_bases`, `apply_cli_overrides`.
 - [dep_injection/di_loader.py](../../../dep_injection/di_loader.py) — `ConfigDrivenModule`, `find_typed_deps`, `get_return_type`, `_unwrap_optional`/`_unwrap_list`. The real engine.
 - [commands/config.py:467](../../../commands/config.py#L467) — `create_experiment_context`, the canonical factory.
 - [conf/](../../../conf/) — example YAMLs.
+- [tests/test_dep_injection_phase.py](../../../tests/test_dep_injection_phase.py) — unit tests that pin the phase-overlay precedence (rule-level / per-component / flat-key rejection / extends-chain merge).

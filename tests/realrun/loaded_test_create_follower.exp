@@ -202,6 +202,14 @@ send "\003"
 set timeout $BUDGET_PROMPT_S
 expect -re {[\$#] +}
 
+# Kill the 1ms ping BEFORE master fires savevm — otherwise loaded-test snapshot
+# resumes the ping on every loadvm and wwt_recivied_callback aborts qemu under
+# sync=true / 100µs latency. See create_master.exp's matching pkill.
+send "pkill -f 'ping 192'\r"
+expect -re {[\$#] +}
+send "sleep 1\r"
+expect -re {[\$#] +}
+
 # Touch our own at_first_echo flag — master polls for this before savevm.
 if {[catch {set f [open $my_at_first_echo_flag w]; close $f} err]} {
     puts "WARN: could not write $my_at_first_echo_flag: $err"

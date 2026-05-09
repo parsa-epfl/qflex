@@ -8,10 +8,11 @@ from .di_loader import ConfigDrivenModule
 
 def build_experiment_context(
     config_path: str,
+    cmd_name: str | None = None,
     overrides: list[str] | None = None,
     component_overrides: dict[str, dict] | None = None,
 ) -> ExperimentContext:
-    cfg = load_config(config_path)
+    cfg = load_config(config_path, cmd_name=cmd_name)
     cfg = apply_cli_overrides(cfg, overrides or [])
     if component_overrides:
         cfg = OmegaConf.merge(

@@ -221,6 +221,16 @@ if {[catch {set f [open $my_at_first_echo_flag w]; close $f} err]} {
 wait_for_file $follower_first_echo $BUDGET_CHECKPOINTING_S
 puts "saw follower's first-echo flag: $follower_first_echo"
 
+# --- 4b. Kill the 1ms ping BEFORE savevm -----------------------------------
+# Otherwise loaded-test snapshot has `ping -i 0.001 -c 1000000` running, which
+# resumes on every loadvm and immediately blasts the PDES wire under sync=true /
+# 100µs latency — wwt_recivied_callback aborts qemu before the load-side .exp
+# can type its first command. Killing here makes the snapshot clean.
+send "pkill -f 'ping 192'\r"
+expect -re {[\$#] +}
+send "sleep 1\r"
+expect -re {[\$#] +}
+
 # --- 5. savevm loaded-test via the monitor ---------------------------------
 
 set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]

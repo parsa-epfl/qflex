@@ -111,19 +111,28 @@ def data_class_wrap(target: Callable, *, name: str):
     Final-value precedence for any field of `target` (low → high; later wins):
 
       1. Factory default (`target`'s parameter default).
-      2. The YAML's `extends:` chain — recursive merge of parent docs.
-      3. The component's `_base_:` resolution against `_leaf_defaults`
-         (or whatever top-level base it points at). Applied once, at the
-         outermost `load_config` call, so `_leaf_defaults` overrides in
-         child YAMLs propagate into components defined in parent YAMLs.
-      4. The component's own per-leaf `experiment_context*: { ... }` block
-         (e.g. `experiment_context_node_0`'s explicit overrides).
-      5. **Command-scoped section: top-level `<func_name>: { ... }` block
-         in the YAML.** Only applied when this command runs (matched by
-         the wrapped function's Python name — `fw`, `run_idx`,
-         `partition_cleanup`, etc.). Overrides every component matching
-         `target`'s `_target_`. Use this to keep one YAML across multiple
-         pipeline phases instead of forking a YAML per command.
+      2. The YAML's `extends:` chain — recursive deep-merge of parent docs;
+         the child wins at every level (including `_leaf_defaults` and any
+         other top-level base block).
+      3. **Phase overlay: top-level `<func_name>: { ... }` block.** Only
+         applied when this command runs (matched by the wrapped function's
+         Python name — `fw`, `run_idx`, `partition_cleanup`, etc.). The
+         block mirrors the main YAML's shape; the supported targets are
+         `_leaf_defaults: {...}` (rule-level — propagates to every
+         component using `_base_:`) and `components: {<name>: {...}}`
+         (per-component, scoped strictly to the named component, so e.g.
+         `experiment_context_node_1` can be overridden without touching
+         the group). Flat-key forms like `boot: { latencies_ns_list: [...] }`
+         are rejected — write `boot: { _leaf_defaults: {...} }` or
+         `boot: { components: {experiment_context: {...}} }` instead.
+      4. The component's `_base_:` resolution against the (possibly
+         phase-modified) `_leaf_defaults` — applied once at the outermost
+         `load_config` call, AFTER the phase overlay so its `_leaf_defaults`
+         changes propagate.
+      5. The component's own per-leaf `experiment_context*: { ... }` block
+         (e.g. `experiment_context_node_0`'s explicit overrides). Wins
+         over `_base_` because OmegaConf.merge keeps the component's keys
+         on top of the merged base.
       6. CLI flag the user explicitly passed (`--core-count`, `--memory-gb`, …).
 
     At call time:
@@ -183,29 +192,21 @@ def data_class_wrap(target: Callable, *, name: str):
                     cli_overrides[n] = v
 
             yaml_keys: set[str] = set()
-            cmd_overrides: dict = {}
+            cfg = None
             if config_path:
                 from dep_injection.config_loader import load_config
                 from dep_injection.di_loader import RESERVED_KEYS
-                cfg = load_config(config_path)
+                # Resolve everything the YAML can supply (extends → phase
+                # overlay → _base_) so missing-flag detection sees the same
+                # field set the DI graph will. The phase block can add fields
+                # via `_leaf_defaults: {...}` which propagate into the group
+                # component when its `_base_:` is resolved.
+                cfg = load_config(config_path, cmd_name=cmd_name)
                 comp = cfg.get("components", {}).get(name)
                 if comp is not None:
                     yaml_keys = {k for k in comp.keys() if k not in RESERVED_KEYS}
                     deps = comp.get("_deps_") or {}
                     yaml_keys.update(deps.keys())
-
-                # Command-scoped overrides: top-level `<func_name>: { ... }`
-                # block in the YAML applies ONLY when this command runs and
-                # replaces the equivalent fields from the extends chain /
-                # `_leaf_defaults` / per-component `experiment_context` block.
-                # CLI flags still win over these. See data_class_wrap docstring
-                # for the full precedence order.
-                cmd_section = cfg.get(cmd_name)
-                if cmd_section is not None:
-                    cmd_overrides = {
-                        k: v for k, v in cmd_section.items() if k not in RESERVED_KEYS
-                    }
-                    yaml_keys.update(cmd_overrides.keys())
 
             provided = cli_overrides.keys() | yaml_keys
             missing = target_required_param_names - provided
@@ -220,18 +221,17 @@ def data_class_wrap(target: Callable, *, name: str):
 
             if config_path:
                 from dep_injection.builder import build_experiment_context
-                # CLI > command-section > rest of the YAML chain.
-                combined_overrides = {**cmd_overrides, **cli_overrides}
                 comp_overrides = None
-                if combined_overrides:
+                if cli_overrides:
                     target_path = f"{target.__module__}.{target.__qualname__}"
                     comp_overrides = {
-                        cn: combined_overrides
+                        cn: cli_overrides
                         for cn, c in cfg.get("components", {}).items()
                         if c.get("_target_") == target_path
                     }
                 kwargs[name] = build_experiment_context(
                     config_path,
+                    cmd_name=cmd_name,
                     component_overrides=comp_overrides,
                 )
             else:

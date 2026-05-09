@@ -2,25 +2,33 @@ from pathlib import Path
 from omegaconf import OmegaConf, DictConfig
 
 
-def load_config(path: str | Path) -> DictConfig:
-    """Load YAML with `extends:` inheritance (recursive); resolve `_base_:`.
+def load_config(path: str | Path, cmd_name: str | None = None) -> DictConfig:
+    """Load YAML and resolve it in this order:
 
-    `_base_` resolution runs ONCE at the outermost call, after the full extends
-    chain has been merged. This is what lets a child YAML override a top-level
-    block (e.g. `_leaf_defaults: { memory_gb: 4 }`) and have that override
-    propagate into every component that uses `_base_: _leaf_defaults` —
-    including components defined in a parent YAML. Eager resolution at every
-    level (the previous behaviour) bakes the parent's `_leaf_defaults` values
-    into components before the child's override gets a chance to merge.
+      1. **Recursive `extends:` merge** — the full chain is collapsed into a
+         single doc via deep merge, with the child winning at every level
+         (including `_leaf_defaults` and any other top-level base block).
+      2. **Phase overlay** (`cfg[cmd_name]`, optional) — popped and deep-
+         merged onto the doc with the same semantics. The block is shaped
+         like a sub-YAML, so callers drive changes via `_leaf_defaults: {...}`
+         (rule-level, propagates to every component using `_base_:`) or
+         `components: {<name>: {...}}` (per-component). Components keep their
+         `_base_:` references through this step.
+      3. **`_base_:` resolution** — each component is replaced by
+         `merge(<base>, comp)` so component fields still win over the base.
+
+    CLI flags layer on top via the wrapper.
     """
-    return _apply_component_bases(_load_raw(Path(path).resolve()))
+    cfg = _load_raw(Path(path).resolve())
+    if cmd_name is not None:
+        cfg = _apply_phase_overlay(cfg, cmd_name)
+    return _apply_component_bases(cfg)
 
 
 def _load_raw(path: Path) -> DictConfig:
     """Load YAML + merge `extends:` chain WITHOUT resolving `_base_:`. Components
     keep their `_base_:` references through the whole chain so the outermost
-    `_apply_component_bases` sees the fully-merged `_leaf_defaults` (or whatever
-    other top-level base block was overridden along the way)."""
+    `_apply_component_bases` sees the fully-merged top-level base blocks."""
     cfg = OmegaConf.load(path)
     parent_name = cfg.pop("extends", None)
     if parent_name is None:
@@ -31,6 +39,35 @@ def _load_raw(path: Path) -> DictConfig:
             f"{path.name} extends '{parent_name}' but {parent_path} does not exist"
         )
     return OmegaConf.merge(_load_raw(parent_path), cfg)
+
+
+def _apply_phase_overlay(cfg: DictConfig, cmd_name: str) -> DictConfig:
+    """Pop `cfg[cmd_name]` (if present) and deep-merge it onto cfg before
+    `_base_:` resolution. The phase block mirrors the main YAML's shape:
+    `_leaf_defaults: {...}` updates the leaf base (and propagates to every
+    component using `_base_: _leaf_defaults`); `components: {<name>: {...}}`
+    updates a specific component before its `_base_:` is resolved.
+
+    Top-level keys in the phase block must already exist in cfg (or be
+    `components`); flat-key forms like `boot: { latencies_ns_list: [...] }`
+    are rejected so they don't silently no-op.
+    """
+    phase = cfg.pop(cmd_name, None)
+    if phase is None:
+        return cfg
+    if not isinstance(phase, DictConfig):
+        raise ValueError(
+            f"phase section '{cmd_name}:' must be a mapping, got {type(phase).__name__}"
+        )
+    unknown = [k for k in phase.keys() if k != "components" and k not in cfg]
+    if unknown:
+        raise ValueError(
+            f"phase section '{cmd_name}:' has unrecognised top-level key(s) "
+            f"{unknown}; the phase block mirrors the main YAML — use "
+            f"'_leaf_defaults: {{...}}' (rule-level), 'components: {{<name>: {{...}}}}' "
+            f"(per-component), or any other top-level base block already defined."
+        )
+    return OmegaConf.merge(cfg, phase)
 
 
 def _apply_component_bases(cfg: DictConfig) -> DictConfig:
