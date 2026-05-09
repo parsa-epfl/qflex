@@ -18,6 +18,24 @@
 # finalise before `quit` tears down PDES. See the `expect-scripts` skill.
 #
 # For SINGLE-NODE setups, use load_savevm_loaded.exp instead.
+#
+# === IN-IMAGE WORKLOAD SCRIPT REFERENCE — ./server.sh ========================
+# Captured from `cat ./server.sh` in the post-loadvm guest:
+#
+#   #!/bin/sh
+#
+#   docker run -it --name web_search_server --rm \
+#     -v $(pwd)/index_14GB:/download/index_14GB \
+#     --net host \
+#     --cpuset-cpus=0-7 \
+#     cloudsuite/web-search:server 14g 1
+#
+# We rewrite this file in-guest before launching (heredoc further down) so
+# --cpuset-cpus=0-7 becomes --cpuset-cpus=0-0 — matches our -smp 1 guest. If
+# you need to change anything about server.sh in this run, edit the heredoc
+# below — don't edit the in-image baked file (the change wouldn't survive a
+# fresh loadvm anyway, since the qcow2 owns the canonical copy).
+# =============================================================================
 
 set timeout 900
 
@@ -25,6 +43,7 @@ set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
 set BUDGET_CHECKPOINTING_S 1800
+set BUDGET_WORKLOAD_INIT_S 2700   ; # wait for first server-side NodeDataChanged: ~45 min under PDES sync=true on -smp 1
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
@@ -32,6 +51,23 @@ set exp_folder   $env(EXP_FOLDER)
 
 catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
+
+# Three load-phase sentinels under the group folder (parent of $exp_folder).
+# Master writes load_loaded_server_done.flag (after first savevm) and
+# load_done.flag (after second savevm); follower writes load_ramp_up_done.flag.
+# Master clears its OWN flags at startup so re-runs don't see stale signals.
+#
+# TODO: migrate these ad-hoc sentinels into the executor's existing
+# _sentinel_path framework (commands/executer.py:_sentinel_basename) so they're
+# named, owned, and cleaned up consistently with the boot-phase
+# .started/.done/.killed_by_peer sentinels. The `load_` prefix here is a
+# stopgap to avoid name collisions with future sentinels.
+set group_folder                  [file dirname $exp_folder]
+set load_loaded_server_done_flag  "$group_folder/load_loaded_server_done.flag"
+set load_ramp_up_done_flag        "$group_folder/load_ramp_up_done.flag"
+set load_done_flag                "$group_folder/load_done.flag"
+catch {file delete -force $load_loaded_server_done_flag}
+catch {file delete -force $load_done_flag}
 
 proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
@@ -74,6 +110,42 @@ proc quit_qemu {monitor_port} {
             catch {expect -i $sid eof}
         }
     }
+}
+
+# Poll a file for a literal substring with a wall-clock budget. min_count
+# lets a single Load.log host multiple savevm rounds — pass 2 on the second
+# call so we don't match the first savevm's still-present log 7. Used to
+# wait for per-node savevm to complete via qemu's `savevm log 7` printf
+# (last thing save_snapshot() emits before returning).
+proc wait_for_substring {path needle budget_seconds {min_count 1}} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]
+            set content [read $fh]
+            close $fh
+            set count 0
+            set start 0
+            while {[set idx [string first $needle $content $start]] >= 0} {
+                incr count
+                set start [expr {$idx + 1}]
+            }
+            if {$count >= $min_count} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle did not reach count ${min_count} in $path within ${budget_seconds}s"
+}
+
+# Poll for a file's existence with a wall-clock budget. Used to wait for the
+# peer to write a sentinel.
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
 }
 
 # --- 1. Connect serial + nudge for shell prompt ------------------------------
@@ -198,48 +270,137 @@ expect {
 
 sleep 5
 
-# TEMP: kick off the workload server in the background so the script can
-# continue. & detaches; the prompt returns immediately.
-send "./server.sh &\r"
+# TEMP: rewrite the in-image ./server.sh in-place so --cpuset-cpus matches our
+# -smp 1 guest. Image's baked server.sh asks for cpus 0-7; docker rejects it
+# because only CPU 0 is available. Single-quoted heredoc delimiter so $(pwd)
+# is preserved literal — gets expanded at runtime, not at write-time.
+send "cat > ./server.sh <<'WRITE_SERVER_EOF'\r"
+send "#!/bin/sh\r"
+send "\r"
+send "docker run -it --name web_search_server --rm \\\r"
+send "  -v \$(pwd)/index_14GB:/download/index_14GB \\\r"
+send "  --net host \\\r"
+send "  --cpuset-cpus=0-0 \\\r"
+send "  cloudsuite/web-search:server 14g 1\r"
+send "WRITE_SERVER_EOF\r"
 expect {
-    timeout { puts "ERROR: ./server.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: writing ./server.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "chmod +x ./server.sh\r"
+expect {
+    timeout { puts "ERROR: chmod ./server.sh timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}
 }
 
 sleep 5
+send "cat ./server.sh\r"
+sleep 5
 
-# TEMP: skip checkpointing for now — both leaves stay in a forever loop so the
-# user can poke the running guests by hand (and Ctrl+C ./qflex when done).
-# Restore the savevm/quit block below when ready to re-enable checkpointing.
-puts "master: ping + server up; entering forever loop (no savevm). Ctrl+C ./qflex to stop."
-while {1} {
-    sleep 60
+
+# TEMP: run the workload server in the FOREGROUND so its output streams into
+# qemu's serial chardev logfile uninterrupted (no `&`, no shell prompt return
+# to swallow lines). server.sh holds the guest shell until it exits or the
+# user Ctrl+C's ./qflex.
+send "./server.sh\r"
+
+# Wait for the first NodeDataChanged out of server.sh's solr/elasticsearch
+# init. Under PDES sync=true on -smp 1 the cloudsuite web-search server's
+# index load can take ~45 min wall-clock — use BUDGET_WORKLOAD_INIT_S so a
+# slow-but-progressing run isn't aborted, while a genuinely stuck server
+# (e.g. docker rejected the cmdline early) still fails fast eventually.
+# Reading on the existing serial spawn (server.sh is the foreground process
+# there).
+puts "master: server.sh launched; waiting for first 'NodeDataChanged' (~45 min budget)..."
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: never saw 'NodeDataChanged' from server.sh within ${BUDGET_WORKLOAD_INIT_S}s"; quit_qemu $monitor_port; exit 1 }
+    -re {NodeDataChanged}
+}
+puts "master: saw first 'NodeDataChanged'; settling 10 s host time before savevm..."
+sleep 10
+
+# Open a SEPARATE spawn on the monitor port to issue savevm. server.sh stays
+# running on the serial spawn — different chardev, no interference.
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+set timeout $BUDGET_DEFAULT_S
+expect {
+    timeout { puts "ERROR: monitor prompt timed out before savevm"; exit 1 }
+    "(qemu) "
 }
 
-# --- BELOW IS DISABLED FOR THE TEMP DEBUG MODE -------------------------------
-# catch {close -i $serial_sid}
-# catch {wait -i $serial_sid}
-#
-# # --- 2. savevm loaded via the monitor --------------------------------------
-# set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
-# set spawn_id $monitor_sid
-# set timeout $BUDGET_DEFAULT_S
-# expect {
-#     timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
-#     "(qemu) "
-# }
-# set timeout $BUDGET_CHECKPOINTING_S
-# send "delvm loaded\r"
-# expect {
-#     timeout { puts "WARN: delvm didn't return; continuing anyway" }
-#     "(qemu) "
-# }
-# send "savevm loaded\r"
-# expect {
-#     timeout { puts "ERROR: savevm didn't return"; exit 1 }
-#     "(qemu) "
-# }
-# sleep 5
-# send "quit\r"
-# catch {expect eof}
-# exit 0
+# delvm best-effort idempotency — savevm refuses to overwrite.
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm loaded-server\r"
+expect {
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm loaded-server\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return"; exit 1 }
+    "(qemu) "
+}
+
+# (qemu) prompt comes back AFTER save_snapshot returns, but its log 7 printf
+# goes through a different stream (qemu's stdout → Load.log via bash
+# redirect, vs the monitor chardev). Wait explicitly for log 7 to land in
+# Load.log so we're certain the per-node save finalised before we touch the
+# sentinel.
+puts "master: savevm command returned; polling Load.log for 'savevm log 7'..."
+wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "master: saw 'savevm log 7' — distributed savevm-loaded-server finalised."
+
+# Write the first load-phase sentinel: "master finished savevm loaded-server".
+# Follower's wait_for_file will pick this up and launch ./client.sh.
+if {[catch {set f [open $load_loaded_server_done_flag "w"]; close $f} err]} {
+    puts "WARN: could not write $load_loaded_server_done_flag: $err"
+} else {
+    puts "master: wrote sentinel: $load_loaded_server_done_flag"
+}
+
+# --- 3. Wait for follower's ramp-up sentinel ---------------------------------
+# Follower writes load_ramp_up_done.flag after seeing "Ramp up completed" in
+# client.sh's output. Once it's there, the workload is in steady state and we
+# can capture a `loaded` snapshot of the running benchmark.
+puts "master: waiting for follower to write $load_ramp_up_done_flag (client ramp-up)..."
+wait_for_file $load_ramp_up_done_flag $BUDGET_WORKLOAD_INIT_S
+puts "master: saw follower's ramp-up sentinel; running second savevm 'loaded'..."
+
+# --- 4. Second savevm: "loaded" ---------------------------------------------
+# spawn_id is still $monitor_sid from the first savevm — reuse it.
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm loaded\r"
+expect {
+    timeout { puts "WARN: delvm loaded didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm loaded\r"
+expect {
+    timeout { puts "ERROR: savevm loaded didn't return"; exit 1 }
+    "(qemu) "
+}
+
+# Confirm the SECOND log 7 — Load.log already contains the first one from
+# `savevm loaded-server`, so we wait for count >= 2.
+puts "master: savevm loaded returned; polling Load.log for second 'savevm log 7'..."
+wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S 2
+puts "master: saw second 'savevm log 7' — savevm-loaded finalised."
+
+# 10 s host settle, then write the final sentinel.
+sleep 10
+if {[catch {set f [open $load_done_flag "w"]; close $f} err]} {
+    puts "WARN: could not write $load_done_flag: $err"
+} else {
+    puts "master: wrote final sentinel: $load_done_flag"
+}
+
+# --- 5. Quit master qemu cleanly --------------------------------------------
+# spawn_id is still the monitor — send `quit` directly. Master's `quit` will
+# cascade END_OF_EMULATION to the follower's qemu via PDES; follower's script
+# wakes from its wait_for_file load_done.flag and quits its own qemu next.
+puts "master: closing master qemu via monitor 'quit'."
+send "quit\r"
+catch {expect eof}
+exit 0

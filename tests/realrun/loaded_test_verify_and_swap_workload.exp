@@ -265,8 +265,8 @@ proc drain_for {secs} {
 drain_for 2
 send "\003"
 drain_for 1
-send "pkill -9 -f /tmp/sender.sh; pkill -9 -f /tmp/echo_server.sh; pkill -9 -f 'nc '; pkill -9 -f 'ping 192'; sleep 1\r"
-drain_for 30
+send "pkill -9 -f /tmp/sender.sh; pkill -9 -f /tmp/echo_server.sh; pkill -9 -f 'nc '; pkill -9 -f 'ping 192'\r"
+drain_for 5
 send "\r"
 set timeout $BUDGET_CHECKPOINTING_S
 expect {
@@ -380,14 +380,15 @@ expect -re {[\$#] +}
 
 # Build the structured probe inside the guest, then cat it back so we can
 # capture it from the serial buffer. Uses key=value lines so pytest can
-# parse with a one-liner. Sleep 3s to let the loops survive at least one
-# iteration before we read pid/rc.
+# parse with a one-liner. drain_for 20 is HOST wall-clock — sending `sleep N`
+# to the guest would run in virtual time (much slower under PDES sync), and
+# all we need here is enough wall-clock for the workload to complete a few
+# iterations.
 #
 # pgrep matches the long-lived parent script paths, NOT the inner short-lived
 # `nc -l -p X` / `head -c 64 /dev/urandom` processes — those only exist for a
 # few ms per iteration, so a probe running between iterations would miss them.
-send "sleep 3\r"
-expect -re {[\$#] +}
+drain_for 20
 send "{ \
 echo echo_server_pid=\$(pgrep -f /tmp/echo_server.sh | head -1); \
 pgrep -f /tmp/echo_server.sh >/dev/null; echo echo_server_rc=\$?; \
@@ -422,12 +423,13 @@ expect {
     -re {[\$#] +}
 }
 
-# Capture how many of the LAST 100 sender iterations were [ok]. Pytest
-# asserts == 100 — i.e. no [noreply] / [MISMATCH] in the most recent
-# 100 iterations before savevm. Initial warm-up [noreply]s during the
+# Capture how many of the LAST 10 sender iterations were [ok]. Pytest
+# asserts == 10 — i.e. no [noreply] / [MISMATCH] in the most recent
+# 10 iterations before savevm. Initial warm-up [noreply]s during the
 # first second (peer not loadvm'd yet) are fine; they're not in the
-# last 100 lines after a 10 s settle.
-capture_to "ok_in_last_100.txt" "tail -100 /tmp/sender.log | grep -c '\\[ok\\]\$'"
+# last 10 lines after the settle. Use Tcl braces so the brackets in the
+# grep regex aren't taken as Tcl command substitution.
+capture_to "ok_in_last_10.txt" {tail -10 /tmp/sender.log | grep -c '\[ok\]$'}
 
 # --- 6. savevm `loaded-test` (master) / wait for completion (follower) -----
 

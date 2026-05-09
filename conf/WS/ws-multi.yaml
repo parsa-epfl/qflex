@@ -62,6 +62,8 @@ load:
 
 fw:
   components:
+    experiment_context:
+      sample_size: 500
     experiment_context_node_0:
       syncs_list: ["false"]
     experiment_context_node_1:

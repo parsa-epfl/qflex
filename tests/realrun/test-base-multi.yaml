@@ -11,3 +11,7 @@ _leaf_defaults:
   # multi-node tests do not consume `population_seconds` (boot/init-warm/
   # savevm-* read other fields).
   population_seconds: 1
+  # Use vanilla (timing) qemu instead of parallel-qemu. parallel-qemu's
+  # icount-based virtual-time path stalls so far behind wall-clock under
+  # PDES sync that even short drain windows take 10+ minutes.
+  is_parallel: false
