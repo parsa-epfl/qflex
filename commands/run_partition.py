@@ -28,12 +28,8 @@ class RunPartitionCommand(SimulationCommand):
     """
 
     def __init__(self,
-                 experiment_context: ExperimentContext,
-                 warming_ratio: int,
-                 measurement_ratio: int):
+                 experiment_context: ExperimentContext):
         self.experiment_context = experiment_context
-        self.detailed_warming_ratio = warming_ratio
-        self.measurement_ratio = measurement_ratio
         self.use_stdio = False
 
     def cmd(self) -> str:
@@ -87,8 +83,6 @@ class RunPartitionCommand(SimulationCommand):
         # coordination via the sentinel_dir we forward.
         inner = RunSinglePartitionCommand(
             exp,
-            self.detailed_warming_ratio,
-            self.measurement_ratio,
             use_stdio=self.use_stdio,
         )
         return inner.execute(to_stdio=to_stdio,

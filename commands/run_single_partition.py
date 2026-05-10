@@ -12,16 +12,12 @@ class RunSinglePartitionCommand(SequentialGroupExecutor, SimulationCommand):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 warming_ratio: int,
-                 measurement_ratio: int,
                  use_stdio: bool = True):
         # Init lean — children are built lazily in _build_children() so this
         # executor can be constructed before its partition snapshots exist
         # (true for the group case in multi-experiment dispatch).
         super().__init__([])
         self.experiment_context = experiment_context
-        self.detailed_warming_ratio = warming_ratio
-        self.measurement_ratio = measurement_ratio
         self.use_stdio = use_stdio
         self._assert_syncs_true()
 
@@ -54,8 +50,6 @@ class RunSinglePartitionCommand(SequentialGroupExecutor, SimulationCommand):
             children.append(
                 RunIdxCommand(
                     sub_ctx,
-                    self.detailed_warming_ratio,
-                    self.measurement_ratio,
                     use_stdio=self.use_stdio,
                 )
             )

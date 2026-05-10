@@ -10,24 +10,23 @@ class FunctionalWarming(SimulationCommand):
     """
 
     def __init__(self,
-                 experiment_context: ExperimentContext,
-                 sample_size: int):
+                 experiment_context: ExperimentContext):
         self.experiment_context = experiment_context
-        self.sample_size = sample_size
 
     def cmd(self) -> str:
         self._assert_syncs_true()
         # Build per-context derived state fresh so this method works whether
         # self.experiment_context was set at __init__ or mutated later (multi-experiment dispatch).
         parser = QemuCommonArgParser(self.experiment_context)
+        sample_size = self.experiment_context.sample_size
         sampling_interval = math.ceil(
-            (self.experiment_context.workload.population + self.sample_size - 1) / self.sample_size
+            (self.experiment_context.workload.population + sample_size - 1) / sample_size
         )
 
         fw_cmd = wrap_with_gdb(
             f"./qemu-system-aarch64 {parser.get_qemu_base_args()} "
             f"-plugin ../lib/libworm_cache.so,mode=warm,"
-            f"init_threshold={sampling_interval},interval={sampling_interval},count={self.sample_size}",
+            f"init_threshold={sampling_interval},interval={sampling_interval},count={sample_size}",
             self.experiment_context.use_gdb,
         )
         tock_command = " tock=$(($(date +%s%N) / 1000000)) "

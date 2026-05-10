@@ -121,6 +121,9 @@ class ExperimentContext(BaseModel):
     # TODO later we need to revisit if partition and idx are well suited to be part of the exp object
     partition_number: int = Field(default=-1, description="Partition number for this node, used for some qemu options.")
     partition_count: int = Field(default=16, description="Number of partitions the per-sampling-unit checkpoints are split into for parallel timing runs (driven by the `partition` phase). Same value is used downstream by `run-partition` to enumerate partitions.")
+    sample_size: int = Field(default=30, description="Number of sampling units the `fw` phase emits checkpoints for. Only the `fw` command consumes this; the timing-phase commands ignore it.")
+    warming_ratio: int = Field(default=2, description="Detailed-warming prefix length within each sampling unit, in units relative to `measurement_ratio` (each unit = 100k cycles). Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
+    measurement_ratio: int = Field(default=1, description="Measurement segment length within each sampling unit, in units relative to `warming_ratio`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
     idx: int = Field(default=-1, description="Index of the partition to run, used for some qemu options.")
     seed_image_name: str = Field(default='', description="Name of the seed image file to use in multi-node setup.")
     telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
@@ -534,6 +537,9 @@ def create_experiment_context(
     use_telnet_monitor: Annotated[bool, Field(description="Whether to use telnet monitor for QEMU instead of stdio.")] = False,
     partition_number: Annotated[int, Field(description="Partition number for the nodes to run things in parallel.")] = -1,
     partition_count: Annotated[int, Field(description="Number of partitions the per-sampling-unit checkpoints are split into for parallel timing runs.")] = 16,
+    sample_size: Annotated[int, Field(description="Number of sampling units the `fw` phase emits checkpoints for. Only the `fw` command consumes this; other phases ignore it.")] = 30,
+    warming_ratio: Annotated[int, Field(description="Detailed-warming prefix length within each sampling unit, in units relative to `measurement_ratio` (each unit = 100k cycles). Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 2,
+    measurement_ratio: Annotated[int, Field(description="Measurement segment length within each sampling unit, in units relative to `warming_ratio`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 1,
     idx: Annotated[int, Field(description="Index of the partition to run, used for some qemu options.")] = -1,
     pdes_net_devs: Annotated[Optional[List[str]], Field(description="List of network device models ('e1000' or 'virtio-net-pci') to use for each neighbor node in multi-node setup. Order matches neighbor_node_list.")] = None,
     sub_experiments: Annotated[Optional[List[ExperimentContext]], Field(description="Optional sub-experiments. If non-empty, this is a group node — leaf-level fields are inherited (e.g. via YAML extends) but unused, and the executor recurses into each sub-experiment in parallel.")] = None,
@@ -639,6 +645,9 @@ def create_experiment_context(
         use_telnet_monitor=use_telnet_monitor,
         partition_number=partition_number,
         partition_count=partition_count,
+        sample_size=sample_size,
+        warming_ratio=warming_ratio,
+        measurement_ratio=measurement_ratio,
         idx=idx,
         pdes_net_devs=pdes_net_devs,
         sub_experiments=sub_experiments,

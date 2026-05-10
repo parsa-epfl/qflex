@@ -508,7 +508,9 @@ class SimulationCommand(Executor):
 
     def _assert_syncs_true(self) -> None:
         exp = self.get_experiment()
-        if exp is None or not exp.syncs_list:
+        if exp is None:
+            return
+        if exp.syncs_list is None or len(exp.syncs_list) == 0 or len(exp.neighbor_node_list) == 0:
             return
         bad = [s for s in exp.syncs_list if s != "true"]
         assert not bad, (

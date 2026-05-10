@@ -30,6 +30,7 @@ class Boot(Executor):
         gdb_cmd = wrap_with_gdb(
             f"./qemu-system-aarch64 {parser.get_qemu_base_args()}",
             exp.use_gdb,
+            interactive_tmux=exp.interactive_tmux,
         )
 
         if not exp.interaction_script:

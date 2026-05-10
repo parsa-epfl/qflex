@@ -19,3 +19,18 @@ _leaf_defaults:
   image_name: root-ws.qcow2
   keep_experiment_unique: false
   use_image_directly: true
+  sample_size: 1000
+  warming_ratio: 2
+  measurement_ratio: 1
+  partition_count: 16
+
+
+
+run_idx:
+  _leaf_defaults:
+    partition_number: 0
+    idx: 0
+
+run_single_partition:
+  _leaf_defaults:
+    partition_number: 0

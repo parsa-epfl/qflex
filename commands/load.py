@@ -25,11 +25,12 @@ class Load(SimulationCommand):
             load_cmd = wrap_with_gdb(
                 f"./qemu-system-aarch64 {parser.get_qemu_base_args()}",
                 exp.use_gdb,
+                interactive_tmux=exp.interactive_tmux,
             )
         else:
             load_cmd = (
                 f"./vanilla-qemu-system-aarch64 "
-                f"{parser.get_qemu_base_args()}"
+                f"{parser.get_qemu_base_args()} < /dev/null"
             )
 
         if not exp.interaction_script:

@@ -240,11 +240,8 @@ def mock_mounting_folder(tmp_path):
     return mf
 
 
-@pytest.fixture
-def multi_context(mock_mounting_folder):
-    """Build the dc-multi.yaml ExperimentContext rooted at the temp mounting folder."""
-    from dep_injection.builder import build_experiment_context
-    overrides = {
+def _multi_context_overrides(mock_mounting_folder):
+    return {
         "experiment_context": {
             "mounting_folder": mock_mounting_folder,
             "image_folder": mock_mounting_folder,
@@ -258,8 +255,30 @@ def multi_context(mock_mounting_folder):
             "image_folder": mock_mounting_folder,
         },
     }
+
+
+@pytest.fixture
+def multi_context(mock_mounting_folder):
+    """Build the dc-multi.yaml ExperimentContext rooted at the temp mounting folder."""
+    from dep_injection.builder import build_experiment_context
     return build_experiment_context("conf/DC/dc-multi.yaml",
-                                    component_overrides=overrides)
+                                    component_overrides=_multi_context_overrides(mock_mounting_folder))
+
+
+@pytest.fixture
+def multi_context_for_phase(mock_mounting_folder):
+    """Factory: returns build_experiment_context(...) with the phase overlay
+    applied for the given cmd_name. Use this in tests that need to exercise
+    per-phase YAML knobs (sample_size, warming_ratio, measurement_ratio, ...)
+    that production reaches via the loader's _apply_phase_overlay path."""
+    from dep_injection.builder import build_experiment_context
+    overrides = _multi_context_overrides(mock_mounting_folder)
+
+    def _build(cmd_name: str):
+        return build_experiment_context("conf/DC/dc-multi.yaml",
+                                        cmd_name=cmd_name,
+                                        component_overrides=overrides)
+    return _build
 
 
 # ============================================================================

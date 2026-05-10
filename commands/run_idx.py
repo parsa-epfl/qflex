@@ -7,12 +7,8 @@ class RunIdxCommand(SimulationCommand):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 warming_ratio: int,
-                 measurement_ratio: int,
                  use_stdio: bool = True):
         self.experiment_context = experiment_context
-        self.detailed_warming_ratio = warming_ratio
-        self.measurement_ratio = measurement_ratio
         self.use_stdio = use_stdio
 
     def get_err_file_address(self):
@@ -26,8 +22,8 @@ class RunIdxCommand(SimulationCommand):
         # Build per-context derived state fresh — see Executor refactor notes.
         # TODO turn this into a param, for now each ratio represents 100000 cycles
         ratio_coefficient = 100000
-        total_cycles = ((self.detailed_warming_ratio * ratio_coefficient)
-                        + (self.measurement_ratio * ratio_coefficient)) + 1
+        total_cycles = ((self.experiment_context.warming_ratio * ratio_coefficient)
+                        + (self.experiment_context.measurement_ratio * ratio_coefficient)) + 1
         idx = self.experiment_context.idx
         vanilla_parser = VanillaQemuArgParser(self.experiment_context, idx, total_cycles,
                                               use_stdio=self.use_stdio)
@@ -57,7 +53,7 @@ class RunIdxCommand(SimulationCommand):
             ]
         timing_command = f"""
             gdb -batch -ex run -ex "python try: gdb.execute('bt')\nexcept: pass" -return-child-result --args ../vanilla-qemu-system-aarch64 \
-            {vanilla_parser.get_qemu_base_args()} {output}
+            {vanilla_parser.get_qemu_base_args()} {output} < /dev/null
         """
         prints = []
         if not self.use_stdio:

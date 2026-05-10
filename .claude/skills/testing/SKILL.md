@@ -130,6 +130,20 @@ Tests must drive the code we ship — never duplicate it.
 - **Never invoke a binary directly from a test or fixture** to "probe" capabilities (e.g. running `qemu-system-aarch64 -netdev pdes,...,latencyns=...` to gate a skip). That duplicates parsing/wiring logic in a place that can disagree with the real code path — and when it does disagree, the test silently lies. If a binary is stale, the *real* run will fail with the *real* error message; that's the signal you want. Gate skips on env vars, docker availability, or repo state — not on subprocess outputs of the very thing you're testing.
 - The same rule applies to "test helpers" that build commands by hand: if a helper duplicates what `cmd()` would emit, it'll drift from the real implementation. Either call the class or assert against its `cmd()` output.
 
+## Test environment hides tty-input bugs
+
+Real-run tests use [`_exec_in_container`](../../../tests/conftest.py) — `subprocess.run(["./dep", "exec", ...], capture_output=True, text=True, ...)` — and `./dep exec` calls `docker exec` **without `-t`** (see `commands/docker.py:DockerExec.cmd`, no `-t` flag). The container-side bash that runs `./qflex <phase>` therefore inherits stdin = pipe, NOT a tty. Any qemu invocation that calls `tcsetattr` on stdin (default `-serial mon:stdio` for phases without `interaction_script` / `interactive_tmux`, including init-warm / fw / run-*) silently returns `ENOTTY` here — no SIGTTOU, no hang, tests pass.
+
+Production users running the same `./qflex` from a `./dep start-docker` interactive shell (`docker run -it /bin/bash`) inherit a real `pts/0` tty, and qemu's `tcsetattr` on a background-process-group + foreground-tty raises **SIGTTOU**, gdb traps it, run hangs.
+
+The asymmetry means **a tty-input bug in qemu's wiring shows up only in production, never in the test suite**. The fix lives on the production side (we redirect qemu's stdin from `/dev/null`):
+
+- `commands/qemu.py:wrap_with_gdb` — appends ` < /dev/null` to its output unless `interactive_tmux=True`. Boot/load/init-warm/fw all route through this.
+- `commands/run_idx.py` — appends `< /dev/null` directly to its inline `gdb -batch ... vanilla-qemu-system-aarch64 ...` cmdline (which doesn't go through `wrap_with_gdb`). Covers run-idx + run-single-partition + run-partition since the latter two delegate to `RunIdxCommand`.
+- `commands/load.py` vanilla branch — same direct append for the bare `./vanilla-qemu-system-aarch64` invocation.
+
+When you add a new phase / new qemu cmdline shape, redirect stdin from `/dev/null` unless the phase is genuinely interactive (Path B / `interactive_tmux=true` only). **Don't rely on the test container's lack of a tty for correctness** — the bug just resurfaces in production. The `commands/multinode.py` debug helper is the one intentional exception (kept interactive for one-off poking).
+
 ## Adding a new test
 
 For a new pipeline phase (or any executor that follows the dispatch contract):

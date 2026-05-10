@@ -2,13 +2,24 @@ import os
 from commands.config import ExperimentContext
 
 
-def wrap_with_gdb(qemu_invocation: str, use_gdb: bool) -> str:
-    if not use_gdb:
-        return qemu_invocation
+def wrap_with_gdb(qemu_invocation: str, use_gdb: bool,
+                  interactive_tmux: bool = False) -> str:
     # `set confirm off` replaces the old `yes | gdb` shutdown-prompt workaround:
     # works for non-interactive runs and doesn't flood gdb with "y" when a user
     # Ctrl+Cs inside an interactive tmux pane.
-    return f"gdb -ex 'set confirm off' -ex run --args {qemu_invocation}"
+    #
+    # `< /dev/null` keeps qemu's stdin off the parent's tty so:
+    #   - tcsetattr in a stdio-serial setup (init-warm / fw / run-* / Path A)
+    #     returns ENOTTY instead of raising SIGTTOU on a background-pgid'd qemu.
+    #   - any gdb-trapped signal (e.g. quit-time SIGSEGV in pdes_comm_send) hits
+    #     a (gdb) prompt that reads EOF on /dev/null → gdb exits cleanly →
+    #     bash unwinds.
+    # Skip the redirect when interactive_tmux is True — Path B routes the tmux
+    # pane's pty into qemu's stdin so the user can type into the serial console.
+    redirect = "" if interactive_tmux else " < /dev/null"
+    if not use_gdb:
+        return f"{qemu_invocation}{redirect}"
+    return f"gdb -ex 'set confirm off' -ex run --args {qemu_invocation}{redirect}"
 
 
 class QemuCommonArgParser:

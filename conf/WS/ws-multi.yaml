@@ -60,11 +60,23 @@ load:
       loadvm_name: booted
 
 
+initialize:
+  components:
+    experiment_context_node_0:
+      loadvm_name: loaded
+    experiment_context_node_1:
+      loadvm_name: loaded
+
+
+# TODO see if you have to pass in sample size 3 times or not
 fw:
   components:
     experiment_context:
-      sample_size: 500
+      loadvm_name: init_warmed
     experiment_context_node_0:
-      syncs_list: ["false"]
+      loadvm_name: init_warmed
     experiment_context_node_1:
-      syncs_list: ["false"]
+      loadvm_name: init_warmed
+
+
+

@@ -481,6 +481,7 @@ def analyze_sampling_unit(result_folders: list[str], sampling_unit_size: int, in
     console.print(f"[green]Analyzing sampling unit at index: {index}[/green]")
     
     # Check if the index is valid
+    print(f"[green]Checking if index {index} is within bounds of {instruction_data_u.shape[1]} sampling units...[/green]")
     if index >= instruction_data_u.shape[1]:
         console.print(f"[red]Error: Index {index} is out of bounds. Maximum index is {instruction_data_u.shape[1] - 1}[/red]")
         sys.exit(1)
@@ -489,7 +490,9 @@ def analyze_sampling_unit(result_folders: list[str], sampling_unit_size: int, in
     interval_instruction_u_data = instruction_data_u[:, index, :]  # Shape: [snapshots, cores]
     
     # Calculate IPC for each snapshot and core
+    # TODO this is hard coded !!! this needs to be fixed.
     interval_ipc_u_data = interval_instruction_u_data / (INTERVAL * sampling_unit_size)
+    print(f"[green]Calculated U-IPC data for sampling unit index {index} with shape {interval_ipc_u_data.shape}[/green]")
     
     # Analyze core groups if specified, otherwise analyze all cores as one group
     if core_groups:
@@ -514,7 +517,12 @@ def analyze_sampling_unit(result_folders: list[str], sampling_unit_size: int, in
             snapshot_group_ipc = np.sum(group_ipc_data, axis=1)  # Shape: [snapshots]
             
             # Filter out NaN and zero values
-            valid_data = [x for x in snapshot_group_ipc if not math.isnan(x) and x != 0]
+            # Print out the invalid results
+            console.print(f"[green]Checking snapshots for invalid IPC values... [/green]")
+            for idx, ipc in enumerate(snapshot_group_ipc):
+                if math.isnan(ipc) or ipc == 0:
+                    console.print(f"[red]Snapshot {idx}: Invalid IPC value {ipc} (NaN or zero)[/red]")
+            valid_data = [x if not math.isnan(x) and x != 0 else 0 for x in snapshot_group_ipc]
             
             if len(valid_data) == 0:
                 console.print("[red]Error: No valid data found for this core group.[/red]")
@@ -555,10 +563,17 @@ def analyze_sampling_unit(result_folders: list[str], sampling_unit_size: int, in
         console.print("\n[bold cyan]Analyzing all cores as a single group:[/bold cyan]")
         
         # Aggregate across cores for each snapshot to get total IPC per snapshot
+        # Print interval_ipc_u_data for each index to debug
+        for idx, ipc_data in enumerate(interval_ipc_u_data):
+            console.print(f"Snapshot {idx}: IPC data across cores: {ipc_data}")
         snapshot_total_ipc = np.sum(interval_ipc_u_data, axis=1)  # Shape: [snapshots]
         
         # Filter out NaN and zero values
-        valid_data = [x for x in snapshot_total_ipc if not math.isnan(x) and x != 0]
+        console.print(f"[green]Checking snapshots for invalid IPC values... [/green]")
+        for idx, ipc in enumerate(snapshot_total_ipc):
+            if math.isnan(ipc) or ipc == 0:
+                console.print(f"[red]Snapshot {idx}: Invalid IPC value {ipc} (NaN or zero)[/red]")
+        valid_data = [x if not math.isnan(x) and x != 0 else 0 for x in snapshot_total_ipc]
         
         if len(valid_data) == 0:
             console.print("[red]Error: No valid data found for the specified sampling unit.[/red]")
@@ -685,6 +700,7 @@ Examples:
         for dir_name in dirs:
             if dir_name.startswith("result_"):
                 result_folders.append(os.path.join(root, dir_name))
+    print(f"[green]Found {len(result_folders)} result folders in ./run directory[/green]")
 
     if not result_folders:
         console.print("[red]Error: No result_* folders found in current directory[/red]")
