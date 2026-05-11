@@ -29,12 +29,16 @@ class RunIdxCommand(SimulationCommand):
                                               use_stdio=self.use_stdio)
 
         partition_folder = self.experiment_context.get_partition_folder()
+        # result_<idx>/ is created BEFORE qemu runs so the trailing block's mv
+        # has somewhere to land even when peer-kill SIGKILLs qemu mid-run.
         setup_commands = [
             f"cd {partition_folder}",
             f'echo "===== qflex idx {idx}: starting in {partition_folder} ====="',
             f'rm -rf "snapshot_{idx}-flexus"',
             f"mkdir snapshot_{idx}-flexus",
             f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
+            f'rm -rf "result_{idx}"',
+            f'mkdir "result_{idx}"',
         ]
 
         tick_command = " tick=$(($(date +%s%N) / 1000000)) "
@@ -51,35 +55,25 @@ class RunIdxCommand(SimulationCommand):
                 f'echo "===== qflex idx {idx}: gdb stdout =====" >> {self.get_log_file_address()}',
                 f'echo "===== qflex idx {idx}: gdb stderr =====" >> {self.get_err_file_address()}',
             ]
-        timing_command = f"""
+
+        # One trailing block: run qemu, capture rc immediately, do the per-idx
+        # backup unconditionally, then exit with qemu's actual rc. The `{ ... }`
+        # group sequences statements without `&&`, so mv/cp run even on
+        # SIGKILL (137 from gdb's -return-child-result when peer-kill fires).
+        # Faithful rc propagation is required so the leaf's `killed_by_peer`
+        # branch in commands/executer.py still distinguishes peer-killed from
+        # actual qemu crashes.
+        timing_and_backup = f"""{{
             gdb -batch -ex run -ex "python try: gdb.execute('bt')\nexcept: pass" -return-child-result --args ../vanilla-qemu-system-aarch64 \
             {vanilla_parser.get_qemu_base_args()} {output} < /dev/null
-        """
-        prints = []
-        if not self.use_stdio:
-            prints = [
-                f"""echo "log is:""",
-                f"""cat {self.get_log_file_address()}""",
-                f"""echo "err is:""",
-                f"""cat {self.get_err_file_address()}"""
-            ]
-        tock_command = " tock=$(($(date +%s%N) / 1000000)) "
-        time_command = ' echo "Elapsed: $((tock - tick)) ms " '
-
-        # Move every *.log into result_<idx>/, then copy run-partition.log back
-        # to the partition folder. The mv stays open-ended (any new .log file
-        # qemu/Flexus emits in the future is moved automatically), and the
-        # cp-back keeps the partition-level run-partition.log alive across
-        # idxs so the next idx appends to it instead of starting from scratch.
-        backup_commands = [
-            f'rm -rf "result_{idx}"',
-            f'mkdir "result_{idx}"',
-            f'mv *.log "result_{idx}/"',
-            f'cp -f "result_{idx}/run-partition.log" "{partition_folder}/run-partition.log" 2>/dev/null || true',
-        ]
+            __qflex_qemu_rc=$?
+            tock=$(($(date +%s%N) / 1000000))
+            echo "Elapsed: $((tock - tick)) ms"
+            mv *.log "result_{idx}/" 2>/dev/null || true
+            cp -f "result_{idx}/run-partition.log" "{partition_folder}/run-partition.log" 2>/dev/null || true
+            exit $__qflex_qemu_rc
+        }}"""
         return setup_commands + log_banner + [
             tick_command,
-            timing_command,
-            tock_command,
-            time_command,
-        ] + prints + backup_commands
+            timing_and_backup,
+        ]
