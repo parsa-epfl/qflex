@@ -306,7 +306,9 @@ class ExperimentContext(BaseModel):
 
         root_sls = [
            "partition.py",
-           "result.py"
+           "result.py",
+           "collect.py",
+           "result_new.py"
         ]
         for file in root_sls:
             os.system(f"cp -u ./{file} {self.get_experiment_folder_address()}/{file}")

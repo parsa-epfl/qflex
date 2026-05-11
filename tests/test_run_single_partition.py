@@ -8,13 +8,16 @@ from .conftest import (
 )
 
 
-def test_run_single_partition_two_nodes(multi_context):
+def test_run_single_partition_two_nodes(multi_context_for_phase):
     """RunSinglePartitionCommand at a fixed partition_number. Each node iterates
     its idxs sequentially via SequentialGroupExecutor; at the per-(partition, idx)
-    leaf the master goes first, then the follower."""
+    leaf the master goes first, then the follower. warming_ratio /
+    measurement_ratio come from the run_single_partition phase overlay in
+    dc-multi.yaml."""
     from commands.run_single_partition import RunSinglePartitionCommand
     from commands.config import clone_experiment_context
 
+    multi_context = multi_context_for_phase("run_single_partition")
     pinned_subs = [
         clone_experiment_context(s, partition_number=0)
         for s in multi_context.sub_experiments
@@ -22,8 +25,7 @@ def test_run_single_partition_two_nodes(multi_context):
     top = multi_context.model_copy(update={"sub_experiments": pinned_subs})
 
     with capture_dry_run_stdout() as buf:
-        RunSinglePartitionCommand(experiment_context=top, warming_ratio=2,
-                                  measurement_ratio=8, use_stdio=False).execute()
+        RunSinglePartitionCommand(experiment_context=top, use_stdio=False).execute()
     blocks = parse_dry_run_blocks(buf.getvalue())
 
     # Master and follower each emit a RunIdxCommand for idx 0 and idx 1.

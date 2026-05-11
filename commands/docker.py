@@ -167,6 +167,9 @@ class DockerStarter(Executor):
         -v {cwd}/experiments:/home/dev/qflex/experiments \
         -v {cwd}/conf:/home/dev/qflex/conf \
         -v {cwd}/qflex:/home/dev/qflex/qflex \
+        -v {cwd}/result.py:/home/dev/qflex/result.py \
+        -v {cwd}/collect.py:/home/dev/qflex/collect.py \
+        -v {cwd}/result_new.py:/home/dev/qflex/result_new.py \
         -v {cwd}/requirements.txt:/home/dev/qflex/requirements.txt \
         {sample_scripts} \
         {tests_mount} \

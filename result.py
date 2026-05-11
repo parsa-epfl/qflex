@@ -22,6 +22,14 @@ INTERVAL = 100000
 END = 300000
 CORE_COUNT = 64
 
+# When True, NaN / zero snapshots are dropped from stats inputs (shorter
+# valid_data list — current default). When False, they are replaced with 0
+# in place (preserves snapshot count, but the mean is depressed and CV
+# inflates). Toggle when you want to see what the stats look like if every
+# snapshot is counted, including ones where this core / group reported no
+# instructions.
+OMMIT_ZERO = True
+
 console = Console()
 
 def parse_core_groups(core_groups_str: str) -> list[list[int]]:
@@ -233,6 +241,54 @@ def calculate_z_score(confidence: float) -> float:
             return 1.96
 
 
+def _apply_zero_policy(values, predicate):
+    """Apply the module-level OMMIT_ZERO policy to a stats input.
+
+    `predicate(x)` returns True for valid entries (typically
+    `lambda x: not math.isnan(x) and x > 0` — preserved per call site since
+    some sites historically used `x > 0` and others `x != 0`).
+
+    OMMIT_ZERO=True  -> drop invalid entries (shorter list).
+    OMMIT_ZERO=False -> replace invalid entries with 0 (preserves length;
+                        depresses mean, inflates CV).
+    """
+    if OMMIT_ZERO:
+        return [x for x in values if predicate(x)]
+    return [x if predicate(x) else 0 for x in values]
+
+
+def compute_per_core_stats(interval_data: np.ndarray, confidence: float,
+                           acceptable_sampling_error: float) -> list[dict]:
+    """For each active core, treat that core's per-snapshot IPC series as its own
+    sample and compute mean / CV / current vs. required sample size /
+    adequacy. `interval_data` is [snapshots, cores], either total IPC or U-IPC.
+    Cores with no valid (non-NaN, non-zero) snapshots are skipped."""
+    z_score = calculate_z_score(confidence)
+    out: list[dict] = []
+    for core_idx in range(interval_data.shape[1]):
+        series = interval_data[:, core_idx]
+        valid = _apply_zero_policy(series, lambda x: not math.isnan(x) and x > 0)
+        if not valid:
+            continue
+        average = float(np.mean(valid))
+        std_dev = float(np.std(valid))
+        cv = std_dev / average if average > 0 else float('inf')
+        if math.isinf(cv):
+            required = float('inf')
+        else:
+            required = (z_score * cv / acceptable_sampling_error) ** 2
+        current = len(valid)
+        out.append({
+            'core': core_idx,
+            'average': average,
+            'coefficient_of_variation': cv,
+            'current_sample_size': current,
+            'required_sample_size': required,
+            'is_sample_size_enough': current >= required,
+        })
+    return out
+
+
 def plot_u_ipc_distribution(result_folders: list[str], sampling_unit_size: int, index: int, plot_enabled: bool = True) -> dict:
     """
     Plot U-IPC distribution and return statistics for the specified sampling unit.
@@ -262,7 +318,7 @@ def plot_u_ipc_distribution(result_folders: list[str], sampling_unit_size: int, 
     
     # Calculate U-IPC statistics for sample size validation
     snapshot_total_u_ipc = np.sum(interval_ipc_data_u, axis=1)  # Sum across cores for each snapshot
-    valid_u_ipc_data = [x for x in snapshot_total_u_ipc if not math.isnan(x) and x > 0]
+    valid_u_ipc_data = _apply_zero_policy(snapshot_total_u_ipc, lambda x: not math.isnan(x) and x > 0)
     
     if len(valid_u_ipc_data) > 0:
         average_u_ipc = np.mean(valid_u_ipc_data)
@@ -400,7 +456,16 @@ def generate_new_core_info(result_folders: list[str], old_core_info_path: str, s
     else:
         required_sample_size = float('inf')
         is_sample_size_enough = False
-    
+
+    # Per-core (per-active-core) stats over the same snapshot dimension, for
+    # both total IPC and user-only U-IPC. Shares the user's confidence/error.
+    per_core_ipc_stats = compute_per_core_stats(
+        interval_ipc_data, confidence, acceptable_sampling_error,
+    )
+    per_core_u_ipc_stats = compute_per_core_stats(
+        interval_ipc_data_u, confidence, acceptable_sampling_error,
+    )
+
     return {
         'comparison_data': comparison_data,
         'cores_with_timing_data': cores_with_timing_data,
@@ -411,8 +476,35 @@ def generate_new_core_info(result_folders: list[str], old_core_info_path: str, s
         'current_sample_size': u_ipc_stats['current_sample_size'],
         'is_sample_size_enough': is_sample_size_enough,
         'confidence': confidence,
-        'acceptable_sampling_error': acceptable_sampling_error
+        'acceptable_sampling_error': acceptable_sampling_error,
+        'per_core_ipc_stats': per_core_ipc_stats,
+        'per_core_u_ipc_stats': per_core_u_ipc_stats,
     }
+
+
+def _render_per_core_table(title: str, per_core_stats: list[dict]) -> None:
+    """Render one Per-Core (U-)IPC Statistics table. No-op when the list is
+    empty (e.g. no active cores produced valid samples)."""
+    if not per_core_stats:
+        return
+    table = Table(title=title, box=box.ROUNDED)
+    table.add_column("Core", justify="center", style="cyan")
+    table.add_column("Average", justify="center", style="green")
+    table.add_column("Coefficient of Variation", justify="center", style="yellow")
+    table.add_column("Current Sample Size", justify="center", style="magenta")
+    table.add_column("Required Sample Size", justify="center", style="magenta")
+    table.add_column("Sample Size Adequate", justify="center", style="blue")
+    for row in per_core_stats:
+        adequate = row['is_sample_size_enough']
+        table.add_row(
+            str(row['core']),
+            f"{row['average']:.4f}",
+            f"{row['coefficient_of_variation']:.4f}",
+            str(row['current_sample_size']),
+            f"{row['required_sample_size']:.1f}",
+            Text("✓ Yes", style="green") if adequate else Text("✗ No", style="red"),
+        )
+    console.print(table)
 
 
 def display_results_table(results: dict):
@@ -456,7 +548,16 @@ def display_results_table(results: dict):
     summary_table.add_row("Acceptable Error", f"{results['acceptable_sampling_error']*100}%")
     
     console.print(summary_table)
-    
+
+    _render_per_core_table(
+        "Per-Core IPC Statistics",
+        results.get('per_core_ipc_stats', []),
+    )
+    _render_per_core_table(
+        "Per-Core U-IPC Statistics",
+        results.get('per_core_u_ipc_stats', []),
+    )
+
     if not results['is_sample_size_enough']:
         needed_samples = results['required_sample_size'] - results['current_sample_size']
         warning_panel = Panel(
@@ -522,7 +623,7 @@ def analyze_sampling_unit(result_folders: list[str], sampling_unit_size: int, in
             for idx, ipc in enumerate(snapshot_group_ipc):
                 if math.isnan(ipc) or ipc == 0:
                     console.print(f"[red]Snapshot {idx}: Invalid IPC value {ipc} (NaN or zero)[/red]")
-            valid_data = [x if not math.isnan(x) and x != 0 else 0 for x in snapshot_group_ipc]
+            valid_data = _apply_zero_policy(snapshot_group_ipc, lambda x: not math.isnan(x) and x != 0)
             
             if len(valid_data) == 0:
                 console.print("[red]Error: No valid data found for this core group.[/red]")
@@ -573,7 +674,7 @@ def analyze_sampling_unit(result_folders: list[str], sampling_unit_size: int, in
         for idx, ipc in enumerate(snapshot_total_ipc):
             if math.isnan(ipc) or ipc == 0:
                 console.print(f"[red]Snapshot {idx}: Invalid IPC value {ipc} (NaN or zero)[/red]")
-        valid_data = [x if not math.isnan(x) and x != 0 else 0 for x in snapshot_total_ipc]
+        valid_data = _apply_zero_policy(snapshot_total_ipc, lambda x: not math.isnan(x) and x != 0)
         
         if len(valid_data) == 0:
             console.print("[red]Error: No valid data found for the specified sampling unit.[/red]")

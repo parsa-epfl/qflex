@@ -35,3 +35,26 @@ components:
     latencies_ns_list: [100000]
     syncs_list: ["true"]
     wait_for_nodes: [0]
+
+# Per-phase overlays for the timing-phase knobs. _leaf_defaults under a phase
+# block deep-merges into the top-level _leaf_defaults inherited from DC_base
+# *before* `_base_:` resolves on each component, so every node leaf picks up
+# the right value when its phase is active.
+fw:
+  _leaf_defaults:
+    sample_size: 10
+
+run_partition:
+  _leaf_defaults:
+    warming_ratio: 2
+    measurement_ratio: 8
+
+run_single_partition:
+  _leaf_defaults:
+    warming_ratio: 2
+    measurement_ratio: 8
+
+run_idx:
+  _leaf_defaults:
+    warming_ratio: 2
+    measurement_ratio: 8

@@ -8,24 +8,27 @@ from .conftest import (
 )
 
 
-def test_functional_warming_two_nodes(multi_context):
-    """Vanilla two-node FW: same master-first invariant."""
+def test_functional_warming_two_nodes(multi_context_for_phase):
+    """Vanilla two-node FW: same master-first invariant. The `fw` phase
+    overlay in dc-multi.yaml supplies sample_size — driven from YAML, not the
+    constructor."""
     from commands.functional_warming import FunctionalWarming
+    ctx = multi_context_for_phase("fw")
     with capture_dry_run_stdout() as buf:
-        FunctionalWarming(experiment_context=multi_context, sample_size=10).execute()
+        FunctionalWarming(experiment_context=ctx).execute()
     blocks = parse_dry_run_blocks(buf.getvalue())
     assert_two_node_master_first(blocks, "FunctionalWarming", "FunctionalWarming_node")
 
 
-def test_interactive_tmux_only_on_boot_and_load(multi_context):
+def test_interactive_tmux_only_on_boot_and_load(multi_context_for_phase):
     """SUPPORTS_INTERACTIVE gate: setting interactive_tmux=True on a context that
     flows into a non-interactive phase (FunctionalWarming) is a no-op — the
     standard subprocess bash is emitted and no [tmux] marker appears."""
     from commands.functional_warming import FunctionalWarming
-    top = pin_per_sub(multi_context, interactive_tmux=True)
+    top = pin_per_sub(multi_context_for_phase("fw"), interactive_tmux=True)
 
     with capture_dry_run_stdout() as buf:
-        FunctionalWarming(experiment_context=top, sample_size=10).execute()
+        FunctionalWarming(experiment_context=top).execute()
     blocks = parse_dry_run_blocks(buf.getvalue())
 
     leaves = [b for b in blocks if b.cls_name == "FunctionalWarming"]

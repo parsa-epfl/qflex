@@ -14,7 +14,7 @@ from .conftest import (
 )
 
 
-def test_run_partition_runs_partitions_in_parallel(multi_context, monkeypatch):
+def test_run_partition_runs_partitions_in_parallel(multi_context_for_phase, monkeypatch):
     """Wall-clock proof that RunPartitionCommand fans the partition axis out in
     parallel via mp.Process — not sequentially.
 
@@ -47,9 +47,9 @@ def test_run_partition_runs_partitions_in_parallel(multi_context, monkeypatch):
     # we're testing dispatch parallelism, not the grace.
     monkeypatch.setattr(Executor, "POST_EXIT_GRACE_SECONDS", 0)
 
+    multi_context = multi_context_for_phase("run_partition")
     master = multi_context.sub_experiments[0]
-    runner = RunPartitionCommand(experiment_context=master,
-                                 warming_ratio=2, measurement_ratio=8)
+    runner = RunPartitionCommand(experiment_context=master)
 
     start = time.monotonic()
     ok = runner.execute(to_stdio=False)
@@ -68,17 +68,19 @@ def test_run_partition_runs_partitions_in_parallel(multi_context, monkeypatch):
     )
 
 
-def test_run_partition_full_tree_two_nodes(multi_context):
+def test_run_partition_full_tree_two_nodes(multi_context_for_phase):
     """RunPartitionCommand on the multi-node group: nodes parallel, partitions
     parallel (within each node), idxs sequential (within each partition).
     All three axes use the same sub_experiments dispatch (the former ParallelExecutor
     is gone). Verify that for every (node, partition, idx) tuple, the master
-    appears before the follower in dispatch order."""
+    appears before the follower in dispatch order. warming_ratio /
+    measurement_ratio come from the run_partition phase overlay in
+    dc-multi.yaml."""
     from commands.run_partition import RunPartitionCommand
 
+    multi_context = multi_context_for_phase("run_partition")
     with capture_dry_run_stdout() as buf:
-        RunPartitionCommand(experiment_context=multi_context, warming_ratio=2,
-                            measurement_ratio=8).execute()
+        RunPartitionCommand(experiment_context=multi_context).execute()
     blocks = parse_dry_run_blocks(buf.getvalue())
 
     leaves = [b for b in blocks if b.cls_name == "RunIdxCommand"]

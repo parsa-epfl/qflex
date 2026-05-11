@@ -79,6 +79,7 @@ initialize:
 fw:
   _leaf_defaults:
     loadvm_name: init_warmed
+    sample_size: 30
     # TODO: BUG (same family as initialize) — fw takes per-sample snapshots
     # via the WormCacheQFlex `mode=warm` plugin. Under is_parallel=false
     # (icount / sequential mode) the first snapshot request from one node
@@ -95,7 +96,16 @@ run_idx:
   _leaf_defaults:
     partition_number: 0
     idx: 0
+    warming_ratio: 2
+    measurement_ratio: 1
 
 run_single_partition:
   _leaf_defaults:
     partition_number: 0
+    warming_ratio: 2
+    measurement_ratio: 1
+
+run_partition:
+  _leaf_defaults:
+    warming_ratio: 2
+    measurement_ratio: 1

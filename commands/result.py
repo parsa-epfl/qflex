@@ -19,4 +19,6 @@ class RunResultCommand(Executor):
         return [
             f"cd {experiment_folder}",
             f"python {experiment_folder}/result.py",
+            f"python {experiment_folder}/collect.py",
+            f"python {experiment_folder}/result_new.py",
         ]

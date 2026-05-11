@@ -1,0 +1,11 @@
+extends: ws
+
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: web-search-single-node-yaml-2-full-higher-phantom-ipc
+    doubled_vcpu: true
+    # Check what happens with higher phantom IPC
+    phantom_cpu_ipc: 4
+    image_name: root-ws-higher-phantom-ipc.qcow2
+

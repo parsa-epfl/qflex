@@ -9,12 +9,15 @@ from .conftest import (
 )
 
 
-def test_run_idx_at_specific_partition_idx(multi_context):
+def test_run_idx_at_specific_partition_idx(multi_context_for_phase):
     """Per-(partition, idx) coordination at the leaf RunIdxCommand level.
     We pin partition_number and idx on each sub-experiment's clone so the sentinel
-    namespace is exact: RunIdxCommand_partN_idxM_nodeX."""
+    namespace is exact: RunIdxCommand_partN_idxM_nodeX. warming_ratio /
+    measurement_ratio come from the run_idx phase overlay in dc-multi.yaml."""
     from commands.run_idx import RunIdxCommand
     from commands.config import clone_experiment_context
+
+    multi_context = multi_context_for_phase("run_idx")
 
     # Build a top-level RunIdxCommand pointing at the group context, but each
     # leaf needs partition+idx set. Easiest: clone each sub at (part=0, idx=1)
@@ -26,8 +29,7 @@ def test_run_idx_at_specific_partition_idx(multi_context):
     top = multi_context.model_copy(update={"sub_experiments": pinned_subs})
 
     with capture_dry_run_stdout() as buf:
-        RunIdxCommand(experiment_context=top, warming_ratio=2,
-                      measurement_ratio=8, use_stdio=False).execute()
+        RunIdxCommand(experiment_context=top, use_stdio=False).execute()
 
     blocks = parse_dry_run_blocks(buf.getvalue())
     leaves = [b for b in blocks if b.cls_name == "RunIdxCommand"]

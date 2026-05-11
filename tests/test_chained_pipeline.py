@@ -9,7 +9,7 @@ Chain:
         ↓
     init-warm done  (test_04 — runs `./qflex initialize` against loaded-test)
         ↓
-    fw selected     (test_05 — runs `./qflex fw --sample-size 30` against init-warm result)
+    fw selected     (test_05 — runs `./qflex fw` against init-warm result; sample_size from YAML)
 
 Each test gates itself on the previous test's snapshot via `require_snapshot`,
 so a missing earlier step shows up as a SKIP rather than a misleading FAIL.
@@ -39,9 +39,18 @@ from .conftest import (
 NODE_SUB_NAMES = ("qflex_test_multi-node-0", "qflex_test_multi-node-1")
 LOADED_TEST_SNAPSHOT = "loaded-test"
 INIT_WARMED_SNAPSHOT = "init_warmed"  # hard-coded in parallel-qemu/plugins/pf_api.c
-FW_SAMPLE_SIZE = 30                   # default in qflex's `fw` command signature
-FW_LAST_SAMPLE = FW_SAMPLE_SIZE - 1   # samples are snapshot_0 .. snapshot_29
+REALRUN_YAML = "tests/realrun/dc-multi.yaml"
 PARTITION_COUNT = 5                   # `partition:` section in dc-multi.yaml
+
+
+def _yaml_leaf_field(cmd_name: str, field: str):
+    """Read a per-leaf field for the given phase out of the realrun YAML.
+    Single source of truth: the YAML. Tests that need to assert on a YAML
+    value (e.g. sample_size) should derive it via this helper rather than
+    re-declaring the value as a python constant."""
+    from dep_injection.builder import build_experiment_context
+    ctx = build_experiment_context(REALRUN_YAML, cmd_name=cmd_name)
+    return getattr(ctx.sub_experiments[0], field)
 
 
 pytestmark = [
@@ -329,17 +338,17 @@ def test_04_init_warm_creates_init_warmed_snapshot(dev_container):
 
 def test_05_fw_creates_per_sample_snapshots(dev_container):
     """Run `./qflex fw` against the init_warmed snapshot. WormCacheQFlex
-    `mode=warm` takes `--sample-size` periodic per-sample snapshots over the
+    `mode=warm` takes `sample_size` periodic per-sample snapshots over the
     `population_seconds` window, then prints `Generate N snapshots. Quit.`
     and `std::process::exit(0)` — qemu exits naturally with rc 0.
 
-    Sample count is the default of qflex's `fw` command signature (30);
-    population is the test-base-multi.yaml `_leaf_defaults.population_seconds`
-    (1 s — overrides the dc.yaml 5 s default). Per the "no CLI flags in tests"
-    rule, both come from the YAML / signature defaults, not from a
-    `--sample-size` flag.
+    Sample count comes from the `fw._leaf_defaults.sample_size` overlay in
+    tests/realrun/dc-multi.yaml; population is the test-base-multi.yaml
+    `_leaf_defaults.population_seconds` (1 s — overrides the dc.yaml 5 s
+    default). Per the "no CLI flags in tests" rule, both come from the YAML.
     """
     mounting = dev_container
+    sample_size = _yaml_leaf_field("fw", "sample_size")
 
     # Skip cleanly if test_04 hasn't created init_warmed yet.
     require_snapshot(
@@ -349,7 +358,7 @@ def test_05_fw_creates_per_sample_snapshots(dev_container):
     )
 
     r = _exec_in_container(
-        "./qflex fw -c tests/realrun/dc-multi.yaml",
+        f"./qflex fw -c {REALRUN_YAML}",
         timeout=1800,
     )
     assert r.returncode == 0, (
@@ -359,12 +368,12 @@ def test_05_fw_creates_per_sample_snapshots(dev_container):
     )
 
     # FW has a known bug where one node may skip writing the LAST checkpoint
-    # file (snapshot_29.state.zstd) even though the plugin exited cleanly.
+    # file (snapshot_<N-1>.state.zstd) even though the plugin exited cleanly.
     # The deterministic signal is the plugin's exit log line — it appears in
-    # at least one node's FunctionalWarming.log when count reaches 30 and
-    # `std::process::exit(0)` is called. We assert the log line on at least
-    # one node and the bulk presence of per-sample files (≥ N-1 of N).
-    quit_marker = f"Generate {FW_SAMPLE_SIZE} snapshots. Quit."
+    # at least one node's FunctionalWarming.log when count reaches sample_size
+    # and `std::process::exit(0)` is called. We assert the log line on at
+    # least one node and the bulk presence of per-sample files (≥ N-1 of N).
+    quit_marker = f"Generate {sample_size} snapshots. Quit."
     saw_quit_log = False
     for n, sub in enumerate(NODE_SUB_NAMES):
         log = f"{mounting}/experiments/{sub}/FunctionalWarming.log"
@@ -381,8 +390,8 @@ def test_05_fw_creates_per_sample_snapshots(dev_container):
             f for f in os.listdir(run_dir)
             if f.startswith("snapshot_") and f.endswith(".state.zstd")
         ]
-        assert len(sample_files) >= FW_SAMPLE_SIZE - 1, (
-            f"node {n} only produced {len(sample_files)} of {FW_SAMPLE_SIZE} "
+        assert len(sample_files) >= sample_size - 1, (
+            f"node {n} only produced {len(sample_files)} of {sample_size} "
             f"per-sample state files in {run_dir} — FW didn't reach the end."
         )
 
