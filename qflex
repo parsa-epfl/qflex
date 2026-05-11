@@ -109,6 +109,12 @@ def test_worm(
     branch_trace: Annotated[bool, typer.Option(
         help="Whether to log branch PCs to per-core files."
     )]=False,
+    tage_decision_trace: Annotated[bool, typer.Option(
+        help="Whether to log compact per-conditional TAGE decisions to per-core files."
+    )]=False,
+    tage_decision_trace_limit: Annotated[int | None, typer.Option(
+        help="Optional maximum number of conditional TAGE decisions to log per core."
+    )]=None,
     monitor_port: Annotated[int | None, typer.Option(
         help="Optional QEMU monitor port for graceful stop / debugging."
     )]=None,
@@ -120,6 +126,8 @@ def test_worm(
         experiment_context=experiment_context,
         skip_generate_cfg=skip_generate_cfg,
         branch_trace=branch_trace,
+        tage_decision_trace=tage_decision_trace,
+        tage_decision_trace_limit=tage_decision_trace_limit,
         monitor_port=monitor_port,
     )
     test_worm_executor.execute(to_stdio=True, run_in_background=False)
@@ -285,6 +293,7 @@ def qpoints_run_gem5_cmd(
     inst: Annotated[int, typer.Option(help="Instruction count.")],
     core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
     branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging.")] = False,
+    tage_decision_trace: Annotated[bool, typer.Option(help="Enable compact TAGE decision logging.")] = False,
     data_trace: Annotated[bool, typer.Option(help="Enable data access trace logging.")] = False,
     dump_cache_state: Annotated[
         bool, typer.Option(help="Enable Ruby cache-state dumping (requires --timing-ruby).")
@@ -311,6 +320,7 @@ def qpoints_run_gem5_cmd(
         inst=inst,
         core_count=core_count,
         branch_trace=branch_trace,
+        tage_decision_trace=tage_decision_trace,
         data_trace=data_trace,
         dump_cache_state=dump_cache_state,
         timing_ruby=timing_ruby,
