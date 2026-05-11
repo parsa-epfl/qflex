@@ -88,6 +88,10 @@ def initialize(
     skip_generate_cfg: Annotated[bool, typer.Option(
         help="Whether to skip generating configuration files."
     )]=False,
+    fallback_cycles: Annotated[int | None, typer.Option(
+        min=0,
+        help="Optional cycle threshold to trigger init_warmed snapshot creation when LLC warmup does not complete."
+    )]=None,
 ):
     """
     This command initializes the long-term microarchitectural state of the simulator such as caches and TLBs.
@@ -96,6 +100,7 @@ def initialize(
     init_warm_executor = InitWarm(
         experiment_context=experiment_context,
         skip_generate_cfg=skip_generate_cfg,
+        fallback_cycles=fallback_cycles,
     )
     init_warm_executor.execute(to_stdio=True, run_in_background=False)
 
@@ -107,8 +112,14 @@ def test_worm(
         help="Whether to skip generating configuration files."
     )]=False,
     branch_trace: Annotated[bool, typer.Option(
-        help="Whether to log branch PCs to per-core files."
+        help="Whether to log per-core branch traces in CSV format."
     )]=False,
+    tage_decision_trace: Annotated[bool, typer.Option(
+        help="Whether to log compact per-conditional TAGE decisions to per-core files."
+    )]=False,
+    tage_decision_trace_limit: Annotated[int | None, typer.Option(
+        help="Optional maximum number of conditional TAGE decisions to log per core."
+    )]=None,
     collect_gem5_bbl_btb: Annotated[bool, typer.Option(
         help="Whether to collect the export-only gem5 BBL-BTB view alongside the live PC-indexed BTB."
     )]=False,
@@ -123,6 +134,8 @@ def test_worm(
         experiment_context=experiment_context,
         skip_generate_cfg=skip_generate_cfg,
         branch_trace=branch_trace,
+        tage_decision_trace=tage_decision_trace,
+        tage_decision_trace_limit=tage_decision_trace_limit,
         collect_gem5_bbl_btb=collect_gem5_bbl_btb,
         monitor_port=monitor_port,
     )
@@ -288,7 +301,8 @@ def qpoints_run_gem5_cmd(
     snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")],
     inst: Annotated[int, typer.Option(help="Instruction count.")],
     core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
-    branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging.")] = False,
+    branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging in CSV format.")] = False,
+    tage_decision_trace: Annotated[bool, typer.Option(help="Enable compact TAGE decision logging.")] = False,
     data_trace: Annotated[bool, typer.Option(help="Enable data access trace logging.")] = False,
     dump_cache_state: Annotated[
         bool, typer.Option(help="Enable Ruby cache-state dumping (requires --timing-ruby).")
@@ -315,6 +329,7 @@ def qpoints_run_gem5_cmd(
         inst=inst,
         core_count=core_count,
         branch_trace=branch_trace,
+        tage_decision_trace=tage_decision_trace,
         data_trace=data_trace,
         dump_cache_state=dump_cache_state,
         timing_ruby=timing_ruby,
