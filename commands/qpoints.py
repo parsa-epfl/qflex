@@ -477,6 +477,7 @@ def run_gem5(
     inst: int,
     core_count: int,
     branch_trace: bool = False,
+    tage_decision_trace: bool = False,
     data_trace: bool = False,
     dump_cache_state: bool = False,
     timing_ruby: bool = False,
@@ -505,6 +506,8 @@ def run_gem5(
     ]
     if branch_trace:
         args.append("--branch-trace")
+    if tage_decision_trace:
+        args.append("--tage-decision-trace")
     if data_trace:
         args.append("--data-trace")
     if dump_cache_state:

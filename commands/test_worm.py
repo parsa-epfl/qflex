@@ -13,12 +13,16 @@ class TestWorm(Executor):
                  experiment_context: ExperimentContext,
                  skip_generate_cfg: bool = False,
                  branch_trace: bool = False,
+                 tage_decision_trace: bool = False,
+                 tage_decision_trace_limit: int | None = None,
                  collect_gem5_bbl_btb: bool = False,
                  monitor_port: int | None = None):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
         self.branch_trace = branch_trace
+        self.tage_decision_trace = tage_decision_trace
+        self.tage_decision_trace_limit = tage_decision_trace_limit
         self.collect_gem5_bbl_btb = collect_gem5_bbl_btb
         self.monitor_port = monitor_port
 
@@ -63,6 +67,13 @@ class TestWorm(Executor):
         branch_trace_opt = ""
         if self.branch_trace:
             branch_trace_opt = ",branch_trace=1"
+        tage_decision_trace_opt = ""
+        if self.tage_decision_trace:
+            tage_decision_trace_opt = ",tage_decision_trace=1"
+            if self.tage_decision_trace_limit is not None:
+                tage_decision_trace_opt += (
+                    f",tage_decision_trace_limit={self.tage_decision_trace_limit}"
+                )
         collect_gem5_bbl_btb_opt = ""
         if self.collect_gem5_bbl_btb:
             collect_gem5_bbl_btb_opt = ",collect_gem5_bbl_btb=1"
@@ -70,7 +81,7 @@ class TestWorm(Executor):
         ./qemu-system-aarch64 \
         {self.qemu_common_parser.get_qemu_base_args(monitor_port=self.monitor_port)} \
         {self.qemu_common_parser.quantum_args()} \
-        -plugin ../lib/libworm_cache.so,mode=normal{branch_trace_opt}{collect_gem5_bbl_btb_opt}
+        -plugin ../lib/libworm_cache.so,mode=normal{branch_trace_opt}{tage_decision_trace_opt}{collect_gem5_bbl_btb_opt}
         """
 
         return self.build_worm_cache() + [

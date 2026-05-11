@@ -9,10 +9,12 @@ class InitWarm(Executor):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 skip_generate_cfg: bool = False):
+                 skip_generate_cfg: bool = False,
+                 fallback_cycles: int | None = None):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
+        self.fallback_cycles = fallback_cycles
 
         experiment_folder = self.experiment_context.get_experiment_folder_address()
         self.worm_params_address = f"{experiment_folder}/cfg/parameter.rs"
@@ -58,15 +60,19 @@ class InitWarm(Executor):
         ]
     
     def cmd(self) -> str:
+        if self.fallback_cycles is not None and self.fallback_cycles < 0:
+            raise ValueError("fallback_cycles must be a non-negative integer")
 
-
+        fallback_plugin_arg = ""
+        if self.fallback_cycles is not None:
+            fallback_plugin_arg = f",fallback_cycles={self.fallback_cycles}"
 
         # TODO check if we need variables for the plugin
         init_cmd = f"""
         ./qemu-system-aarch64 \
         {self.qemu_common_parser.get_qemu_base_args()} \
         {self.qemu_common_parser.quantum_args()} \
-        -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init
+        -plugin ../lib/libworm_cache.so,mode=pure_fill,prefix=init{fallback_plugin_arg}
         """
 
 
@@ -85,6 +91,4 @@ class InitWarm(Executor):
     
 
     
-
-
 
