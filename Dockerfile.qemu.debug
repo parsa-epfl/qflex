@@ -12,6 +12,9 @@ WORKDIR /home/dev/qflex
 # TODO address the two qemu versions
 COPY ./qemu /home/dev/qflex/qemu
 COPY ./parallel-qemu /home/dev/qflex/parallel-qemu
+# Shared PDES source consumed by both qemu and parallel-qemu via
+# ../../qemu-pdes/{net,include} in their meson.build files.
+COPY ./qemu-pdes /home/dev/qflex/qemu-pdes
 COPY ./flexus /home/dev/qflex/flexus
 
 

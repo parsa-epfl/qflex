@@ -10,7 +10,9 @@ include flexus/.gitignore
 include qemu/.gitignore
 
 out/
-qemu-*
+qemu-saved/
+parallel-qemu-saved/
+**/build/
 Dockerfile
 images/
 .github/
@@ -19,3 +21,9 @@ cfg/
 experiments/
 *.qcow2
 tmp_results/
+multi-node-dc/
+multi-node-dc-old-shanqing/
+multi-node-experiments/
+multi-node-scripts/
+multi-node-web-search/
+multi-node-web-search_virtio/
