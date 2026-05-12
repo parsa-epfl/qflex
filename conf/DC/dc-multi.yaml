@@ -36,10 +36,31 @@ components:
     syncs_list: ["true"]
     wait_for_nodes: [0]
 
-# Per-phase overlays for the timing-phase knobs. _leaf_defaults under a phase
-# block deep-merges into the top-level _leaf_defaults inherited from DC_base
-# *before* `_base_:` resolves on each component, so every node leaf picks up
-# the right value when its phase is active.
+# Per-phase overlays. _leaf_defaults under a phase block deep-merges into the
+# top-level _leaf_defaults inherited from DC_base *before* `_base_:` resolves
+# on each component, so every node leaf picks up the right value when its
+# phase is active. Component-level overrides win over _leaf_defaults — so the
+# latencies_ns_list / syncs_list values hardcoded on experiment_context_node_*
+# above need to be overridden component-by-component, not via _leaf_defaults.
+
+# Boot: relaxed wire (sync=true / 100us deadlocks Alpine) + tmux for per-leaf
+# interactivity. Phase invariant — keep here so any user pointing boot.sh at
+# this YAML gets the right behavior.
+boot:
+  _leaf_defaults:
+    interactive_tmux: true
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+
+load:
+  _leaf_defaults:
+    interactive_tmux: true
+
 fw:
   _leaf_defaults:
     sample_size: 10

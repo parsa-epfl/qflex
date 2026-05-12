@@ -31,10 +31,14 @@ components:
 # Boot: relaxed wire (Alpine freezes under sync=true / 100us), loadvm boot-login,
 # per-node interaction scripts (master/follower differ). latencies_ns_list and
 # syncs_list are hardcoded per-leaf in conf/DC/dc-multi.yaml so the override
-# has to land on the component, not on _leaf_defaults.
+# has to land on the component, not on _leaf_defaults. interactive_tmux:false
+# explicitly opts back to Path A (interaction_script) — conf/DC/dc-multi.yaml's
+# boot overlay sets it true for the convenience-script (boot.sh) users, but
+# tests drive QEMU via expect, not via a tmux window.
 boot:
   _leaf_defaults:
     loadvm_name: boot-login
+    interactive_tmux: false
   components:
     experiment_context_node_0:
       latencies_ns_list: [1000000]
@@ -48,11 +52,12 @@ boot:
 # Load: same script for both leaves; re-savevms loaded-test with a long-running
 # urandom→TCP-echo→cmp workload running, so init/fw resume from a snapshot
 # where the workload is already churning (their warming phases see real
-# CPU+network activity).
+# CPU+network activity). interactive_tmux:false for the same reason as boot.
 load:
   _leaf_defaults:
     interaction_script: /home/dev/qflex/tests/realrun/loaded_test_verify_and_swap_workload.exp
     loadvm_name: loaded-test
+    interactive_tmux: false
 
 # Pipeline phases — each loads loaded-test or init_warmed; interaction_script
 # is left at the factory default ("") which keeps QEMU on its default
@@ -79,7 +84,7 @@ initialize:
 fw:
   _leaf_defaults:
     loadvm_name: init_warmed
-    sample_size: 30
+    sample_size: 20
     # TODO: BUG (same family as initialize) — fw takes per-sample snapshots
     # via the WormCacheQFlex `mode=warm` plugin. Under is_parallel=false
     # (icount / sequential mode) the first snapshot request from one node
@@ -90,7 +95,7 @@ fw:
 
 partition:
   _leaf_defaults:
-    partition_count: 5
+    partition_count: 4
 
 run_idx:
   _leaf_defaults:

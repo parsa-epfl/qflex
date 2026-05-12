@@ -40,7 +40,7 @@ NODE_SUB_NAMES = ("qflex_test_multi-node-0", "qflex_test_multi-node-1")
 LOADED_TEST_SNAPSHOT = "loaded-test"
 INIT_WARMED_SNAPSHOT = "init_warmed"  # hard-coded in parallel-qemu/plugins/pf_api.c
 REALRUN_YAML = "tests/realrun/dc-multi.yaml"
-PARTITION_COUNT = 5                   # `partition:` section in dc-multi.yaml
+PARTITION_COUNT = 4                   # `partition:` section in dc-multi.yaml
 
 
 def _yaml_leaf_field(cmd_name: str, field: str):
@@ -367,6 +367,18 @@ def test_05_fw_creates_per_sample_snapshots(dev_container):
         f"stderr (last 2k):\n{r.stderr[-2000:]}"
     )
 
+    # Surface qemu-side errors from FunctionalWarming.err (write-lock collisions, segfaults, etc.) before checking for the success markers.
+    for sub in NODE_SUB_NAMES:
+        err_path = f"{mounting}/experiments/{sub}/FunctionalWarming.err"
+        if os.path.exists(err_path):
+            with open(err_path) as f:
+                err_content = f.read()
+            for marker in ("qemu-system-aarch64:", "Failed to", "Segmentation fault", "Aborted"):
+                assert marker not in err_content, (
+                    f"{sub} FunctionalWarming.err contains qemu-side error "
+                    f"(matched marker {marker!r}):\n{err_content[-2000:]}"
+                )
+
     # FW has a known bug where one node may skip writing the LAST checkpoint
     # file (snapshot_<N-1>.state.zstd) even though the plugin exited cleanly.
     # The deterministic signal is the plugin's exit log line — it appears in
@@ -426,18 +438,15 @@ def test_06_partition_splits_samples_into_chunks(dev_container):
         )
 
     # PartitionCommand fails if any node's run/partition_0 already exists.
-    # Wipe the previous partition layout so the test is idempotent across
-    # re-runs without touching the FW snapshots themselves.
-    rm_targets = [
-        f"{mounting}/experiments/{sub}/run/partition_*"
-        for sub in NODE_SUB_NAMES
-    ]
-    rm_cmd = " && ".join(f"rm -rf {t}" for t in rm_targets)
-    rm_result = _exec_in_container(rm_cmd, timeout=60)
-    assert rm_result.returncode == 0, (
-        f"failed to clean previous partitions before test_06 "
-        f"(rc={rm_result.returncode}). stderr:\n{rm_result.stderr}"
+    # Use the qflex CLI's own cleanup so we exercise the same path a user would.
+    rm_result = _exec_in_container(
+        f"./qflex partition-cleanup -c {REALRUN_YAML}", timeout=60,
     )
+    assert rm_result.returncode == 0, (
+        f"partition-cleanup failed before test_06 (rc={rm_result.returncode}).\n"
+        f"stdout:\n{rm_result.stdout}\nstderr:\n{rm_result.stderr}"
+    )
+    print(rm_result.stdout, end="")
 
     # partition is fast (file moves only). A few minutes is generous.
     r = _exec_in_container(
@@ -487,7 +496,7 @@ def test_07_run_idx_single_sample(dev_container):
 
     r = _exec_in_container(
         "./qflex run-idx -c tests/realrun/dc-multi.yaml",
-        timeout=1800,
+        timeout=180,
     )
     assert r.returncode == 0, (
         f"run-idx (part 0, idx 0) failed (rc={r.returncode}).\n"

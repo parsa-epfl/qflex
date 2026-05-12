@@ -290,6 +290,7 @@ Concretely:
 * Need to load a YAML the test depends on? `dep_injection.builder.build_experiment_context(path, component_overrides=...)`. Don't read YAML manually.
 * Need to check whether a snapshot exists in a qcow2? `tests/conftest.py::_qcow2_has_snapshot` / `require_snapshot` / `require_boot_login_zstd`. Don't shell out to `qemu-img snapshot -l` from the test body.
 * Driving an end-to-end pipeline phase? `_exec_in_container("./qflex <phase> -c <yaml>", timeout=...)`. The CLI command's body is the source of truth for what that phase does — what folders it produces, what files it writes. The test asserts on rc and on helper-derived artifact paths; it does not duplicate the path math.
+* Need to clean up before re-running? Call the same CLI (e.g. `./qflex partition-cleanup` / `./qflex unpartition` / `./clean_up.sh` / `./dep stop-docker`). Hand-rolled `rm -rf .../partition_*` or `pkill -9 qemu-system` in test code is the same anti-pattern as the partition-path example above.
 
 ```python
 # bad — reinvents production path layout in the test

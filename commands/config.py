@@ -134,6 +134,7 @@ class ExperimentContext(BaseModel):
     pdes_net_devs: List[str] = Field(default=[], description="List of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup.")
     sub_experiments: List["ExperimentContext"] = Field(default_factory=list, description="Optional sub-experiments. If non-empty, this context is a group node; leaf-level fields are unused and the executor recurses into each sub-experiment.")
     wait_for_nodes: List[int] = Field(default_factory=list, description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master. Set to e.g. [0] to wait for the master, or [2] to wait for node 2.")
+    experiment_group_name: str = Field(default="", description="Parent group's experiment_name for this leaf; included in PDES shm names so concurrent projects on the same host don't collide. Auto-populated by the factory when sub_experiments is built.")
     _creation_kwargs: dict = PrivateAttr(default_factory=dict)
 
 
@@ -184,18 +185,15 @@ class ExperimentContext(BaseModel):
 
     def get_shm_names(self, recieve: bool) -> List[str]:
         shm_names = []
-        partition_str = ""
-        if self.partition_number >= 0:
-            partition_str = f"part_{self.partition_number}_"
-        
-        idx_str = ""
-        if self.idx >= 0:
-            idx_str = f"idx_{self.idx}_"
+        # `experiment_group_name` (shared across leaves of the same group) namespaces shm so concurrent projects don't collide on /dev/shm/pdes_*.
+        prefix = f"{self.experiment_group_name}_" if self.experiment_group_name else ""
+        partition_str = f"part_{self.partition_number}_" if self.partition_number >= 0 else ""
+        idx_str = f"idx_{self.idx}_" if self.idx >= 0 else ""
         for neighbor in self.neighbor_node_list:
             if recieve:
-                shm_names.append(f"pdes_{neighbor}_to_{self.node_number}"+partition_str+idx_str)
+                shm_names.append(f"{prefix}pdes_{neighbor}_to_{self.node_number}"+partition_str+idx_str)
             else:
-                shm_names.append(f"pdes_{self.node_number}_to_{neighbor}"+partition_str+idx_str)
+                shm_names.append(f"{prefix}pdes_{self.node_number}_to_{neighbor}"+partition_str+idx_str)
         return shm_names
 
     def get_mounting_folder(self) -> str:
@@ -604,6 +602,13 @@ def create_experiment_context(
         # Add date time to prevent overwriting
         experiment_name = experiment_name + '-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
+    # Stamp this group's name onto every sub leaf so they share an shm namespace.
+    if is_group:
+        sub_experiments = [
+            s.model_copy(update={"experiment_group_name": experiment_name})
+            for s in sub_experiments
+        ]
+
     simulation_context = create_simulation_context(
         core_count=core_count,
         quantum_size=quantum_size,
@@ -675,9 +680,11 @@ def clone_experiment_context(
     if not source._creation_kwargs:
         raise ValueError("Source ExperimentContext has no stored creation kwargs. "
                          "Was it created via create_experiment_context?")
-    
+
     kwargs = {**source._creation_kwargs, **overrides}
-    return create_experiment_context(**kwargs)
+    cloned = create_experiment_context(**kwargs)
+    # experiment_group_name is stamped post-construction by the group's factory call (it's not in _creation_kwargs), so re-apply it from source.
+    return cloned.model_copy(update={"experiment_group_name": source.experiment_group_name})
 
 
 def get_capital_dict(variable: BaseModel):

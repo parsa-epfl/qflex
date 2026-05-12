@@ -9,6 +9,8 @@ from .run_idx import RunIdxCommand
 # win MRO resolution; `SimulationCommand` adds the sync-asserts mixin. Both
 # subclass `Executor`; Python's MRO collapses the diamond cleanly.
 class RunSinglePartitionCommand(SequentialGroupExecutor, SimulationCommand):
+    # vanilla-qemu's PDES exit handshake is clean; no peer-kill needed. See RunIdxCommand.
+    NEEDS_PDES_PEER_KILL = False
 
     def __init__(self,
                  experiment_context: ExperimentContext,

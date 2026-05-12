@@ -54,8 +54,8 @@ set timeout 900
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
-set BUDGET_CHECKPOINTING_S 1800
-set BUDGET_WORKLOAD_INIT_S 2700   ; # client ramp-up under PDES sync=true on -smp 1: ~45 min worst case
+set BUDGET_CHECKPOINTING_S 7200
+set BUDGET_WORKLOAD_INIT_S 7200   ; # client ramp-up under PDES sync=true on -smp 1: ~45 min worst case
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)

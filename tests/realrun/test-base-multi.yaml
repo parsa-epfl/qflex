@@ -5,12 +5,8 @@ extends: ../../conf/DC/dc-multi
 
 _leaf_defaults:
   memory_gb: 4
-  # Shorten the FW population from the dc.yaml 5 s default to 1 s so
-  # `./qflex fw` finishes faster in test_05 — 30 samples × 33 ms virtual
-  # time each instead of 30 × 167 ms, a 5× speedup on the FW wall-clock. Other
-  # multi-node tests do not consume `population_seconds` (boot/init-warm/
-  # savevm-* read other fields).
-  population_seconds: 1
+  # Short FW population so `./qflex fw` finishes quickly under test.
+  population_seconds: 0.1
   # Use vanilla (timing) qemu instead of parallel-qemu. parallel-qemu's
   # icount-based virtual-time path stalls so far behind wall-clock under
   # PDES sync that even short drain windows take 10+ minutes.

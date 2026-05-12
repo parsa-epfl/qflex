@@ -15,4 +15,4 @@ done
 
 
 # TODO explain in docs how old messages either need to be checkpointed or removed
-rm -f /dev/shm/pdes*
+rm -f /dev/shm/*pdes_*
