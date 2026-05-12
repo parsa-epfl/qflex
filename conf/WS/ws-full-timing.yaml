@@ -1,0 +1,13 @@
+extends: ws
+
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: web-search-single-node-yaml-1-full-timing
+    doubled_vcpu: false
+    # Just to throw an error if its used
+    phantom_cpu_ipc: -4
+    # Use 2 full cores instead
+    core_count: 2
+    image_name: root-ws-full-timing.qcow2
+

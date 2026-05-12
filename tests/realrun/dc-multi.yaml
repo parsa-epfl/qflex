@@ -1,0 +1,116 @@
+# SINGLE multi-node real-run YAML — drives every non-init multi-node test phase
+# via top-level command sections. The python tests just `./qflex <phase> -c
+# tests/realrun/dc-multi.yaml`; no CLI flags. (Init bootstrap of `boot-login`
+# is separately gated by QFLEX_INIT_TEST and lives in tests/realrun/dc-multi-init.yaml
+# — that flow's per-leaf interaction_script is asymmetric in a way command
+# sections can't express, so it stays separate.)
+#
+# Phase-specific fields (interaction_script, loadvm_name, partition_count, …)
+# live in the phase blocks below — the leaves only carry what's invariant
+# across phases (experiment_name, telnet ports, use_gdb). Each phase block
+# uses `_leaf_defaults: {...}` for rule-level changes and `components.<name>:`
+# for per-leaf scoping; flat-key broadcast is no longer accepted.
+extends: test-base-multi
+
+components:
+  experiment_context:
+    experiment_name: qflex_test_multi
+
+  experiment_context_node_0:
+    experiment_name: qflex_test_multi-node-0
+    use_gdb: false
+    serial_telnet_port: 55681
+    telnet_port: 55781
+
+  experiment_context_node_1:
+    experiment_name: qflex_test_multi-node-1
+    use_gdb: false
+    serial_telnet_port: 55682
+    telnet_port: 55782
+
+# Boot: relaxed wire (Alpine freezes under sync=true / 100us), loadvm boot-login,
+# per-node interaction scripts (master/follower differ). latencies_ns_list and
+# syncs_list are hardcoded per-leaf in conf/DC/dc-multi.yaml so the override
+# has to land on the component, not on _leaf_defaults. interactive_tmux:false
+# explicitly opts back to Path A (interaction_script) — conf/DC/dc-multi.yaml's
+# boot overlay sets it true for the convenience-script (boot.sh) users, but
+# tests drive QEMU via expect, not via a tmux window.
+boot:
+  _leaf_defaults:
+    loadvm_name: boot-login
+    interactive_tmux: false
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+      interaction_script: /home/dev/qflex/tests/realrun/loaded_test_create_master.exp
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+      interaction_script: /home/dev/qflex/tests/realrun/loaded_test_create_follower.exp
+
+# Load: same script for both leaves; re-savevms loaded-test with a long-running
+# urandom→TCP-echo→cmp workload running, so init/fw resume from a snapshot
+# where the workload is already churning (their warming phases see real
+# CPU+network activity). interactive_tmux:false for the same reason as boot.
+load:
+  _leaf_defaults:
+    interaction_script: /home/dev/qflex/tests/realrun/loaded_test_verify_and_swap_workload.exp
+    loadvm_name: loaded-test
+    interactive_tmux: false
+
+# Pipeline phases — each loads loaded-test or init_warmed; interaction_script
+# is left at the factory default ("") which keeps QEMU on its default
+# (mon:stdio) channels, no auto-telnet-monitor.
+initialize:
+  _leaf_defaults:
+    loadvm_name: loaded-test
+    # TODO: BUG — init phase only completes cleanly when both nodes use
+    # `is_parallel: true` (PDES quantum mode). The test-base default
+    # `is_parallel: false` (icount / sequential mode) deadlocks: when one
+    # node finishes warming and is ready to checkpoint (e.g. node 1 fires
+    # `qemu_plugin_notify_fully_warmed` first), the other node (node 0)
+    # never makes the corresponding progress and the run hangs. Conversely
+    # `is_parallel: true` doesn't deadlock here, but ignores the play/pause
+    # barriers on long runs (the QEMU↔Flexus pause handshake described in
+    # MULTI_NODE.md "Pause is bidirectional"), so anything that's supposed
+    # to stall on a sync boundary just runs through. We override to parallel
+    # here so init at least progresses to completion. Fix later: either make
+    # icount mode honor the per-node ready handshake (so neither node
+    # deadlocks waiting for the other), or make parallel mode honor the
+    # play/pause barriers under long runs (so timing fidelity is preserved).
+    is_parallel: true
+
+fw:
+  _leaf_defaults:
+    loadvm_name: init_warmed
+    sample_size: 20
+    # TODO: BUG (same family as initialize) — fw takes per-sample snapshots
+    # via the WormCacheQFlex `mode=warm` plugin. Under is_parallel=false
+    # (icount / sequential mode) the first snapshot request from one node
+    # deadlocks the peer the same way init does. Override to parallel mode;
+    # see commands/init_warm.py for the full bug description and the fix
+    # direction.
+    is_parallel: true
+
+partition:
+  _leaf_defaults:
+    partition_count: 4
+
+run_idx:
+  _leaf_defaults:
+    partition_number: 0
+    idx: 0
+    warming_ratio: 2
+    measurement_ratio: 1
+
+run_single_partition:
+  _leaf_defaults:
+    partition_number: 0
+    warming_ratio: 2
+    measurement_ratio: 1
+
+run_partition:
+  _leaf_defaults:
+    warming_ratio: 2
+    measurement_ratio: 1

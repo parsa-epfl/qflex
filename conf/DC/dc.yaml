@@ -1,0 +1,9 @@
+extends: DC_base
+
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: data-caching-comparison
+    doubled_vcpu: true
+    phantom_cpu_ipc: 2
+    image_name: root-single-node.qcow2

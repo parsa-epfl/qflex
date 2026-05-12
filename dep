@@ -2,7 +2,7 @@
 
 import typer
 from typing import Annotated
-from commands.docker import DockerStarter, DockerBuild
+from commands.docker import DockerStarter, DockerBuild, DockerExec, DockerStop, DEFAULT_CONTAINER_NAME
 
 app = typer.Typer(
     name="./dep",
@@ -16,29 +16,86 @@ def build_docker(
     worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
     worm_only: Annotated[bool, typer.Option(help="Re-build only the WormCacheQFlex component.")] = False,
     push: Annotated[bool, typer.Option(help="Push the built image to github container registery. Requires authentication.")] = False,
+    no_cache: Annotated[bool, typer.Option("--no-cache", help="Pass --no-cache to every `docker buildx build` step (full from-scratch rebuild).")] = False,
 ):
     """
     Build the Docker image for QFlex. Use --debug to build a debug version.
     Useful for development and testing without installing dependencies locally.
     """
-    docker_build_executor = DockerBuild(debug=debug, worm=worm, worm_only=worm_only, push=push)
+    docker_build_executor = DockerBuild(debug=debug, worm=worm, worm_only=worm_only, push=push, no_cache=no_cache)
     docker_build_executor.execute(to_stdio=True, run_in_background=False)
 
 
 @app.command()
 def start_docker(
     mounting_folder: Annotated[str, typer.Option(help="Folder to mount for files.")],
-    debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False, 
+    debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False,
     worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
     start_directory: Annotated[str, typer.Option(help="Directory to start in inside the container.")] = None,
+    background: Annotated[bool, typer.Option("--background", help="Run detached, named ('qflex-dev'), and kept alive with `tail -f /dev/null`. Subsequent `./dep exec` calls then talk to this container instead of starting a fresh one each time.")] = False,
+    container_name: Annotated[str, typer.Option(help="Name of the detached container (only used with --background).")] = DEFAULT_CONTAINER_NAME,
 ):
     """
-    Start a Docker container with the QFlex environment. 
-    Useful for development and testing without installing dependencies locally.
+    Start a Docker container with the QFlex environment.
+
+    Default mode: interactive (`-it /bin/bash`) — drops you into a shell.
+
+    With --background: detached + named so `./dep exec` can `docker exec` into it
+    later. Useful for tests / CI / agent-driven runs where the same container
+    handles many commands without paying per-call container-start cost.
     """
-    docker_executor = DockerStarter(mounting_folder=mounting_folder, debug=debug, worm=worm, start_directory=start_directory)
+    docker_executor = DockerStarter(
+        mounting_folder=mounting_folder,
+        debug=debug,
+        worm=worm,
+        start_directory=start_directory,
+        background=background,
+        container_name=container_name,
+    )
     docker_executor.execute(to_stdio=True, run_in_background=False)
     # TODO bring in the build scripts here as well
+
+
+@app.command(name="exec")
+def exec_in_docker(
+    command: Annotated[str, typer.Option("--command", help="Bash command to run inside the container.")],
+    container_name: Annotated[str, typer.Option(help="Name of the running container to exec into.")] = DEFAULT_CONTAINER_NAME,
+    working_directory: Annotated[str, typer.Option(help="cwd inside the container.")] = "/home/dev/qflex",
+):
+    """
+    Run a single command inside the long-running QFlex dev container.
+
+    Requires a container started by `./dep start-docker --background` (or any
+    container with a matching name). This uses `docker exec` — much faster than
+    spinning up a fresh container per call.
+
+    Example:
+        ./dep start-docker --mounting-folder /mnt/sdc/data-caching-1c/ --worm --background
+        ./dep exec --command "./qflex --help"
+        ./dep exec --command "./qflex boot -c conf/DC/dc.yaml"
+        ./dep stop-docker
+    """
+    ok = DockerExec(
+        command=command,
+        container_name=container_name,
+        working_directory=working_directory,
+    ).execute(to_stdio=True, run_in_background=False)
+    # Propagate the inner command's failure as a non-zero process exit so that
+    # callers (tests, scripts, agents) actually see the failure instead of
+    # silently getting rc=0 while the inner qflex command crashed.
+    if not ok:
+        raise typer.Exit(1)
+
+
+@app.command()
+def stop_docker(
+    container_name: Annotated[str, typer.Option(help="Name of the container to stop and remove.")] = DEFAULT_CONTAINER_NAME,
+):
+    """
+    Stop and remove the named QFlex dev container. Idempotent — won't error if
+    the container doesn't exist.
+    """
+    DockerStop(container_name=container_name).execute(to_stdio=True, run_in_background=False)
 
 
 if __name__ == "__main__":

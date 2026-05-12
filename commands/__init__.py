@@ -1,5 +1,6 @@
-from .executer import Executor
+from .executer import Executor, SimulationCommand
 
 __all__ = [
-    "Executor"
+    "Executor",
+    "SimulationCommand",
 ]

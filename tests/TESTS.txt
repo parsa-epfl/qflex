@@ -1,0 +1,111 @@
+QFlex test suite — file × function × what it verifies
+======================================================
+
+Auto-generated for cleanup planning. Three categories:
+  1. Dry-run / unit  — fast, hermetic, run by default `make test`.
+  2. Real-run        — gated, slow, docker-based.
+  3. Helpers         — not actually tests; lives under tests/ for convenience.
+
+
+1. DRY-RUN / UNIT TESTS  (default `make test`)
+-----------------------------------------------
+
+| File                          | Function                                              | What it verifies                                                                                                  |
+|-------------------------------|-------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| test_boot.py                  | test_boot_two_nodes                                   | Vanilla two-node Boot: dispatch order is master-first, sentinel basenames match `Boot_node<N>`.                   |
+| test_boot.py                  | test_boot_with_interaction_script_dry_run             | Boot with `interaction_script` (Path A): bash includes the expect invocation.                                     |
+| test_boot.py                  | test_boot_with_login_ls_script_single_node            | Single-node Boot Path A using the `login_ls_script` fixture; ls capture wired through bash.                       |
+| test_boot.py                  | test_boot_with_login_ls_script_two_nodes              | Two-node Boot Path A; master-first ordering preserved with interaction_script set.                                |
+| test_boot.py                  | test_boot_interactive_tmux_dry_run                    | Boot Path B (`interactive_tmux=True`): emits `[tmux]` markers, opens one window per leaf.                          |
+| test_load.py                  | test_load_two_nodes                                   | Vanilla two-node Load: dispatch order + sentinel basenames.                                                        |
+| test_load.py                  | test_load_with_interaction_script_dry_run             | Load Path A with interaction_script.                                                                              |
+| test_init_warm.py             | test_init_warm_two_nodes                              | Vanilla two-node InitWarm dispatch.                                                                                |
+| test_functional_warming.py    | test_functional_warming_two_nodes                     | Vanilla two-node FW dispatch.                                                                                      |
+| test_functional_warming.py    | test_interactive_tmux_only_on_boot_and_load           | `SUPPORTS_INTERACTIVE` gate: FW must IGNORE `interactive_tmux=True` (only Boot/Load honor it).                     |
+| test_partition.py             | test_partition_two_nodes                              | PartitionCommand on both nodes.                                                                                    |
+| test_partition.py             | test_clean_partition_two_nodes                        | CleanPartitionCommand on both nodes.                                                                               |
+| test_partition.py             | test_unpartition_two_nodes                            | UnPartitionCommand on both nodes.                                                                                  |
+| test_run_idx.py               | test_run_idx_at_specific_partition_idx                | RunIdxCommand: per-(partition, idx) sentinel basename includes `_part<P>_idx<I>_node<N>`.                          |
+| test_run_single_partition.py  | test_run_single_partition_two_nodes                   | RunSinglePartitionCommand: sequential idxs within one partition.                                                   |
+| test_run_partition.py         | test_run_partition_full_tree_two_nodes                | RunPartitionCommand full tree: nodes × partitions × idxs leaf set.                                                |
+| test_run_partition.py         | test_run_partition_runs_partitions_in_parallel        | NON-DRY-RUN. Wall-clock test that partition axis fans out via mp.Process; asserts `1.5s < elapsed < 3.5s`.         |
+| test_result.py                | test_result_two_nodes                                 | RunResultCommand on both nodes.                                                                                    |
+| test_dep_injection_base.py    | test_base_merges_top_level_dict                       | DI/YAML `_base_:` block: component fields override base fields; `_base_` key stripped after merge.                 |
+| test_dep_injection_base.py    | test_base_resolves_against_extends_chain              | `_base_` resolves through the `extends:` parent chain.                                                             |
+| test_dep_injection_base.py    | test_base_missing_top_level_raises                    | Pointing `_base_:` at a missing top-level key raises a clear error.                                                |
+| test_dep_injection_base.py    | test_base_pointing_at_scalar_raises                   | `_base_` pointing at a scalar (not a dict) raises.                                                                 |
+| test_useful_commands.py       | test_script_invokes_expected_qflex_command            | LINT-Y: parametrized; greps each helper script in `useful_commands/` for the expected `./qflex …` substring.       |
+| test_useful_commands.py       | test_cleanup_targets_clean_up_sh                      | LINT-Y: `cleanup.sh` shells out to `./clean_up.sh`.                                                                |
+| test_useful_commands.py       | test_script_shell_parses                              | LINT-Y: `bash -n` syntax-check on each helper script.                                                              |
+
+
+2. REAL-RUN TESTS  (docker-based, gated)
+-----------------------------------------
+
+Gate: most are `QFLEX_REAL_RUN_TESTS=1` (default ON; set `QFLEX_SKIP_REAL_RUN=1` to disable).
+The bootstrap file uses a separate `QFLEX_INIT_TEST=1` gate.
+
+| File                              | Function                                                  | What it verifies                                                                                                               |
+|-----------------------------------|-----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| test_dev_container_smoke.py       | test_dev_container_exec_smoke                             | `./dep exec "echo …"` round-trips. Sanity check that the container is up.                                                      |
+| test_dev_container_smoke.py       | test_qflex_help_inside_container                          | `./qflex --help` runs inside the container. Validates the qflex script + imports load in the dev image.                        |
+| test_dev_container_smoke.py       | test_alpine_login_and_ls_real_run                         | Single-node alpine Boot driven by login_and_ls.exp; asserts captured ls output is non-empty.                                   |
+| test_boot_login_bootstrap.py      | test_init_alpine_boot_login_savevm                        | INIT GATE (`QFLEX_INIT_TEST=1`). Single-node alpine: install, boot, login, save `boot-login` snapshot.                          |
+| test_boot_login_bootstrap.py      | test_init_multi_boot_login_savevm                         | INIT GATE. Multi-node `boot-login` bootstrap. Produces the per-node qcow2 + `boot-login` everything else depends on.           |
+| test_chained_pipeline.py          | test_03_boot_creates_loaded_test_with_workload            | `./qflex boot -c dc-multi.yaml`: from `boot-login`, run ping handshake (master ↔ follower), `savevm loaded-test`. Asserts both qcow2 carry `loaded-test` AND ls_after_create.txt has testN.txt. |
+| test_chained_pipeline.py          | test_03b_load_verifies_files_and_swaps_workload           | `./qflex load`: 100-pkt foreground ping pre-flight (sync-on PDES), ls capture (asserts test1/2.txt survived savevm/loadvm), then KILLS the legacy big ping, starts the bidirectional `head /dev/urandom → nc → cmp` workload (forever), and re-savevms `loaded-test` with the workload running. Asserts ls_after_load.txt has testN.txt. |
+| test_chained_pipeline.py          | test_04_init_warm_creates_init_warmed_snapshot            | `./qflex initialize`: WormCacheQFlex `pure_fill` warms the cache hierarchy over the random-read workload; on full warm, savevm `init_warmed` per node. Asserts both qcow2 carry `init_warmed` + the external incremental-base files.    |
+| test_chained_pipeline.py          | test_05_fw_creates_per_sample_snapshots                   | `./qflex fw --sample-size 30`: functional-warm over the population, produce snapshot_0..29 per node. Tolerates the known last-snapshot drop.                                                                |
+| test_chained_pipeline.py          | test_06_partition_splits_samples_into_chunks              | `./qflex partition`: chops the FW snapshots into 5 partition folders.                                                          |
+| test_chained_pipeline.py          | test_07_run_idx_single_sample                             | `./qflex run-idx`: single (partition=0, idx=0) leaf per node. Asserts END_OF_EMULATION + `all.measurement.end.log` present.    |
+| test_chained_pipeline.py          | test_08_run_single_partition_sequential_idxs              | `./qflex run-single-partition --partition-number 0`: sequential idxs within partition 0.                                       |
+| test_chained_pipeline.py          | test_09_run_partition_full_fanout                         | `./qflex run-partition`: full multi-node × all-partitions × all-idxs tree. Longest test.                                       |
+| test_chained_pipeline.py          | test_10_result_aggregates_to_core_info_csv                | `./qflex result`: aggregates per-partition output into `core_info_new.csv`. Asserts new IPC + microarch IPC values look sane.  |
+| test_dev_image_contents.py        | test_iputils_ping_installed                               | The dev docker image has `ping`.                                                                                               |
+| test_dev_image_contents.py        | test_perf_resolves_to_a_binary                            | The `perf` shim exists in the image.                                                                                           |
+| test_dev_image_contents.py        | test_rust_toolchain_present                               | `rustc` and `cargo` exist.                                                                                                     |
+| test_dev_image_contents.py        | test_inferno_binary_on_path                               | Parametrized: `inferno-collapse-perf` and `inferno-flamegraph` exist.                                                          |
+| test_dev_image_contents.py        | test_host_dns_server_propagates_to_container              | Parametrized: each host nameserver from `commands.docker._read_host_dns()` is in the container's `/etc/resolv.conf`.           |
+| test_dev_image_contents.py        | test_host_dns_search_propagates_to_container              | Parametrized: each host DNS search domain propagates into the container.                                                       |
+
+
+3. HELPERS  (not pytest-collected; live in tests/ for shared imports)
+---------------------------------------------------------------------
+
+| File                  | Function              | What it does                                                                                                                                                                                       |
+|-----------------------|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| container_compiler.py | compile_in_container  | Recompiles qemu/ + parallel-qemu/ (and optionally flexus/ via `--include-flexus`) inside the long-lived `qflex_test` container. Invoked by `make test-iterate` (no flexus) and by `make test QFLEX_RECOMPILE=1` (with flexus). Container is left running so the next real-run session reuses it. |
+
+
+4. EXPECT SCRIPTS UNDER tests/realrun/  (paired by phase, wired in dc-multi.yaml)
+---------------------------------------------------------------------------------
+
+| File                                              | Role               | What it does                                                                                                                                                                                                                                                |
+|---------------------------------------------------|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| login_and_ls.exp                                  | single-node, boot  | Used by test_alpine_login_and_ls_real_run: log in as qflex, capture ls.                                                                                                                                                                                     |
+| boot_login_savevm.exp                             | master, init       | Bootstrap: master configures alpine, savevms `boot-login`. Used by test_init_alpine_boot_login_savevm + test_init_multi_boot_login_savevm.                                                                                                                  |
+| boot_login_wait.exp                               | follower, init     | Bootstrap follower: tails Boot.log for `savevm log 7` and quits.                                                                                                                                                                                            |
+| loaded_test_create_master.exp  (was ping_savevm_master.exp)  | master, boot       | Per-leaf script in dc-multi.yaml's boot phase. Loads `boot-login`, touches test1.txt + captures ls_after_create.txt, configures 192.168.100.1 on the PDES NIC, runs the big background ping for the at_first_echo handshake, then savevm `loaded-test`.   |
+| loaded_test_create_follower.exp  (was ping_wait.exp)         | follower, boot     | Mirror of master: touches test2.txt, configures 192.168.100.2, runs ping in background for the handshake, signals via at_first_echo flag, waits for own `savevm log 7`, quits.                                                                              |
+| loaded_test_verify_and_swap_workload.exp  (was load_verify_ls.exp) | both, load         | Per-leaf script in dc-multi.yaml's load phase. (1) 100-pkt foreground ping pre-flight under sync-on PDES (asserts 100/100). (2) ls capture (asserts testN.txt survives savevm/loadvm). (3) Kills the legacy big ping. (4) Starts an echo server (`nc -l` + FIFO) on its own port AND a sender loop (`head -c 64 /dev/urandom → nc → cmp` per iteration) targeting peer's port — runs forever; mismatches log to /tmp/corruption.log. (5) Verifies ECHO_PROBE / SENDER_PROBE / CRPRE pre-savevm. (6) Master only: `delvm loaded-test; savevm loaded-test` (re-saves with the workload running so init/fw inherit it). Follower waits for `savevm log 7` in own Load.log + signals via load_savevm_done flag. |
+| boot_create_and_savevm_master.exp                 | master             | Older savevm-create flow; appears unused after the dc-multi.yaml restructuring (referenced only from conf/DC/dc-multi-savevm-create.yaml which no test exercises). Cleanup candidate.                                                                       |
+| boot_create_and_wait.exp                          | follower           | Older savevm-create follower; same status as above. Cleanup candidate.                                                                                                                                                                                       |
+
+
+5. SUMMARY OF RUNS AFTER THIS SESSION'S CHANGES
+------------------------------------------------
+
+Boot (test_03)              : 2:09  PASS — loaded-test with original ping running.
+Load (test_03b)             : 1:36  PASS — 100-ping pre-flight → workload swap → re-savevm. Random read confirmed in Load.log on both nodes; CRPRE=N.
+Init (test_04)              : 5:22  PASS — warming over the random-read workload, init_warmed saved.
+FW   (test_05)              : 8:25  PASS — sample selection over the same workload.
+
+The random read + send + cmp + log loop is the workload from load onward; it survives savevm/loadvm into init and fw because load re-saves loaded-test while it's running.
+
+
+6. CLEANUP CANDIDATES
+----------------------
+
+  - tests/test_useful_commands.py: it lints helper shell scripts; not testing qflex behavior. Move to a `lint/` step or drop.
+  - tests/realrun/boot_create_and_savevm_master.exp + boot_create_and_wait.exp: stale (referenced only from a YAML no test exercises).
+  - tests/test_dev_container_smoke.py::test_dev_container_exec_smoke: covered transitively by every other real-run test.

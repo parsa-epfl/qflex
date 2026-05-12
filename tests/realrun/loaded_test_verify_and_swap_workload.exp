@@ -1,0 +1,484 @@
+#!/usr/bin/env expect
+# Path A driver for the load-side multi-node savevm test. Thin guest driver:
+# types commands at the serial telnet, writes captured artifacts under
+# $EXP_FOLDER/ for the python pytest layer to assert on. Coordinates with the
+# peer leaf via sentinel files. NO assertions in this script — every check
+# (ping summary, workload pids, corruption log) is verified by
+# tests/test_chained_pipeline.py::test_03b reading the artifacts below.
+#
+# === WHAT THIS SCRIPT DOES (in order) ============================================
+#   1. Drain the post-loadvm serial flood — the snapshot has echo_server.sh,
+#      sender.sh, their nc/cat children, and a 1ms ping all resuming the
+#      moment loadvm completes. They dump heartbeats + ping output through
+#      the serial chardev faster than expect can keep up; without draining,
+#      the chardev's TCP buffer fills and the connection is dropped before
+#      we type anything.
+#   2. `pkill -9` EVERYTHING the snapshot brought back: sender.sh,
+#      echo_server.sh, the nc listener, the cat-fifo bridge, and the boot-
+#      phase ping. Clean slate. The 1ms ping in particular is the WWT race
+#      trigger under sync=true / 100 µs latency — it MUST be dead before
+#      anything else runs.
+#   3. `doas chmod 666 /dev/console` so subsequent workload scripts (started
+#      as the qflex user) can heartbeat to the serial console.
+#   4. **Validate the wire with 100 pings** (`ping -c 100 -i 0.01` — 100
+#      packets at 10 ms intervals = 1 second total). Captured to
+#      ping_summary_after_loadvm.txt; pytest asserts `tx>0 && tx==rx`.
+#      100 µs intervals trigger the WWT race; 10 ms is safely below it.
+#   5. Capture `ls` for the workload-file persistence check
+#      (ls_after_load.txt; pytest asserts `testN.txt` is present).
+#   6. Install /tmp/echo_server.sh + /tmp/sender.sh via heredoc — visible in
+#      qemu_serial.log because we `cat` each back. Echo server runs the
+#      classic cat-fifo loop (no `tee`; tee's stdout to a fifo is fully
+#      buffered, would deadlock the loop on 64-byte messages). Sender does
+#      64 random bytes per iteration → peer's echo server → cmp on returned
+#      bytes; logs every iteration to /dev/console with sent + recv hex
+#      preview + status (ok/MISMATCH/noreply). Sender pacing is `usleep
+#      100` (100 µs between iterations) so the timing-phase Flexus has
+#      actual instructions to measure.
+#   7. Start both via `nohup ... &`. Sleep 3 seconds: long enough for both
+#      sides to confirm the wire is exchanging real bytes (sender's
+#      [time] sent X -> recv Y [ok] lines + echo server's [time] echo conn
+#      ended lines visible on /dev/console → qemu_serial.log).
+#   8. Probe each leaf's workload state to /tmp/workload_state.txt
+#      (echo_server_pid/rc, sender_pid/rc, corruption_log_size) and capture
+#      it + /tmp/corruption.log to host artifacts for pytest assertions.
+#   9. Touch this leaf's `node<N>_load_workload_ready.flag` and wait for the
+#      peer's. Both ready means both nodes have the workload up.
+#  10. **Master only**: connect monitor, `delvm loaded-test`, `savevm
+#      loaded-test` — workload is captured INTO the snapshot exactly as it
+#      is, still running. Wait for the follower's
+#      `node<N>_load_savevm_done.flag`, then `quit`.
+#       **Follower**: poll own Load.log for `savevm log 7` (the per-node
+#      savevm completion signal), touch
+#      `node<N>_load_savevm_done.flag`, then quit_qemu.
+# =================================================================================
+#
+# Artifacts written (all under $EXP_FOLDER):
+#   ls_after_load.txt              — ls output post-loadvm
+#   ping_summary_after_loadvm.txt  — busybox ping -c 100 output incl. summary
+#   workload_state.txt             — echo_server_pid/rc, sender_pid/rc,
+#                                    corruption_log_size
+#   corruption_log_pre_savevm.txt  — `cat /tmp/corruption.log` (empty = clean)
+#
+# Sentinel handshake (under <group_folder>):
+#   node<N>_ping_ready.flag           — peer ready for peer-ping
+#   node<N>_load_workload_ready.flag  — peer's workload swap is up
+#   node<N>_load_savevm_done.flag     — follower's per-node savevm finalised
+
+set timeout 900
+
+# Tcl while/sleep loops aren't bound by `set timeout` — see the expect-scripts
+# skill. Names match the canonical budgets.
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+set node_number  $env(NODE_NUMBER)
+
+# Per-node IPs were baked into `loaded-test` by the boot-side scripts:
+# node 0 → .1, node 1 → .2.
+if {$node_number == 0} {
+    set peer_ip "192.168.100.2"
+    set listen_port 12345
+    set peer_port   12346
+} else {
+    set peer_ip "192.168.100.1"
+    set listen_port 12346
+    set peer_port   12345
+}
+
+set group_folder           [file dirname $exp_folder]
+set my_ping_ready_flag     "$group_folder/node${node_number}_ping_ready.flag"
+set peer_ping_ready_flag   "$group_folder/node[expr {1 - $node_number}]_ping_ready.flag"
+set my_wl_ready_flag       "$group_folder/node${node_number}_load_workload_ready.flag"
+set peer_wl_ready_flag     "$group_folder/node[expr {1 - $node_number}]_load_workload_ready.flag"
+set my_savevm_done_flag    "$group_folder/node${node_number}_load_savevm_done.flag"
+set peer_savevm_done_flag  "$group_folder/node[expr {1 - $node_number}]_load_savevm_done.flag"
+set my_load_log            "$exp_folder/Load.log"
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+catch {file delete -force $my_ping_ready_flag}
+catch {file delete -force $my_wl_ready_flag}
+catch {file delete -force $my_savevm_done_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
+# Wait until $needle appears in $path. Used by the follower to detect that its
+# own per-node savevm has finalised (qemu prints `savevm log 7` from
+# save_snapshot()).
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]
+            set content [read $fh]
+            close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+# Send a guest command, wait for a unique end-of-capture marker the guest
+# prints, write everything in expect's buffer to $exp_folder/$out_name.
+#
+# The marker is `printf '\nQFLEXEOC%s\n' "$$"` — i.e. "QFLEXEOC<pid>\n".
+# Why a marker, not just "expect prompt": busybox's terminal echo + shell
+# redraw can make the post-command prompt appear in the buffer BEFORE the
+# command's output (when the command is dispatched while the shell is
+# settling — the prompt redraw races the typed echo). A simple
+# `expect -re {[\$#] +}` then matches the redraw prompt and capture_to
+# returns with stale-buffer bytes instead of the real output (12 bytes of
+# `qflex:~$ ` instead of the ping summary). The PID-bearing marker can't
+# appear in the typed echo (the typed bytes have the literal `%s`, not a
+# digit), so the regex `\nQFLEXEOC\d+\n` only matches the actual output.
+# Pytest tolerates the typed-echo prefix in the captured buffer via
+# regex / key=value parsing.
+proc capture_to {out_name shell_cmd} {
+    global exp_folder spawn_id
+    send "$shell_cmd; printf '\\nQFLEXEOC%s\\n' \"\$\$\"\r"
+    expect {
+        timeout { puts "ERROR: '$shell_cmd' didn't return end-of-capture marker" }
+        -re {\nQFLEXEOC[0-9]+\r?\n}
+    }
+    set buf $expect_out(buffer)
+    # Drain the post-marker prompt so the next capture_to starts clean.
+    expect {
+        timeout { }
+        -re {[\$#] +}
+    }
+    set path "$exp_folder/$out_name"
+    if {[catch {open $path "w"} f]} {
+        puts "ERROR: could not open $path for writing: $f"
+        return
+    }
+    puts $f $buf
+    close $f
+    puts "wrote $path"
+}
+
+# Write a multi-line script to $path inside the guest via heredoc, then `cat`
+# it back so the script body shows up in qemu_serial.log / Load.log (much
+# easier to read than a giant single-line `nohup sh -c '...'`). Heredoc
+# terminator is single-quoted so the body is written verbatim — the script's
+# own `$VAR` / `$(...)` only get expanded when the script later runs.
+proc install_script {path body} {
+    send "cat > $path <<'WORKLOAD_EOF'\r"
+    foreach line [split $body "\n"] {
+        send "$line\r"
+    }
+    send "WORKLOAD_EOF\r"
+    expect -re {[\$#] +}
+    send "cat $path\r"
+    expect -re {[\$#] +}
+}
+
+# --- 1. Connect serial -------------------------------------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+set saved_timeout $timeout
+
+# Tcl helper: drain bytes from expect's buffer for `secs` seconds of WALL
+# CLOCK. ACTIVELY reads from the chardev so its outbound TCP buffer stays
+# drained — without this, when the guest's workload prints to /dev/console
+# faster than `expect prompt` polls, qemu's chardev buffer fills and the
+# host kernel drops the connection mid-test.
+proc drain_for {secs} {
+    global timeout
+    set saved $timeout
+    set timeout 1
+    set deadline [expr {[clock seconds] + $secs}]
+    while {[clock seconds] < $deadline} {
+        expect {
+            -re {.+} { }
+            timeout { }
+        }
+    }
+    set timeout $saved
+}
+
+# --- 2. Kill workload resumed from snapshot (sender.sh / echo_server.sh / nc) --
+# Once test_03b succeeds, loaded-test gets re-savevm'd with the workload still
+# running; next run they resume and flood /dev/console, stalling qemu's chardev
+# output buffer and breaking every prompt-based expect. Ctrl-C any foreground
+# inhabitant first, then blind-send pkill (keystrokes flow guest-side even
+# under output backpressure), then drain hard so the post-kill backlog flushes
+# faster than `expect prompt`'s regex polling can on its own.
+drain_for 2
+send "\003"
+drain_for 1
+send "pkill -9 -f /tmp/sender.sh; pkill -9 -f /tmp/echo_server.sh; pkill -9 -f 'nc '; pkill -9 -f 'ping 192'\r"
+drain_for 5
+send "\r"
+set timeout $BUDGET_CHECKPOINTING_S
+expect {
+    timeout { puts "ERROR: post-kill prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+set timeout $saved_timeout
+
+# --- 3. chmod /dev/console so workload heartbeats are visible ---------------
+# devtmpfs is in RAM so this chmod is captured in the upcoming savevm and
+# survives every later loadvm — workload scripts started here keep
+# heartbeating to qemu_serial.log / InitWarm.log / FunctionalWarming.log.
+send "doas chmod 666 /dev/console\r"
+expect {
+    timeout { puts "ERROR: doas chmod /dev/console timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {doas \([^)]+\) password: } { send "qflex\r"; exp_continue }
+    -re {Authentication failed} { puts "ERROR: doas auth failed"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# --- 4. Validate the wire — 100 pings at 10 ms intervals --------------------
+# `-c 100 -i 0.01` gives a 1-second 100-packet burst. 1 ms intervals trigger
+# the WWT race; 10 ms is well below the threshold (still useful coverage).
+# Sync sides at the prompt first so neither fires while the peer is still
+# settling.
+
+if {[catch {set f [open $my_ping_ready_flag w]; close $f} err]} {
+    puts "WARN: could not write $my_ping_ready_flag: $err"
+}
+wait_for_file $peer_ping_ready_flag $BUDGET_CHECKPOINTING_S
+
+set timeout $BUDGET_PROMPT_S
+capture_to "ping_summary_after_loadvm.txt" \
+    "ping $peer_ip -c 100 -W 2000 -i 0.01"
+set timeout $saved_timeout
+
+# --- 3. ls capture (workload-file persistence verification) ----------------
+
+capture_to "ls_after_load.txt" "ls"
+
+# --- 4. Swap the boot-phase ping for an integrity-checked echo workload ----
+# Each node listens on its own port AND sends to the peer; cmp catches any
+# byte-level corruption and appends to /tmp/corruption.log inside the guest.
+# After kicking the loops off, dump the live pids / rc / corruption-size
+# probe to a single guest file, then `cat` it back over serial so the .exp
+# captures it under $exp_folder/workload_state.txt.
+
+send "rm -f /tmp/corruption.log /tmp/echo.out /tmp/sender.out /tmp/workload_state.txt\r"
+expect -re {[\$#] +}
+
+# Echo server: persistent listener via busybox `nc -lk -e cat`.
+# `-lk` keeps nc accepting connections after each peer close (with -e it
+# operates as a persistent server per `nc -h`); `-e cat` runs `cat` per
+# connection so received bytes are echoed straight back to the peer.
+# Plain `nc -l` exits after one connection; the rm+mkfifo+restart fifo
+# loop has a ~ms gap between connections during which sender's nc gets
+# RST → 99% of fast-cadence iterations get [noreply]. nc -lk -e cat has
+# no such gap.
+# A 5-second sidecar heartbeat to /dev/console proves the server is up
+# in qemu_serial.log + InitWarm.log/FunctionalWarming.log without
+# flooding (per-connection logging at hundreds/sec would write GBs).
+set echo_server_body "#!/bin/sh
+( while true; do
+    echo \"\[\$(date '+%H:%M:%S')\] echo server alive on port $listen_port\" > /dev/console
+    sleep 5
+done ) &
+exec nc -lk -p $listen_port -e cat"
+install_script "/tmp/echo_server.sh" $echo_server_body
+
+# Sender: 64 random bytes per iteration → peer's echo server (nc -lk -e cat)
+# → cmp on the returned bytes. Mismatches log to /tmp/corruption.log.
+# `usleep 100` (100 µs between iterations) is the user's spec. The
+# `while true` loop is the contract that makes this run forever — the
+# .exp's savevm captures the loop running, init/fw/run-* resume it.
+# Per-iteration print to /dev/console shows actual sent + received bytes
+# (8-byte hex preview each direction). With nc -lk -e cat on the peer,
+# each round-trip is ~ms (TCP open/data/close), so the effective console
+# write rate is ~hundreds/sec — within the chardev's drain rate.
+set sender_body "#!/bin/sh
+while true; do
+    head -c 64 /dev/urandom > /tmp/wl_sent
+    SENT=\$(head -c 8 /tmp/wl_sent | od -An -tx1 | tr -d ' \\n')
+    if nc -w 2 $peer_ip $peer_port < /tmp/wl_sent > /tmp/wl_recv 2>/dev/null
+    then
+        SIZE=\$(stat -c %s /tmp/wl_recv 2>/dev/null || echo 0)
+        RECV=\$(head -c 8 /tmp/wl_recv 2>/dev/null | od -An -tx1 | tr -d ' \\n')
+        if \[ \"\$SIZE\" = \"64\" \] && cmp -s /tmp/wl_sent /tmp/wl_recv; then
+            STATUS=ok
+        else
+            STATUS=MISMATCH
+            echo \"MISMATCH \$(date)\" >> /tmp/corruption.log
+        fi
+    else
+        SIZE=0
+        RECV=
+        STATUS=noreply
+    fi
+    LINE=\"\[\$(date '+%H:%M:%S')\] sent \${SENT} -> recv \${SIZE}B \${RECV} \[\$STATUS\]\"
+    echo \"\$LINE\" >> /tmp/sender.log
+    echo \"\$LINE\" > /dev/console
+    usleep 1000
+done"
+install_script "/tmp/sender.sh" $sender_body
+
+send "chmod +x /tmp/echo_server.sh /tmp/sender.sh\r"
+expect -re {[\$#] +}
+send "nohup /tmp/echo_server.sh >/tmp/echo.out 2>&1 &\r"
+expect -re {[\$#] +}
+send "nohup /tmp/sender.sh >/tmp/sender.out 2>&1 &\r"
+expect -re {[\$#] +}
+
+# Build the structured probe inside the guest, then cat it back so we can
+# capture it from the serial buffer. Uses key=value lines so pytest can
+# parse with a one-liner. drain_for 20 is HOST wall-clock — sending `sleep N`
+# to the guest would run in virtual time (much slower under PDES sync), and
+# all we need here is enough wall-clock for the workload to complete a few
+# iterations.
+#
+# pgrep matches the long-lived parent script paths, NOT the inner short-lived
+# `nc -l -p X` / `head -c 64 /dev/urandom` processes — those only exist for a
+# few ms per iteration, so a probe running between iterations would miss them.
+drain_for 20
+send "{ \
+echo echo_server_pid=\$(pgrep -f /tmp/echo_server.sh | head -1); \
+pgrep -f /tmp/echo_server.sh >/dev/null; echo echo_server_rc=\$?; \
+echo sender_pid=\$(pgrep -f /tmp/sender.sh | head -1); \
+pgrep -f /tmp/sender.sh >/dev/null; echo sender_rc=\$?; \
+echo corruption_log_size=\$(stat -c %s /tmp/corruption.log 2>/dev/null || echo 0); \
+} > /tmp/workload_state.txt\r"
+expect -re {[\$#] +}
+
+capture_to "workload_state.txt"            "cat /tmp/workload_state.txt"
+capture_to "corruption_log_pre_savevm.txt" "cat /tmp/corruption.log 2>/dev/null"
+
+# Tell peer our workload is up.
+if {[catch {set f [open $my_wl_ready_flag w]; close $f} err]} {
+    puts "WARN: could not write $my_wl_ready_flag: $err"
+}
+
+# --- 5. Settle 10 s with active drain, then capture last-100-ok count -----
+# Both nodes wait here. Use drain_for (NOT `send sleep + expect prompt`):
+# the sender prints to /dev/console at ~1000 lines/s, which fills the
+# chardev's outbound TCP buffer faster than a passive `expect` polls.
+# Without an ACTIVELY-DRAINING wait, qemu drops the chardev and the .exp
+# dies mid-savevm-coordination.
+wait_for_file $peer_wl_ready_flag $BUDGET_CHECKPOINTING_S
+puts "both leaves' workloads ready; settling for 10 s before savevm"
+drain_for 10
+
+# Sync to the next prompt before doing more work.
+send "\r"
+expect {
+    timeout { puts "ERROR: post-settle prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# Capture how many of the LAST 10 sender iterations were [ok]. Pytest
+# asserts == 10 — i.e. no [noreply] / [MISMATCH] in the most recent
+# 10 iterations before savevm. Initial warm-up [noreply]s during the
+# first second (peer not loadvm'd yet) are fine; they're not in the
+# last 10 lines after the settle. Use Tcl braces so the brackets in the
+# grep regex aren't taken as Tcl command substitution.
+capture_to "ok_in_last_10.txt" {tail -10 /tmp/sender.log | grep -c '\[ok\]$'}
+
+# --- 6. savevm `loaded-test` (master) / wait for completion (follower) -----
+
+if {$node_number == 0} {
+    catch {close -i $serial_sid}
+    catch {wait -i $serial_sid}
+
+    set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+    set spawn_id $monitor_sid
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        timeout { puts "ERROR: monitor prompt timed out post-workload"; exit 1 }
+        "(qemu) "
+    }
+    set timeout $BUDGET_CHECKPOINTING_S
+    send "delvm loaded-test\r"
+    expect {
+        timeout { puts "WARN: delvm didn't return; continuing anyway" }
+        "(qemu) "
+    }
+    send "savevm loaded-test\r"
+    expect {
+        timeout { puts "ERROR: re-savevm didn't return"; exit 1 }
+        "(qemu) "
+    }
+    puts "re-savevm of loaded-test (with workload running) completed"
+
+    wait_for_file $peer_savevm_done_flag $BUDGET_CHECKPOINTING_S
+    puts "saw follower's load_savevm_done flag"
+
+    send "quit\r"
+    catch {expect eof}
+    exit 0
+} else {
+    # Follower: master's savevm fires PDES drain → our qemu does its per-node
+    # savevm too; `savevm log 7` in our Load.log is the completion signal.
+    wait_for_substring $my_load_log "savevm log 7" $BUDGET_CHECKPOINTING_S
+    puts "saw 'savevm log 7' in $my_load_log; per-node savevm completed"
+
+    if {[catch {set f [open $my_savevm_done_flag w]; close $f} err]} {
+        puts "WARN: could not write $my_savevm_done_flag: $err"
+    }
+}
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+# Grace before quit so the master's savevm doesn't race our final captures
+# being flushed; quit_qemu short-circuits if the monitor is gone.
+sleep 5
+quit_qemu $monitor_port
+exit 0

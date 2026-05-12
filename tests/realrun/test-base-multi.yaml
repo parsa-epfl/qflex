@@ -1,0 +1,13 @@
+# Test base for multi-node real-run YAMLs. Same shape as conf/DC/dc-multi.yaml
+# but with `_leaf_defaults.memory_gb` shrunk to 4 GB on every leaf. See
+# test-base-single.yaml for the rationale.
+extends: ../../conf/DC/dc-multi
+
+_leaf_defaults:
+  memory_gb: 4
+  # Short FW population so `./qflex fw` finishes quickly under test.
+  population_seconds: 0.1
+  # Use vanilla (timing) qemu instead of parallel-qemu. parallel-qemu's
+  # icount-based virtual-time path stalls so far behind wall-clock under
+  # PDES sync that even short drain windows take 10+ minutes.
+  is_parallel: false

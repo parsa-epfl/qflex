@@ -1,50 +1,63 @@
-import os
-
 import glob
 
-from .executer import SequentialGroupExecutor, SimpleCMDExecutor
+from .executer import SequentialGroupExecutor, SimpleCMDExecutor, SimulationCommand
 from .config import ExperimentContext, clone_experiment_context
 from .run_idx import RunIdxCommand
 
 
-class RunSinglePartitionCommand(SequentialGroupExecutor):
+# `SequentialGroupExecutor` first so its `__init__(children)` and `execute()`
+# win MRO resolution; `SimulationCommand` adds the sync-asserts mixin. Both
+# subclass `Executor`; Python's MRO collapses the diamond cleanly.
+class RunSinglePartitionCommand(SequentialGroupExecutor, SimulationCommand):
+    # vanilla-qemu's PDES exit handshake is clean; no peer-kill needed. See RunIdxCommand.
+    NEEDS_PDES_PEER_KILL = False
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 warming_ratio: int,
-                 measurement_ratio: int,
                  use_stdio: bool = True):
+        # Init lean — children are built lazily in _build_children() so this
+        # executor can be constructed before its partition snapshots exist
+        # (true for the group case in multi-experiment dispatch).
+        super().__init__([])
         self.experiment_context = experiment_context
-        self.detailed_warming_ratio = warming_ratio
-        self.measurement_ratio = measurement_ratio
         self.use_stdio = use_stdio
-        self.snapshots = glob.glob("snapshot_*.loc", root_dir=self.experiment_context.get_partition_folder())
-        self.idxs = [int(f.removeprefix("snapshot_").removesuffix(".loc")) for f in self.snapshots]
-        self.idxs.sort()
-        
-        if len(self.idxs) == 0:
-            super().__init__([])
-            return
-        print("snapshot idx are " + str(self.idxs))
-        for i in range(min(self.idxs), max(self.idxs)+1):
-            if i not in self.idxs:
-                raise ValueError(f"Missing snapshot for index {i} in partition {self.experiment_context.get_partition_folder()}. Found snapshots for indices {self.idxs}.")
-            
-        print(f"Found snapshots for indices {self.idxs} in partition {self.experiment_context.get_partition_folder()}.")
+        self._assert_syncs_true()
 
-        setup_command = SimpleCMDExecutor("rm -rf output_state")
+    def _build_children(self):
+        partition_folder = self.experiment_context.get_partition_folder()
+        snapshots = glob.glob("snapshot_*.loc", root_dir=partition_folder)
+        idxs = sorted(int(f.removeprefix("snapshot_").removesuffix(".loc")) for f in snapshots)
+        if len(idxs) == 0:
+            return []
+        for i in range(min(idxs), max(idxs) + 1):
+            if i not in idxs:
+                raise ValueError(
+                    f"Missing snapshot for index {i} in partition "
+                    f"{partition_folder}. Found {idxs}."
+                )
+
+        # Wipe the per-partition log/err once before the first idx runs. Each
+        # RunIdxCommand below appends (>>/2>>) so all idxs accumulate into
+        # one shared log/err with per-idx banners (see run_idx.py). Without
+        # this wipe, leftover content from a prior partition run would mix
+        # with the new run's output.
         children = [
-            setup_command,
+            SimpleCMDExecutor("rm -rf output_state"),
+            SimpleCMDExecutor(
+                f': > "{partition_folder}/log" && : > "{partition_folder}/err"'
+            ),
         ]
-        for idx in self.idxs:
-            cloned_experiment_context = clone_experiment_context(self.experiment_context, idx=idx)
-            run_idx = RunIdxCommand(cloned_experiment_context, self.detailed_warming_ratio, self.measurement_ratio, use_stdio=self.use_stdio)
-            children.append(run_idx)
-        
-        super().__init__(children)
-    
+        for idx in idxs:
+            sub_ctx = clone_experiment_context(self.experiment_context, idx=idx)
+            children.append(
+                RunIdxCommand(
+                    sub_ctx,
+                    use_stdio=self.use_stdio,
+                )
+            )
+            # 5-second sleep between indexes to give the system time to recover. TODO fix this
+            children.append(SimpleCMDExecutor("sleep 5"))
+        return children
+
     def cmd(self) -> str:
         raise NotImplementedError("RunSinglePartitionCommand does not support cmd. Use execute instead.")
-
-        
-        

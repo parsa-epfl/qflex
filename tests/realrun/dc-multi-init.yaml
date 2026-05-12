@@ -1,0 +1,36 @@
+# Multi-node init: boot both nodes through Alpine, wait for login prompt, master
+# savevm's `boot-login` (PDES drain persists every node's CPU+memory into its
+# per-node qcow2). Subsequent multi-node test YAMLs `loadvm: boot-login` to skip
+# the slow Alpine boot.
+#
+# Per-leaf interaction_script is asymmetric (master savevm's, follower waits) so
+# this scenario can't share a YAML with the other multi-node `boot` flows
+# (savevm-create, loaded). Same `qflex_test_*` experiment_names as the other
+# multi-node test YAMLs so they all share per-node `<exp>/run/` and find the
+# external boot-login.zstd written here.
+#
+# Boot phase: latencies 1ms + sync=false (Alpine boot freezes under default
+# 100us+sync=true; 1ms gives PDES drift headroom).
+extends: test-base-multi
+
+components:
+  experiment_context:
+    experiment_name: qflex_test_multi
+
+  experiment_context_node_0:
+    experiment_name: qflex_test_multi-node-0
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/boot_login_savevm.exp
+    serial_telnet_port: 55671
+    telnet_port: 55771
+    latencies_ns_list: [1000000]
+    syncs_list: ["false"]
+
+  experiment_context_node_1:
+    experiment_name: qflex_test_multi-node-1
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/boot_login_wait.exp
+    serial_telnet_port: 55672
+    telnet_port: 55772
+    latencies_ns_list: [1000000]
+    syncs_list: ["false"]

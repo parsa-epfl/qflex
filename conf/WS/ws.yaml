@@ -1,0 +1,34 @@
+extends: WS_base
+
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: web-search-single-node-yaml-0
+    doubled_vcpu: true
+    phantom_cpu_ipc: 2
+    latencies_ns_list: [1000000]
+    syncs_list: ["false"]
+
+
+boot:
+  components:
+    experiment_context:
+      interaction_script: /home/dev/qflex/conf/WS/expects/boot_savevm_booted_single.exp
+
+load:
+  components:
+    experiment_context:
+      interaction_script: /home/dev/qflex/conf/WS/expects/load_savevm_loaded_single.exp
+      loadvm_name: booted
+
+initialize:
+  components:
+    experiment_context:
+      loadvm_name: loaded
+
+
+# TODO see if you have to pass in sample size 3 times or not
+fw:
+  components:
+    experiment_context:
+      loadvm_name: init_warmed

@@ -1,0 +1,266 @@
+#!/usr/bin/env expect
+# Master driver for the `loaded-test` snapshot creation. Loads from boot-login,
+# logs in as qflex, configures the PDES NIC to 192.168.100.1, kicks off
+# `ping 192.168.100.2 ...` in the background, waits for the first ICMP echo
+# back, signals the follower, waits for the follower to also have its first
+# echo, then `savevm loaded-test` over the monitor and quits.
+#
+# Refuses to run on a non-master multi-node leaf — non-master uses ping_wait.exp.
+#
+# Coordination uses the same per-node-flag handshake as boot_login_savevm.exp:
+#   * node1_at_first_echo.flag — follower signals "I see incoming pings"
+#   * node1_savevm_done.flag   — follower signals "my per-node savevm finalised"
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_FIRST_ECHO_S    600
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+set node_number  $env(NODE_NUMBER)
+
+set group_folder           [file dirname $exp_folder]
+set my_at_first_echo_flag  "$group_folder/node${node_number}_at_first_echo.flag"
+set follower_first_echo    "$group_folder/node1_at_first_echo.flag"
+set follower_savevm_done   "$group_folder/node1_savevm_done.flag"
+
+# Master is node 0; -1 (single-node) doesn't run pings (no peer). Refuse other.
+if {$node_number != 0} {
+    puts "ERROR: ping_savevm_master.exp ran on node $node_number — only node 0 (master of a multi-node setup) should run this script. Use ping_wait.exp for non-master leaves."
+    exit 1
+}
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+# Clear stale sentinels from a prior run.
+catch {file delete -force $my_at_first_echo_flag}
+catch {file delete -force $follower_first_echo}
+catch {file delete -force $follower_savevm_done}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
+# --- 1. Connect serial + login ---------------------------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "ERROR: login prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }
+}
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: password prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Pp]assword: }
+}
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# --- 1b. Touch test1.txt + capture ls_after_create -------------------------
+# Bakes a known file into the upcoming `loaded-test` snapshot so a later
+# `loadvm loaded-test` can verify per-node file persistence (savevm/loadvm
+# round-trip). Two-stage match: first the `ls\r` echo, then the prompt — so
+# expect_out(buffer) is the listing, not a stale prompt redraw.
+send "touch test1.txt && ls\r"
+expect {
+    timeout { puts "ERROR: ls echo didn't come back"; quit_qemu $monitor_port; exit 1 }
+    "ls\r"
+}
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+set ls_output $expect_out(buffer)
+set out_path "$exp_folder/ls_after_create.txt"
+if {[catch {open $out_path "w"} f]} {
+    puts "ERROR: could not open $out_path for writing: $f"
+} else {
+    puts $f $ls_output
+    close $f
+    puts "wrote $out_path"
+}
+
+# --- 2. Configure 192.168.100.1 on the PDES NIC ----------------------------
+#
+# The PDES NIC is the virtio-net-pci with MAC 52:54:00:aa:bb:00 (master = node 0,
+# i = 0 → mac suffix 00; see commands/config.py:setup_nic_args). We discover
+# the iface name by MAC because Alpine's eth0/eth1 ordering depends on probe
+# order and isn't guaranteed across boots. `sudo` is required for `ip addr add` —
+# the qflex user must be in the sudoers group of the boot-login image.
+
+send "MAC=52:54:00:aa:bb:00; IFACE=\$(ip -o link | grep -i \"\$MAC\" | awk -F': ' '{print \$2}'); echo IFACE=\$IFACE\r"
+expect {
+    timeout { puts "ERROR: iface lookup timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {IFACE=([A-Za-z0-9]+)} {
+        set iface $expect_out(1,string)
+        puts "found PDES iface: $iface"
+    }
+}
+expect -re {[\$#] +}
+
+# Alpine image: `sudo` isn't installed, `doas` is. qflex is in doas.conf
+# but doas prompts for the user's password — answer with `qflex`.
+#
+# Marker design: `IPSETUP_RC$?` expands shell-side to `IPSETUP_RC0` on
+# success. The TYPED command (echoed back by the shell) contains the literal
+# `IPSETUP_RC$?` string, NOT `IPSETUP_RC0`, so the success match is
+# unambiguous — won't fire on the command echo. (Without this, the literal
+# `IFACE_UP=eth0` in the typed command was being matched before the doas
+# password prompt arrived.)
+send "doas ip addr add 192.168.100.1/24 dev $iface && doas ip link set $iface up; echo IPSETUP_RC\$?\r"
+expect {
+    timeout { puts "ERROR: ip configuration timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {doas \([^)]+\) password: } { send "qflex\r"; exp_continue }
+    -re {Authentication failed} {
+        puts "ERROR: doas authentication failed (qflex pw rejected)"
+        quit_qemu $monitor_port; exit 1
+    }
+    -re {doas: not found|not permitted|Operation not permitted} {
+        puts "ERROR: doas not usable for ip — switch the script to root login"
+        quit_qemu $monitor_port; exit 1
+    }
+    "IPSETUP_RC0" { puts "configured 192.168.100.1 on $iface" }
+    -re {IPSETUP_RC[1-9]} {
+        puts "ERROR: ip addr add / ip link set returned non-zero"
+        quit_qemu $monitor_port; exit 1
+    }
+}
+expect -re {[\$#] +}
+
+# --- 3. Start ping in background, watch for first echo ---------------------
+
+send "ping 192.168.100.2 -c 1000000 -W 2000 -i 0.001 > /tmp/ping.out 2>&1 &\r"
+expect {
+    timeout { puts "ERROR: backgrounding ping timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+set timeout $BUDGET_FIRST_ECHO_S
+send "tail -F /tmp/ping.out\r"
+expect {
+    timeout { puts "ERROR: never saw first echo from 192.168.100.2"; quit_qemu $monitor_port; exit 1 }
+    -re {bytes from 192\.168\.100\.2} {
+        puts "saw first echo from 192.168.100.2"
+    }
+}
+# Stop tail with Ctrl-C so we get a prompt back.
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect -re {[\$#] +}
+
+# Touch our own at_first_echo flag (so peer can pair-up if it polls for ours).
+if {[catch {set f [open $my_at_first_echo_flag w]; close $f} err]} {
+    puts "WARN: could not write $my_at_first_echo_flag: $err"
+} else {
+    puts "wrote $my_at_first_echo_flag"
+}
+
+# --- 4. Wait for follower's first echo -------------------------------------
+
+wait_for_file $follower_first_echo $BUDGET_CHECKPOINTING_S
+puts "saw follower's first-echo flag: $follower_first_echo"
+
+# --- 4b. Kill the 1ms ping BEFORE savevm -----------------------------------
+# Otherwise loaded-test snapshot has `ping -i 0.001 -c 1000000` running, which
+# resumes on every loadvm and immediately blasts the PDES wire under sync=true /
+# 100µs latency — wwt_recivied_callback aborts qemu before the load-side .exp
+# can type its first command. Killing here makes the snapshot clean.
+send "pkill -f 'ping 192'\r"
+expect -re {[\$#] +}
+send "sleep 1\r"
+expect -re {[\$#] +}
+
+# --- 5. savevm loaded-test via the monitor ---------------------------------
+
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+
+set timeout $BUDGET_DEFAULT_S
+expect {
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    "(qemu) "
+}
+
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm loaded-test\r"
+expect {
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm loaded-test\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return within timeout"; exit 1 }
+    "(qemu) "
+}
+
+# --- 6. Wait for follower's per-node savevm to finalise --------------------
+
+wait_for_file $follower_savevm_done $BUDGET_CHECKPOINTING_S
+puts "saw follower's savevm-done flag: $follower_savevm_done"
+
+# --- 7. quit ---------------------------------------------------------------
+
+send "quit\r"
+catch {expect eof}
+exit 0

@@ -5,3 +5,8 @@ pandas
 numpy
 plotext
 rich
+omegaconf>=2.3
+injector>=0.21
+pytest
+libtmux
+plotille

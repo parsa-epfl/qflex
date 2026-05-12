@@ -8,6 +8,7 @@ KeenKraken/
 KnottyKraken/
 images/
 qemu-*
+!qemu-pdes
 .vscode/
 **/.vscode
 experiments/
@@ -98,7 +99,6 @@ tmp_results/
 # Linker output
 *.ilk
 *.map
-*.exp
 
 # Precompiled Headers
 *.gch

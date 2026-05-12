@@ -1,0 +1,226 @@
+#!/usr/bin/env expect
+# Path A driver for the **master** (node 0) of the multi-node savevm test.
+#
+# IMPORTANT: with multi-node PDES, `savevm` issues a DRAIN_START / DRAIN_END
+# coordination across all nodes — every node's CPU+memory state is persisted
+# as part of the distributed snapshot. ONLY the master sends `savevm`. Other
+# nodes use boot_create_and_wait.exp, which stays alive until the master is
+# done so the drain completes cleanly.
+#
+# Master flow:
+#   1) login as qflex / qflex on Alpine,
+#   2) `touch test1.txt` (master is node 0 → file index = NODE_NUMBER + 1 = 1),
+#   3) delvm (best effort) + savevm qflex-makefile-test via the QEMU monitor,
+#   4) touch the cross-node sentinel `<dirname $EXP_FOLDER>/savevm_done.flag`
+#      so the non-master scripts know they may now quit,
+#   5) ls and capture to $EXP_FOLDER/ls_after_create.txt — taken AFTER savevm
+#      on purpose, so the captured output reflects the snapshotted state. If
+#      `loadvm` later doesn't reproduce this listing, savevm captured too early.
+#   6) `quit` over the monitor.
+#
+# A stale sentinel from a prior run is removed at startup — the per-leaf
+# `wait_for_nodes` invariant guarantees the non-master only starts polling
+# AFTER the master's `.started` sentinel exists, which is also after this
+# script has begun, so there's no window where stale state can leak through.
+
+# Multi-node boots are much slower than single-node — every quantum boundary
+# requires a WWT sync message exchange via shm with the neighbour, so kernel
+# bring-up and the userspace initialisation that gets to the login prompt
+# can take many minutes. 900s is a comfortable upper bound.
+set timeout 900
+
+# Wall-clock budgets for connect/wait operations (seconds). See expect-scripts skill.
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+set node_number  $env(NODE_NUMBER)
+
+set group_folder [file dirname $exp_folder]
+set savevm_done_flag "$group_folder/savevm_done.flag"
+
+# Master should always be node 0; refuse to run otherwise rather than silently
+# producing a wrong-node snapshot.
+if {$node_number != 0} {
+    puts "ERROR: boot_create_and_savevm_master.exp ran on node $node_number — only node 0 (master) should run this script"
+    exit 1
+}
+
+# node 0 → test1.txt
+set file_index   [expr {$node_number + 1}]
+set test_file    "test${file_index}.txt"
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+# Clear any stale sentinel from a prior run BEFORE doing anything else, so
+# non-master pollers can't see a stale flag.
+catch {file delete -force $savevm_done_flag}
+
+# Poll telnet for the listener. Caller passes the wall-clock deadline; expect's
+# `set timeout` doesn't apply inside Tcl while/sleep loops.
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+set ok 0
+
+# --- 1. Connect to serial + login ----------------------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+send "\r"
+
+expect {
+    timeout { puts "ERROR: timed out waiting for login prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }
+}
+send "qflex\r"
+
+expect {
+    timeout { puts "ERROR: timed out waiting for password prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[Pp]assword: }
+}
+send "qflex\r"
+
+expect {
+    timeout { puts "ERROR: timed out waiting for shell prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# --- 2. Create the file --------------------------------------------------
+
+send "touch $test_file\r"
+expect {
+    timeout { puts "ERROR: touch didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# --- 3. delvm + savevm via monitor (master only) -------------------------
+#
+# Keep the serial connection open: pause-during-drain doesn't disturb the
+# host-side TCP socket, and we need it again post-savevm for the ls capture.
+
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+
+set timeout $BUDGET_DEFAULT_S
+
+expect {
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    "(qemu) "
+}
+
+# Best-effort cleanup of any prior snapshot with the same tag — savevm refuses
+# to overwrite an existing snapshot, so this guards against repeat test runs.
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm qflex-makefile-test\r"
+expect {
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
+    "(qemu) "
+}
+
+send "savevm qflex-makefile-test\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return within timeout"; exit 1 }
+    "(qemu) "
+}
+
+# --- 4. signal non-master leaves that the savevm drain is complete -------
+
+if {[catch {set f [open $savevm_done_flag "w"]; close $f} err]} {
+    puts "WARN: could not write $savevm_done_flag: $err"
+} else {
+    puts "wrote savevm-done sentinel: $savevm_done_flag"
+}
+
+# --- 5. ls AFTER savevm and capture --------------------------------------
+#
+# Switch back to the serial connection. The buffer may have stray bytes from
+# the drain pause/resume, so send a `\r` to nudge a clean prompt before ls.
+#
+# Use the checkpointing budget for the post-savevm prompt: under multi-node
+# PDES with sync=false + high latency, the guest can take a while to deliver
+# the `\r` echo back over the telnet/chardev socket once it resumes from the
+# drain. The default 5s budget (matching `BUDGET_DEFAULT_S`) was too short and
+# tripped "ERROR: serial prompt timed out post-savevm" in real runs.
+
+set spawn_id $serial_sid
+set timeout $BUDGET_CHECKPOINTING_S
+
+send "\r"
+expect {
+    timeout { puts "ERROR: serial prompt timed out post-savevm"; exit 1 }
+    -re {[\$#] +}
+}
+
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return post-savevm"; exit 1 }
+    -re {[\$#] +}
+}
+set ls_output $expect_out(buffer)
+
+set out_path "$exp_folder/ls_after_create.txt"
+if {[catch {open $out_path "w"} f]} {
+    puts "ERROR: could not open $out_path for writing: $f"
+} else {
+    puts $f $ls_output
+    close $f
+    puts "wrote post-savevm ls output to $out_path"
+}
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+# --- 6. quit -------------------------------------------------------------
+
+set spawn_id $monitor_sid
+send "quit\r"
+catch {expect eof}
+set ok 1
+
+if {!$ok} { exit 1 }

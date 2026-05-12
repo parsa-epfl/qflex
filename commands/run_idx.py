@@ -1,25 +1,15 @@
-import os
-from commands import Executor
+from commands import SimulationCommand
 from .config import ExperimentContext
-from commands.qemu import VanillaQemuArgParser   
+from commands.qemu import VanillaQemuArgParser
 
 
-class RunIdxCommand(Executor):
+class RunIdxCommand(SimulationCommand):
+    NEEDS_PDES_PEER_KILL = False
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 warming_ratio: int, 
-                 measurement_ratio: int,
                  use_stdio: bool = True):
-        idx = experiment_context.idx
         self.experiment_context = experiment_context
-        self.detailed_warming_ratio = warming_ratio
-        self.measurement_ratio = measurement_ratio
-        # TODO turn this into a param, for now each ratio represents 100000 cycles
-        ratio_coefficient = 100000
-        self.total_cycles = ((self.detailed_warming_ratio * ratio_coefficient) + (self.measurement_ratio * ratio_coefficient))  + 1
-        self.vanilla_qemu_arg_parser = VanillaQemuArgParser(experiment_context, idx, self.total_cycles, use_stdio=use_stdio)
-        # TODO add this to configs
         self.use_stdio = use_stdio
 
     def get_err_file_address(self):
@@ -28,48 +18,55 @@ class RunIdxCommand(Executor):
     def get_log_file_address(self):
         return f"{self.experiment_context.get_partition_folder()}/log"
 
-
     def cmd(self) -> str:
-        # TODO get rid of partition at some point and move run_flexus.sh in our python commands
+        self._assert_syncs_true()
+        # TODO turn this into a param, for now each ratio represents 100000 cycles
+        ratio_coefficient = 100000
+        total_cycles = ((self.experiment_context.warming_ratio * ratio_coefficient)
+                        + (self.experiment_context.measurement_ratio * ratio_coefficient)) + 1
         idx = self.experiment_context.idx
+        vanilla_parser = VanillaQemuArgParser(self.experiment_context, idx, total_cycles,
+                                              use_stdio=self.use_stdio)
         partition_folder = self.experiment_context.get_partition_folder()
+
         setup_commands = [
             f"cd {partition_folder}",
-            f"echo running in partition folder {partition_folder}",
+            f'echo "===== qflex idx {idx}: starting in {partition_folder} ====="',
             f'rm -rf "snapshot_{idx}-flexus"',
             f"mkdir snapshot_{idx}-flexus",
             f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
-        ]
-
-        # Add a command to get time in seconds and save it to variable tick, from the host
-        tick_command = " tick=$(($(date +%s%N) / 1000000)) "
-        output = ""
-        if not self.use_stdio:
-            output = f"> {self.get_log_file_address()} 2> {self.get_err_file_address()}"
-        timing_command = f"""
-            gdb -batch -ex run -ex "python try: gdb.execute('bt')\nexcept: pass" -return-child-result --args ../vanilla-qemu-system-aarch64 \
-            {self.vanilla_qemu_arg_parser.get_qemu_base_args()} {output}
-        """
-        prints = []
-        if not self.use_stdio:
-            prints = [
-                f"""echo "log is:""",
-                f"""cat {self.get_log_file_address()}""",
-                f"""echo "err is:""",
-                f"""cat {self.get_err_file_address()}"""
-            ]
-        tock_command = " tock=$(($(date +%s%N) / 1000000)) "
-        time_command = ' echo "Elapsed: $((tock - tick)) ms " '
-
-        backup_commands = [
             f'rm -rf "result_{idx}"',
             f'mkdir "result_{idx}"',
-            f'mv *.log "result_{idx}/"',
         ]
-        return setup_commands + [
-            tick_command,
-            timing_command,
-            tock_command,
-            time_command,
-        ] + prints + backup_commands
-    
+
+        output = ""
+        log_banner = []
+        if not self.use_stdio:
+            # Append (>>) so multiple idxs in the same partition (sequenced by
+            # RunSinglePartitionCommand) accumulate into one shared log/err
+            # rather than each idx truncating the prior idx's content.
+            # RunSinglePartitionCommand wipes the files once at the start of
+            # the partition, so the first idx finds them empty.
+            output = f">> {self.get_log_file_address()} 2>> {self.get_err_file_address()}"
+            log_banner = [
+                f'echo "===== qflex idx {idx}: stdout =====" >> {self.get_log_file_address()}',
+                f'echo "===== qflex idx {idx}: stderr =====" >> {self.get_err_file_address()}',
+            ]
+
+        # No gdb wrap. With vanilla-qemu's clean exit handshake the only way
+        # qemu returns non-zero is a real crash — let it propagate up through
+        # the && chain rather than masking it. Cleanup (`mv` / `cp`) runs only
+        # on success, which is fine because qemu DOES exit cleanly here.
+        qemu_cmd = (
+            f"../vanilla-qemu-system-aarch64 "
+            f"{vanilla_parser.get_qemu_base_args()} {output} < /dev/null"
+        )
+        return setup_commands + log_banner + [
+            "tick=$(($(date +%s%N) / 1000000))",
+            qemu_cmd,
+            "tock=$(($(date +%s%N) / 1000000))",
+            'echo "Elapsed: $((tock - tick)) ms"',
+            f'mv *.log "result_{idx}/" 2>/dev/null || true',
+            f'cp -f "result_{idx}/run-partition.log" '
+            f'"{partition_folder}/run-partition.log" 2>/dev/null || true',
+        ]

@@ -1,0 +1,168 @@
+#!/usr/bin/env expect
+# Init driver. Boots Alpine, waits until the login prompt is visible, savevm's
+# the running guest as `boot-login`, and quits. Used by the QFLEX_INIT_TEST
+# tests to bootstrap a snapshot the regular real-run tests can `loadvm` from
+# (skipping the slow Alpine boot every time).
+#
+# Runs on:
+#   * single-node:        NODE_NUMBER == -1     no follower coordination
+#   * multi-node master:  NODE_NUMBER ==  0     waits for node1_at_login.flag,
+#                                               then savevm + writes savevm_done.flag.
+# Refuses to run on a non-master multi-node leaf — those use boot_login_wait.exp.
+#
+# DOES NOT log in. The point of `boot-login` is to capture the guest *at* the
+# getty login prompt so subsequent tests can drive login → workload from a
+# warm snapshot.
+
+set timeout 900
+
+# Wall-clock budgets for connect/wait operations (seconds). See expect-scripts skill.
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+set node_number  $env(NODE_NUMBER)
+
+set group_folder              [file dirname $exp_folder]
+set follower_at_login         "$group_folder/node1_at_login.flag"
+set follower_savevm_done_flag "$group_folder/node1_savevm_done.flag"
+
+# Refuse to run on a non-master multi-node leaf. -1 = single-node, 0 = master.
+if {$node_number > 0} {
+    puts "ERROR: boot_login_savevm.exp ran on node $node_number — only the master (node 0) or single-node (-1) should run this script. Use boot_login_wait.exp for non-master leaves."
+    exit 1
+}
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+# Clear stale sentinels from a prior init run.
+catch {file delete -force $follower_at_login}
+catch {file delete -force $follower_savevm_done_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+# Poll for a follower's at-login sentinel.
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
+# --- 1. Connect to serial + wait for login prompt ----------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+# Nudge a redraw in case the boot is already past the login banner.
+send "\r"
+
+expect {
+    timeout { puts "ERROR: timed out waiting for login prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: } { puts "[clock format [clock seconds]] saw login prompt — ready to savevm" }
+}
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+# --- 2. Multi-node only: wait until the follower is also at the login prompt --
+
+if {$node_number == 0} {
+    puts "multi-node master: waiting for follower's at-login sentinel: $follower_at_login"
+    wait_for_file $follower_at_login $BUDGET_CHECKPOINTING_S
+    puts "follower reached login — proceeding to savevm"
+}
+
+# --- 3. savevm boot-login via the monitor ------------------------------------
+
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+
+set timeout $BUDGET_DEFAULT_S
+expect {
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    "(qemu) "
+}
+
+# Best-effort: drop a stale `boot-login` snapshot if the qcow2 already has one.
+# savevm refuses to overwrite, so this keeps the init test idempotent.
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm boot-login\r"
+expect {
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
+    "(qemu) "
+}
+
+send "savevm boot-login\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return within timeout"; exit 1 }
+    "(qemu) "
+}
+
+# --- 4. Multi-node only: wait for follower's savevm to also complete ---------
+#
+# Master's `(qemu)` prompt above signals MASTER's local save_snapshot returned
+# (after its `savevm log 7` print). The follower's per-node savevm runs in
+# parallel as part of the same PDES drain and finishes a beat later. If we
+# `quit` now, master's bash exits → executor's _kill_peer_qemus pkills the
+# follower's qemu mid-finalise. Wait for the follower to write
+# `node<N>_savevm_done.flag` (which it does AFTER seeing `savevm log 7` in its
+# own Boot.log) before we let master's bash unwind.
+
+if {$node_number == 0} {
+    wait_for_file $follower_savevm_done_flag $BUDGET_CHECKPOINTING_S
+    puts "saw follower's savevm-done sentinel: $follower_savevm_done_flag"
+}
+
+# --- 5. quit -----------------------------------------------------------------
+
+send "quit\r"
+catch {expect eof}
+exit 0

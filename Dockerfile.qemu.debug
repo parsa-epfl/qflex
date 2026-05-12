@@ -12,11 +12,28 @@ WORKDIR /home/dev/qflex
 # TODO address the two qemu versions
 COPY ./qemu /home/dev/qflex/qemu
 COPY ./parallel-qemu /home/dev/qflex/parallel-qemu
+# Shared PDES source consumed by both qemu and parallel-qemu via
+# ../../qemu-pdes/{net,include} in their meson.build files.
+COPY ./qemu-pdes /home/dev/qflex/qemu-pdes
+COPY ./flexus /home/dev/qflex/flexus
 
 
-RUN make MODE=debug qemu-config && make MODE=debug qemu-build 
+ENV CFLAGS="$CFLAGS -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=strict-prototypes -Wno-error=int-conversion"
+
+RUN make MODE=debug qemu-config && make MODE=debug qemu-build
 
 RUN make MODE=debug parallel-qemu-config && make MODE=debug parallel-qemu-build
+
+RUN test -x parallel-qemu-saved/build/qemu-system-aarch64 \
+ && test -x qemu-saved/build/qemu-system-aarch64 \
+ && test -f parallel-qemu-saved/pc-bios/efi-virtio.rom \
+ && test -f parallel-qemu-saved/pc-bios/efi-e1000.rom
+
+# Flexus (timing model) — produces /home/dev/qflex/kraken_out/lib{knotty,semi}kraken.so
+# which set_up_folders() symlinks into each experiment's run/ folder. Conan does the
+# heavy lifting; build-multiple-kraken_vanilla.py wires the per-target wiring.cpp
+# variants and shells out to ./build for each.
+RUN make flexus-config && make flexus-build MODE=debug
 
 
 

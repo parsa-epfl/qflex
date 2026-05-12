@@ -1,0 +1,18 @@
+# SINGLE single-node real-run YAML — drives every non-init single-node test
+# phase via the same `./qflex <phase> -c tests/realrun/dc-single.yaml` pattern.
+# Currently the only consumer is tests/test_real_runs.py::test_alpine_login_and_ls_real_run,
+# but the file is structured the same as dc-multi.yaml so future single-node
+# pipeline tests can drop in command sections without spawning new YAMLs.
+#
+# Init bootstrap of `boot-login` is separately gated by QFLEX_INIT_TEST and
+# lives in tests/realrun/dc-single-init.yaml.
+extends: test-base-single
+
+components:
+  experiment_context:
+    experiment_name: qflex_real_run_test
+    use_gdb: false
+    interaction_script: /home/dev/qflex/tests/realrun/login_and_ls.exp
+    serial_telnet_port: 55611
+    telnet_port: 55711
+    loadvm_name: boot-login

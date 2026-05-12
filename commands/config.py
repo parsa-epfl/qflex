@@ -1,4 +1,4 @@
-from typing import List
+from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr
 import os
@@ -17,16 +17,10 @@ def get_experiment_folder_address(
     mounting_folder: str,
     experiment_name: str
 ) -> str:
-    # check if working directory exists
-    if not os.path.isdir(mounting_folder):
-        raise ValueError(f"Working directory {mounting_folder} does not exist.")
-    # create experiments if it doesn't exist
-    if not os.path.isdir(f'{mounting_folder}/experiments'):
-        os.makedirs(f'{mounting_folder}/experiments', exist_ok=False)
-    path = f'{mounting_folder}/experiments/{experiment_name}'
-    if not os.path.isdir(path):
-        os.makedirs(path, exist_ok=False)
-    return os.path.abspath(path)
+    # Pure path computation — no filesystem side effects. The folder is
+    # materialised by ExperimentContext.set_up_folders() (called from the
+    # executor's leaf branch via prepare_for_execution()).
+    return os.path.abspath(f'{mounting_folder}/experiments/{experiment_name}')
 
 # TODO move simulation context to a separate folder
 class SimulationContext(BaseModel):
@@ -115,6 +109,7 @@ class ExperimentContext(BaseModel):
     keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
+    use_gdb: bool = Field(default=True, description="Wrap the qemu invocation in `gdb -ex run --args ...`. Set to False (e.g. in test YAMLs) to run qemu directly so the leaf doesn't depend on gdb's interactive prompt handling on segfault.")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     seed_image_address: str = Field(default="", description="Full address of the seed image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
@@ -125,13 +120,54 @@ class ExperimentContext(BaseModel):
     syncs_list: List[str] = Field(default=[], description="List of sync settings ('true' or 'false') for neighbor nodes.")
     # TODO later we need to revisit if partition and idx are well suited to be part of the exp object
     partition_number: int = Field(default=-1, description="Partition number for this node, used for some qemu options.")
+    partition_count: int = Field(default=16, description="Number of partitions the per-sampling-unit checkpoints are split into for parallel timing runs (driven by the `partition` phase). Same value is used downstream by `run-partition` to enumerate partitions.")
+    sample_size: int = Field(default=30, description="Number of sampling units the `fw` phase emits checkpoints for. Only the `fw` command consumes this; the timing-phase commands ignore it.")
+    warming_ratio: int = Field(default=2, description="Detailed-warming prefix length within each sampling unit, in units relative to `measurement_ratio` (each unit = 100k cycles). Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
+    measurement_ratio: int = Field(default=1, description="Measurement segment length within each sampling unit, in units relative to `warming_ratio`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
     idx: int = Field(default=-1, description="Index of the partition to run, used for some qemu options.")
     seed_image_name: str = Field(default='', description="Name of the seed image file to use in multi-node setup.")
     telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
     use_telnet_monitor: bool = Field(default=False, description="Whether to use telnet monitor for QEMU instead of stdio.")
+    serial_telnet_port: int = Field(default=-1, description="Telnet port for QEMU serial console (used by Path A interaction_script). -1 -> auto = 55600 + node_number.")
+    interaction_script: str = Field(default="", description="Path to an executable script (expect/bash/python/...) that drives QEMU for boot/load on this leaf. Receives TELNET_SERIAL_PORT, TELNET_MONITOR_PORT, SERIAL_LOG_PATH, EXP_FOLDER, NODE_NUMBER as env vars. Setting this auto-enables monitor-on-telnet and serial-on-telnet for the leaf.")
+    interactive_tmux: bool = Field(default=False, description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")
     pdes_net_devs: List[str] = Field(default=[], description="List of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup.")
+    sub_experiments: List["ExperimentContext"] = Field(default_factory=list, description="Optional sub-experiments. If non-empty, this context is a group node; leaf-level fields are unused and the executor recurses into each sub-experiment.")
+    wait_for_nodes: List[int] = Field(default_factory=list, description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master. Set to e.g. [0] to wait for the master, or [2] to wait for node 2.")
+    experiment_group_name: str = Field(default="", description="Parent group's experiment_name for this leaf; included in PDES shm names so concurrent projects on the same host don't collide. Auto-populated by the factory when sub_experiments is built.")
     _creation_kwargs: dict = PrivateAttr(default_factory=dict)
 
+
+    def has_sub_experiments(self) -> bool:
+        return len(self.sub_experiments) > 0
+
+    def compute_runtime_settings(self):
+        """Pure (no filesystem, no shm) part of leaf prep: auto-flip flags and
+        auto-compute ports based on user-set fields. Safe to call in dry-run so
+        the rendered bash reflects what the real run would use."""
+        # Path A (scripted boot/load): the script needs separate telnet endpoints for
+        # serial console (guest input/output) and monitor (savevm/quit). Auto-enable
+        # both so the user only needs to set interaction_script in YAML.
+        if self.interaction_script and not self.use_telnet_monitor:
+            print(f"[boot/load] interaction_script={self.interaction_script!r} -> auto-enabling use_telnet_monitor for node {self.node_number}.")
+            self.use_telnet_monitor = True
+
+        if self.use_telnet_monitor and self.telnet_port == -1:
+            self.telnet_port = 55558
+            if self.is_multi_node():
+                self.telnet_port += self.node_number
+
+        if self.interaction_script and self.serial_telnet_port == -1:
+            self.serial_telnet_port = 55600
+            if self.is_multi_node():
+                self.serial_telnet_port += self.node_number
+
+    def prepare_for_execution(self):
+        """One entry point for all leaf-level prep. Called by the executor right before the leaf bash runs.
+        Wraps the existing prep functions; do not call these from create_experiment_context."""
+        self.compute_runtime_settings()
+        self.set_up_folders()
+        self.setup_nic_args()
 
     def get_partition_folder(self) -> str:
         if self.partition_number < 0:
@@ -149,18 +185,15 @@ class ExperimentContext(BaseModel):
 
     def get_shm_names(self, recieve: bool) -> List[str]:
         shm_names = []
-        partition_str = ""
-        if self.partition_number >= 0:
-            partition_str = f"part_{self.partition_number}_"
-        
-        idx_str = ""
-        if self.idx >= 0:
-            idx_str = f"idx_{self.idx}_"
+        # `experiment_group_name` (shared across leaves of the same group) namespaces shm so concurrent projects don't collide on /dev/shm/pdes_*.
+        prefix = f"{self.experiment_group_name}_" if self.experiment_group_name else ""
+        partition_str = f"part_{self.partition_number}_" if self.partition_number >= 0 else ""
+        idx_str = f"idx_{self.idx}_" if self.idx >= 0 else ""
         for neighbor in self.neighbor_node_list:
             if recieve:
-                shm_names.append(f"pdes_{neighbor}_to_{self.node_number}"+partition_str+idx_str)
+                shm_names.append(f"{prefix}pdes_{neighbor}_to_{self.node_number}"+partition_str+idx_str)
             else:
-                shm_names.append(f"pdes_{self.node_number}_to_{neighbor}"+partition_str+idx_str)
+                shm_names.append(f"{prefix}pdes_{self.node_number}_to_{neighbor}"+partition_str+idx_str)
         return shm_names
 
     def get_mounting_folder(self) -> str:
@@ -271,7 +304,9 @@ class ExperimentContext(BaseModel):
 
         root_sls = [
            "partition.py",
-           "result.py"
+           "result.py",
+           "collect.py",
+           "result_new.py"
         ]
         for file in root_sls:
             os.system(f"cp -u ./{file} {self.get_experiment_folder_address()}/{file}")
@@ -283,30 +318,27 @@ class ExperimentContext(BaseModel):
         # TODO check if rom and bios files can be linked from parallel-qemu-saved when using qemu
         # TODO check why files are being turned into bz2
         
-        run_files = [
-            "./parallel-qemu-saved/build/qemu-system-aarch64", 
+        
+        # Read the staged trees the Makefile produces. `make parallel-qemu-build`
+        # copies parallel-qemu/build/ → parallel-qemu-saved/build/ and same for
+        # qemu → qemu-saved; the docker image build is expected to run those
+        # targets so both `-saved/` dirs are present in the image regardless of
+        # variant (release/debug, base/worm).
+        # (source, target_basename_in_run_folder)
+        run_files: list[tuple[str, str]] = [
+            ("./parallel-qemu-saved/build/qemu-system-aarch64", "qemu-system-aarch64"),
+            ("./qemu-saved/build/qemu-system-aarch64", "vanilla-qemu-system-aarch64"),
             # TODO if we ever decide to change EFI and bios, this needs to change
-            "./QEMU_EFI.fd", 
-            "./qemu-saved/build/qemu-system-aarch64",
-            "./parallel-qemu-saved/pc-bios/efi-virtio.rom",
-            "./parallel-qemu-saved/pc-bios/efi-e1000.rom",
-            "./qemu-img",
-            "debug.cfg",
+            ("./QEMU_EFI.fd", "QEMU_EFI.fd"),
+            ("./parallel-qemu-saved/pc-bios/efi-virtio.rom", "efi-virtio.rom"),
+            ("./parallel-qemu-saved/pc-bios/efi-e1000.rom", "efi-e1000.rom"),
+            ("debug.cfg", "debug.cfg"),
         ]
-        for f in run_files:
-
-            if "parallel-qemu-saved/" in f:
-                # Link as the name of the file to run folder
-                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-            elif "qemu-saved/" in f:
-                # Link as the name of the file to run folder with
-                link_address = f"{self.get_experiment_folder_address()}/run/vanilla-{f.split('/')[-1]}"
-            else:
-                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-            
-            print(f"copying {f} to {link_address}...")
+        for src, basename in run_files:
+            link_address = f"{self.get_experiment_folder_address()}/run/{basename}"
+            print(f"copying {src} to {link_address}...")
             # TODO add checks for when cp fails
-            os.system(f"cp -u {f} {link_address}")
+            os.system(f"cp -u {src} {link_address}")
         # TODO turn WormCacheQFlex address into a parameter
         # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
         if not os.path.exists(f"./WormCacheQFlex"):
@@ -326,7 +358,27 @@ class ExperimentContext(BaseModel):
                 os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
 
         
+    def shm_clean_up(self):
+        
+        shm_recvs = self.get_shm_names(recieve=True)
+        shm_sends = self.get_shm_names(recieve=False)
+        all_shm_names = shm_recvs + shm_sends
 
+        for shm_name in all_shm_names:
+            shm_path = f"/dev/shm/{shm_name}"
+            if os.path.exists(shm_path):
+                print(f"Removing shared memory file {shm_path}...")
+                # Force femove the file
+                os.system(f"rm -f {shm_path}")
+            else:
+                print(f"Shared memory file {shm_path} does not exist, skipping removal.")
+
+
+    def clean_up(self):
+        self.shm_clean_up()
+
+
+        
 
     def setup_nic_args(self):
         # TODO move this to simulation context later
@@ -368,11 +420,11 @@ class ExperimentContext(BaseModel):
         self.simulation_context.qemu_nic = nic_command.strip().lower()
 
 
-        if self.use_telnet_monitor:
-            if self.telnet_port == -1:
-                self.telnet_port = 55558 
-                if self.is_multi_node():
-                    self.telnet_port += self.node_number
+        # Port auto-compute moved to compute_runtime_settings() so dry-run can call
+        # it without filesystem side effects. Calling it here again is idempotent
+        # (no-op when ports are already set) — keep it for safety against any
+        # caller that bypasses prepare_for_execution.
+        self.compute_runtime_settings()
 
     def get_ipns_per_core(self) -> list[IPNSInfo]:
 
@@ -444,59 +496,73 @@ class ExperimentContext(BaseModel):
 
 
 def create_experiment_context(
-    core_count: int,
-    quantum_size: int,
-    doubled_vcpu: bool,
-    llc_size_per_tile_mb: int,
-    is_parallel: bool,
-    network: str,
-    memory_gb: int,
+    core_count: Annotated[int, Field(description="Number of CPU cores for the VM.")],
+    quantum_size: Annotated[int, Field(description="Quantum size for the simulator in nanoseconds.")],
+    doubled_vcpu: Annotated[bool, Field(description="Double the number of CPU cores for the client.")],
+    llc_size_per_tile_mb: Annotated[int, Field(description="LLC size per tile in MB.")],
+    is_parallel: Annotated[bool, Field(description="Whether the simulation is parallel or not.")],
+    network: Annotated[str, Field(description="Network mode, either user or none, this is in addition to connecting to internet and other nodes that are there by default.")],
+    memory_gb: Annotated[int, Field(description="Memory size for the VM in GB.")],
     # Host section:
-    host_name: str,
+    host_name: Annotated[str, Field(description="Host name, used to create initial ipns file.")],
     # Workload section:
-    workload_name: str,
-    primary_core_start: int,
-    secondary_core_start: int,
-    is_consolidated: bool,
-    primary_ipc: float,
-    secondary_ipc: float,
-    population_seconds: int,
-    phantom_cpu_ipc: float,
+    workload_name: Annotated[str, Field(description="Workload name.")],
+    primary_core_start: Annotated[int, Field(description="Starting core for primary workload.")],
+    is_consolidated: Annotated[bool, Field(description="Whether the workload is consolidated or not.")],
+    primary_ipc: Annotated[float, Field(description="Target IPC for primary workload.")],
+    population_seconds: Annotated[float, Field(description="Population size for the workload in seconds.")],
+    secondary_core_start: Annotated[int, Field(description="Starting core for secondary workload. Only used if consolidated is True.")] = -1,
+    secondary_ipc: Annotated[float, Field(description="Target IPC for secondary workload. Only used if consolidated is True.")] = 0.0,
+    phantom_cpu_ipc: Annotated[float, Field(description="Target IPC for phantom CPU. This is used for the client in the same node. Only used in double core mode.")] = -1.0,
     # experiment sections
-    image_folder: str,
-    # Default parameters that can be induced from others
-    experiment_name=None,
-    image_name: str=None,
-    keep_experiment_unique: bool = True,
-    use_image_directly: bool = False,
-    loadvm_name: str = "",
-    mounting_folder: str = ".",
-    # Default for simulation context
-    check_period_quantum_coeff: float = 53.0,
-    use_cd_rom: bool = False,
-    machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
-    include_affinity: bool = False,
-    
+    image_folder: Annotated[str, Field(description="Folder where images are stored.")] = "./images",
+    experiment_name: Annotated[str, Field(description="Name of the experiment. Used for organizing output files.")] = "default-experiment",
+    image_name: Annotated[str, Field(description="Name of the image file to load.")] = "root.qcow2",
+    keep_experiment_unique: Annotated[bool, Field(description="Whether to keep the experiment folder unique by adding a timestamp.")] = False,
+    use_image_directly: Annotated[bool, Field(description="Whether to use the image directly from the image folder or copy it to the experiment folder.")] = False,
+    loadvm_name: Annotated[str, Field(description="Name of the loadvm to use in QEMU, optional.")] = "",
+    use_gdb: Annotated[bool, Field(description="Wrap the qemu invocation in `gdb -ex run --args ...`. Set to False (e.g. in test YAMLs) to run qemu directly.")] = True,
+    mounting_folder: Annotated[str, Field(description="Mounting directory where the experiment folders will be created.")] = ".",
+    check_period_quantum_coeff: Annotated[float, Field(description="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period.")] = 53.0,
+    use_cd_rom: Annotated[bool, Field(description="Whether to use a CD-ROM for initial setup.")] = False,
+    machine_freq_ghz: Annotated[float, Field(description="Machine frequency in GHz.")] = 2.0,
+    include_affinity: Annotated[bool, Field(description="Whether or not to generate affinity index in core_info.csv.")] = False,
     # Multi-node parameters
-    node_number: int = -1,
-    neighbor_node_list: List[int] = [],
-    latencies_ns_list: List[int] = [],
-    syncs_list: List[str] = [],
-    seed_image_name: str = '',
-    telnet_port: int = -1,
-    use_telnet_monitor: bool = False,
-    partition_number: int = -1,
-    idx: int = -1,
-    pdes_net_devs: List[str] = [],
+    node_number: Annotated[int, Field(description="Node number in multi-node setup, -1 means single node. 0 is the master node.")] = -1,
+    neighbor_node_list: Annotated[Optional[List[int]], Field(description="List of neighbor node numbers in multi-node setup, only used if node_number is not -1.")] = None,
+    latencies_ns_list: Annotated[Optional[List[int]], Field(description="List of latencies to neighbor nodes in nanoseconds, only used if node_number is not -1. Order matches neighbor_node_list.")] = None,
+    syncs_list: Annotated[Optional[List[str]], Field(description="List of sync options to neighbor nodes ('true' or 'false'), only used if node_number is not -1. Order matches neighbor_node_list.")] = None,
+    seed_image_name: Annotated[str, Field(description="Name of the seed image file to use in multi-node setup.")] = "",
+    telnet_port: Annotated[int, Field(description="Telnet port for QEMU monitor instead of stdio.")] = -1,
+    use_telnet_monitor: Annotated[bool, Field(description="Whether to use telnet monitor for QEMU instead of stdio.")] = False,
+    partition_number: Annotated[int, Field(description="Partition number for the nodes to run things in parallel.")] = -1,
+    partition_count: Annotated[int, Field(description="Number of partitions the per-sampling-unit checkpoints are split into for parallel timing runs.")] = 16,
+    sample_size: Annotated[int, Field(description="Number of sampling units the `fw` phase emits checkpoints for. Only the `fw` command consumes this; other phases ignore it.")] = 30,
+    warming_ratio: Annotated[int, Field(description="Detailed-warming prefix length within each sampling unit, in units relative to `measurement_ratio` (each unit = 100k cycles). Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 2,
+    measurement_ratio: Annotated[int, Field(description="Measurement segment length within each sampling unit, in units relative to `warming_ratio`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 1,
+    idx: Annotated[int, Field(description="Index of the partition to run, used for some qemu options.")] = -1,
+    pdes_net_devs: Annotated[Optional[List[str]], Field(description="List of network device models ('e1000' or 'virtio-net-pci') to use for each neighbor node in multi-node setup. Order matches neighbor_node_list.")] = None,
+    sub_experiments: Annotated[Optional[List[ExperimentContext]], Field(description="Optional sub-experiments. If non-empty, this is a group node — leaf-level fields are inherited (e.g. via YAML extends) but unused, and the executor recurses into each sub-experiment in parallel.")] = None,
+    wait_for_nodes: Annotated[Optional[List[int]], Field(description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master; set e.g. [0] to wait for the master.")] = None,
+    serial_telnet_port: Annotated[int, Field(description="Telnet port for QEMU serial console (Path A). -1 -> auto = 55600 + node_number.")] = -1,
+    interaction_script: Annotated[str, Field(description="Path to an executable script that drives QEMU on this leaf during boot/load. Receives TELNET_SERIAL_PORT, TELNET_MONITOR_PORT, SERIAL_LOG_PATH, EXP_FOLDER, NODE_NUMBER as env vars. Auto-enables monitor-on-telnet + serial-on-telnet.")] = "",
+    interactive_tmux: Annotated[bool, Field(description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")] = False,
 ) -> ExperimentContext:
-    
+    neighbor_node_list = neighbor_node_list or []
+    latencies_ns_list = latencies_ns_list or []
+    syncs_list = syncs_list or []
+    pdes_net_devs = pdes_net_devs or []
+    sub_experiments = sub_experiments or []
+    wait_for_nodes = wait_for_nodes or []
+
     creation_kwargs = {k: v for k, v in locals().items()}
+    is_group = len(sub_experiments) > 0
 
     # assert False
     # TODO add how to create experiment name
 
     neighbers_length = min([len(neighbor_node_list), len(latencies_ns_list), len(syncs_list)])
-    if neighbers_length > 0 or node_number != -1:
+    if not is_group and (neighbers_length > 0 or node_number != -1):
 
         for value in set(syncs_list):
             assert value in ['true', 'false'], "syncs values must be either 'true' or 'false'"
@@ -536,6 +602,13 @@ def create_experiment_context(
         # Add date time to prevent overwriting
         experiment_name = experiment_name + '-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
+    # Stamp this group's name onto every sub leaf so they share an shm namespace.
+    if is_group:
+        sub_experiments = [
+            s.model_copy(update={"experiment_group_name": experiment_name})
+            for s in sub_experiments
+        ]
+
     simulation_context = create_simulation_context(
         core_count=core_count,
         quantum_size=quantum_size,
@@ -568,6 +641,7 @@ def create_experiment_context(
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
+        use_gdb=use_gdb,
         include_affinity=include_affinity,
         node_number=node_number,
         neighbor_node_list=neighbor_node_list,
@@ -577,12 +651,19 @@ def create_experiment_context(
         telnet_port=telnet_port,
         use_telnet_monitor=use_telnet_monitor,
         partition_number=partition_number,
+        partition_count=partition_count,
+        sample_size=sample_size,
+        warming_ratio=warming_ratio,
+        measurement_ratio=measurement_ratio,
         idx=idx,
         pdes_net_devs=pdes_net_devs,
+        sub_experiments=sub_experiments,
+        wait_for_nodes=wait_for_nodes,
+        serial_telnet_port=serial_telnet_port,
+        interaction_script=interaction_script,
+        interactive_tmux=interactive_tmux,
     )
 
-    e.set_up_folders()
-    e.setup_nic_args()
     e._creation_kwargs = creation_kwargs
 
     # TODO add a print config so every one sees the final config
@@ -599,9 +680,11 @@ def clone_experiment_context(
     if not source._creation_kwargs:
         raise ValueError("Source ExperimentContext has no stored creation kwargs. "
                          "Was it created via create_experiment_context?")
-    
+
     kwargs = {**source._creation_kwargs, **overrides}
-    return create_experiment_context(**kwargs)
+    cloned = create_experiment_context(**kwargs)
+    # experiment_group_name is stamped post-construction by the group's factory call (it's not in _creation_kwargs), so re-apply it from source.
+    return cloned.model_copy(update={"experiment_group_name": source.experiment_group_name})
 
 
 def get_capital_dict(variable: BaseModel):

@@ -1,0 +1,353 @@
+#!/usr/bin/env expect
+# MULTI-NODE FOLLOWER (node_number > 0) load template. Pairs with
+# load_savevm_loaded_master.exp on node 0. The load phase has already done
+# `loadvm booted`, so the guest is back at the logged-in shell prompt — no
+# re-login needed. Runs your INSERT YOUR SETUP HERE block, then waits for
+# THIS node's per-node `save_snapshot()` to finalise (by polling this node's
+# own Load.log for `savevm log 7` — the last printf inside migration/savevm.c's
+# save_snapshot).
+#
+# DOES NOT issue `savevm` over the monitor. PDES `savevm` is master-only — the
+# master's monitor command drives a distributed drain that automatically
+# writes every node's per-node qcow2; we just have to stay alive long enough
+# for our end of the drain to finalise.
+#
+# Why poll for `savevm log 7` and not just `expect eof`:
+#   `expect eof` reactively waits for the executor's `_kill_peer_qemus` to
+#   SIGKILL our QEMU after master's `quit` — that's timing-dependent and can
+#   land *before* our per-node save has finalised, leaving our qcow2 with no
+#   `loaded` snapshot. The `savevm log 7` marker is the deterministic signal
+#   that our local save_snapshot returned. Peer-kill remains the safety net.
+#
+# Note the path target: `$exp_folder/Load.log` — load-phase qemu stdout lands
+# in Load.log (not Boot.log). The boot-side mirror polls Boot.log; here we
+# follow the load phase's redirect.
+#
+# === IN-IMAGE WORKLOAD SCRIPT REFERENCE — ./client.sh ========================
+# Captured from `cat ./client.sh` in the post-loadvm guest:
+#
+#   #!/bin/sh
+#
+#   ./disable_logging.sh
+#
+#   docker run -it --rm --name web_search_client \
+#     --cpuset-cpus=8-15 \
+#     --net host cloudsuite/web-search:client \
+#     127.0.0.1 8 \
+#     --ramp-up=30 \
+#     --ramp-down=180 \
+#     --steady=720000 \
+#     --interval-type=ThinkTime \
+#     --interval-min=0 \
+#     --interval-max=0 -q
+#
+# We rewrite this file in-guest before launching (heredoc further down) with
+# --cpuset-cpus=8-15 → --cpuset-cpus=0-0 (match -smp 1) and 127.0.0.1 8 →
+# 192.168.100.1 1 (master's PDES IP + single client thread). If you need to
+# change anything about client.sh in this run, edit the heredoc below —
+# don't edit the in-image baked file (the change wouldn't survive a fresh
+# loadvm anyway, since the qcow2 owns the canonical copy).
+# =============================================================================
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_CHECKPOINTING_S 7200
+set BUDGET_WORKLOAD_INIT_S 7200   ; # client ramp-up under PDES sync=true on -smp 1: ~45 min worst case
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+# Three load-phase sentinels under the group folder (parent of $exp_folder).
+# Master writes load_loaded_server_done.flag and load_done.flag; follower
+# writes load_ramp_up_done.flag. Each leaf clears its OWN flags at startup
+# so re-runs don't see stale signals.
+#
+# TODO: migrate these ad-hoc sentinels into the executor's existing
+# _sentinel_path framework (commands/executer.py:_sentinel_basename) so
+# they're named, owned, and cleaned up consistently with the boot-phase
+# .started/.done/.killed_by_peer sentinels. The `load_` prefix is a stopgap
+# to avoid name collisions with future sentinels.
+set group_folder                  [file dirname $exp_folder]
+set load_loaded_server_done_flag  "$group_folder/load_loaded_server_done.flag"
+set load_ramp_up_done_flag        "$group_folder/load_ramp_up_done.flag"
+set load_done_flag                "$group_folder/load_done.flag"
+catch {file delete -force $load_ramp_up_done_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+# Poll a file for a literal substring with a wall-clock budget. min_count
+# lets a single Load.log host multiple savevm rounds — pass 2 on the second
+# call so we don't match the first savevm's still-present log 7. Used to
+# wait for per-node savevm to complete via qemu's `savevm log 7` printf
+# (last thing save_snapshot() emits before returning).
+proc wait_for_substring {path needle budget_seconds {min_count 1}} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]
+            set content [read $fh]
+            close $fh
+            set count 0
+            set start 0
+            while {[set idx [string first $needle $content $start]] >= 0} {
+                incr count
+                set start [expr {$idx + 1}]
+            }
+            if {$count >= $min_count} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle did not reach count ${min_count} in $path within ${budget_seconds}s"
+}
+
+# Poll for a file's existence with a wall-clock budget. Used to wait for the
+# peer to write a sentinel.
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
+# --- 1. Connect serial + nudge for shell prompt ------------------------------
+# loadvm restored the guest to the logged-in qflex shell. A bare \r re-renders
+# the prompt. No fresh-boot wait needed (no kernel boot under PDES).
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out after loadvm"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# TODO: replace this fixed 10 s wait with a sentinel-based handshake so the
+# two nodes coordinate on a "loaded" signal instead of guessing wall-clock.
+# Mirror the boot phase's `savevm log 7` pattern: each leaf touches a per-node
+# "loaded" sentinel, peers wait_for_file each other's, then proceed.
+puts "follower: post-loadvm settle — waiting 10 s host time before guest config..."
+sleep 10
+
+# =============================================================================
+# INSERT YOUR SETUP HERE
+# =============================================================================
+#
+# Same shape as the master template. Anything you do here gets baked into THIS
+# node's per-node `loaded` snapshot. Each guest command is one `send` followed
+# by an `expect` that waits for the next shell prompt.
+#
+# For symmetric workloads, the master and follower SETUP blocks are typically
+# identical. For asymmetric workloads, they differ — but each leaf's SETUP
+# runs against ITS OWN guest only.
+#
+# =============================================================================
+
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# TEMP: configure 192.168.100.2/24 on the PDES NIC (eth0). su to root because
+# `ip` requires privileges; alpine's su asks for username and password (both
+# empty here), so two trailing \r's cover both prompts. Drop back to qflex
+# with `su qflex` after. eth0 here = the virtio-net-pci PDES NIC at PCI addr
+# 0x10 (the one with mac=52:54:00:aa:bb:0a — see the QEMU command line).
+send "su\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
+    -re {[Aa]uthentication failure|incorrect password} {
+        puts "ERROR: su rejected empty creds — image may not allow empty pw"
+        quit_qemu $monitor_port; exit 1
+    }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
+}
+send "ip link show\r"
+expect {
+    timeout { puts "ERROR: ip link show timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip link set eth0 down\r"
+expect {
+    timeout { puts "ERROR: ip link set eth0 down timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip link set eth0 address 52:54:00:aa:bb:0a\r"
+expect {
+    timeout { puts "ERROR: ip link set address timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip link set eth0 up\r"
+expect {
+    timeout { puts "ERROR: ip link set eth0 up timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip addr add 192.168.100.2/24 dev eth0\r"
+expect {
+    timeout { puts "ERROR: ip addr add timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "su qflex\r"
+expect {
+    timeout { puts "ERROR: didn't get qflex prompt after su qflex"; quit_qemu $monitor_port; exit 1 }
+    -re {\$ +}
+}
+
+sleep 5
+
+# TEMP: ping the peer to verify the PDES wire is up under sync=true.
+# Match on the iputils/busybox summary line, NOT on the next prompt — proves
+# ping actually ran. 30 s host wall-clock budget; under PDES that's plenty for
+# 10 packets at -i 0.05 to land + summary to print.
+send "ping 192.168.100.1 -i 0.05 -c 10\r"
+set timeout 30
+expect {
+    timeout { puts "ERROR: ping summary didn't arrive within 30s"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        puts "follower: ping summary -> $expect_out(1,string) transmitted, $expect_out(2,string) received"
+    }
+}
+# drain post-summary prompt so the next send isn't racing leftover bytes
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "WARN: prompt didn't return after ping summary; continuing" }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# TEMP: rewrite the in-image ./client.sh in-place so --cpuset-cpus matches our
+# -smp 1 guest AND so the client points at the master's PDES IP rather than
+# 127.0.0.1. Image's baked client.sh asks for cpus 8-15 and aims at
+# 127.0.0.1 8 (8 client threads on local CPUs 8-15) — both wrong for our
+# setup. Single-quoted heredoc delimiter so any embedded $vars are preserved
+# literal.
+send "cat > ./client.sh <<'WRITE_CLIENT_EOF'\r"
+send "#!/bin/sh\r"
+send "\r"
+send "./disable_logging.sh\r"
+send "\r"
+send "docker run -it --rm --name web_search_client \\\r"
+send "  --cpuset-cpus=0-0 \\\r"
+send "  --net host cloudsuite/web-search:client \\\r"
+send "  192.168.100.1 1 \\\r"
+send "  --ramp-up=30 \\\r"
+send "  --ramp-down=180 \\\r"
+send "  --steady=720000 \\\r"
+send "  --interval-type=ThinkTime \\\r"
+send "  --interval-min=0 \\\r"
+send "  --interval-max=0 -q\r"
+send "WRITE_CLIENT_EOF\r"
+expect {
+    timeout { puts "ERROR: writing ./client.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "chmod +x ./client.sh\r"
+expect {
+    timeout { puts "ERROR: chmod ./client.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# --- 2. Wait for master's first savevm 'loaded-server' to finalise ----------
+# Master writes load_loaded_server_done.flag after seeing its own `savevm
+# log 7`; until then the server isn't ready and the client would hit
+# nothing. Budget covers master's 45 min NodeDataChanged wait + 30 min
+# savevm = 75 min worst case.
+puts "follower: client.sh ready; waiting for master's $load_loaded_server_done_flag..."
+wait_for_file $load_loaded_server_done_flag [expr {$BUDGET_WORKLOAD_INIT_S + $BUDGET_CHECKPOINTING_S}]
+puts "follower: saw master's first savevm sentinel; launching client.sh."
+
+# Run the client in the FOREGROUND so its output streams into qemu's serial
+# chardev logfile uninterrupted. We watch the live spawn for "Ramp up
+# completed" — client.sh keeps holding the shell after that (steady-state +
+# ramp-down phases run for many minutes), but we don't need to wait for
+# those, just to know steady-state has begun.
+send "./client.sh\r"
+
+puts "follower: client.sh launched; waiting for 'Ramp up completed'..."
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: never saw 'Ramp up completed' from client.sh within ${BUDGET_WORKLOAD_INIT_S}s"; quit_qemu $monitor_port; exit 1 }
+    -re {Ramp up completed}
+}
+puts "follower: saw 'Ramp up completed'; writing $load_ramp_up_done_flag."
+
+# Write the ramp-up sentinel for master.
+if {[catch {set f [open $load_ramp_up_done_flag "w"]; close $f} err]} {
+    puts "WARN: could not write $load_ramp_up_done_flag: $err"
+}
+
+# --- 3. Wait for master's second savevm 'loaded' to finalise ----------------
+# Master will issue `savevm loaded`, wait for log 7, sleep 10, then write
+# load_done.flag and `quit`. Budget: BUDGET_CHECKPOINTING_S covers the
+# savevm + settle.
+puts "follower: waiting for master's $load_done_flag (master is doing second savevm 'loaded')..."
+wait_for_file $load_done_flag $BUDGET_CHECKPOINTING_S
+puts "follower: saw master's final sentinel; closing follower qemu."
+
+# --- 4. Quit follower qemu cleanly ------------------------------------------
+# By now master has issued `quit` on its own qemu — END_OF_EMULATION may
+# have already cascaded over PDES and closed our qemu too. quit_qemu's
+# `catch {connect_telnet}` handles either case (live monitor → send quit;
+# dead monitor → return silently).
+quit_qemu $monitor_port
+exit 0

@@ -1,0 +1,85 @@
+#!/usr/bin/env expect
+# Install qemu-guest-agent (the QMP agent) into an Alpine guest via the serial
+# console, then `savevm base` and `quit` cleanly via the QEMU monitor.
+#
+# Driven by qflex's Path A: receives TELNET_SERIAL_PORT and TELNET_MONITOR_PORT
+# (and EXP_FOLDER, NODE_NUMBER, SERIAL_LOG_PATH) as env vars from the executor's
+# bash. Set this script as `interaction_script` on a leaf in YAML:
+#
+#   experiment_context_node_0:
+#     interaction_script: ./sample_scripts/install_qga.exp
+#
+# After `savevm base` you can later `loadvm base` and the agent will be running,
+# letting downstream scripts use guest-agent QMP commands instead of expect.
+
+set timeout 600
+
+# Wall-clock budgets for connect/wait operations (seconds). See expect-scripts skill.
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+
+# Poll telnet for the listener — initial qemu-startup case so use the larger budget.
+set saved_timeout $timeout
+set timeout 5
+set deadline [expr {[clock seconds] + $BUDGET_INITIAL_S}]
+while {[clock seconds] < $deadline} {
+    spawn telnet 127.0.0.1 $serial_port
+    set this_sid $spawn_id
+    set ok 0
+    expect {
+        -re "Escape character is" { set ok 1 }
+        -re "Connection refused" { }
+        timeout { }
+        eof { }
+    }
+    if {$ok} { break }
+    catch {close -i $this_sid}
+    catch {wait -i $this_sid}
+    sleep 2
+}
+set timeout $saved_timeout
+if {!$ok} { error "could not connect to serial telnet on port $serial_port within ${BUDGET_INITIAL_S}s" }
+
+# Wait for Alpine's login prompt.
+expect {
+    timeout { puts "ERROR: timed out waiting for login prompt"; exit 1 }
+    -re {login: $}
+}
+send "root\r"
+
+# Alpine's root has no password by default on a fresh image; tolerate either path.
+expect {
+    timeout { puts "ERROR: timed out at password / shell prompt"; exit 1 }
+    -re {Password: $} { send "\r"; exp_continue }
+    -re {# $}
+}
+
+# Update package index and install qemu-guest-agent.
+send "apk update\r"
+expect -re {# $}
+send "apk add qemu-guest-agent\r"
+expect -re {# $}
+
+# Enable + start the service so subsequent loadvm sessions have it running.
+send "rc-update add qemu-guest-agent default\r"
+expect -re {# $}
+send "rc-service qemu-guest-agent start\r"
+expect -re {# $}
+
+# Done with the guest. Disconnect from serial.
+close
+
+# Snapshot + quit cleanly via the monitor. savevm is checkpointing — needs the
+# large budget; the surrounding monitor prompts use the default short budget.
+spawn telnet 127.0.0.1 $monitor_port
+set timeout $BUDGET_DEFAULT_S
+expect "(qemu) "
+set timeout $BUDGET_CHECKPOINTING_S
+send "savevm base\r"
+expect "(qemu) "
+set timeout $BUDGET_DEFAULT_S
+send "quit\r"

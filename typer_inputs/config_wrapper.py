@@ -1,86 +1,248 @@
-from typing import Annotated, List, Dict
+from typing import Annotated, Callable, Optional, Union, get_args, get_origin
 import functools
-
-
-from .typer_base import TyperDataClassMeta
 import inspect
+import os
+
+import typer
+from pydantic.fields import FieldInfo
 
 
+CONFIG_ENV_VAR = "QFLEX_CONFIG"
 
 
+def _cli_type_and_converter(inner_type):
+    """
+    Decide how a factory-param's inner type should appear on the CLI.
 
-# important TODO make a test for this class later
-def data_class_wrap(*args):
-    
-    root_names = set()
-    params = []
-    nested_params_names_nested = set()
-    
-    root_name_to_init_funciton: Dict[str, callable] = {}
-    root_name_to_params: Dict[str, List[inspect.Parameter]]={}
-    
-    for arg in args:
-        assert isinstance(arg, TyperDataClassMeta), "All arguments must be instances of TyperDataClassMeta"
-        assert arg.name not in root_names, f"Data class name {arg.name} is duplicated in multiple data classes"
-        root_names.add(arg.name)
-        curr_params: List[inspect.Parameter] = []
-        for name, param in inspect.signature(arg.init_function).parameters.items():
-            assert name not in nested_params_names_nested, f"Parameter name {name} is duplicated in multiple data classes"
-            params.append(param)
-            curr_params.append(param)
-            nested_params_names_nested.add(name)
-        root_name_to_init_funciton[arg.name] = arg.init_function 
-        root_name_to_params[arg.name] = curr_params
-            
+    Returns (cli_type, converter):
+    - cli_type: the type to advertise on the Typer flag.
+    - converter: callable str -> list[T] for list-typed params, else None.
+
+    Click natively treats `Annotated[Optional[List[int]], typer.Option(...)]` as
+    multi-flag repetition (`--flag 1 --flag 2`), not comma-separated. To get the
+    comma-separated UX without per-field custom ParamTypes, list-typed factory
+    params are exposed as Optional[str] on the CLI and parsed in the wrapper.
+    """
+    if get_origin(inner_type) is Union:
+        non_none = [a for a in get_args(inner_type) if a is not type(None)]
+        if len(non_none) == 1:
+            inner_type = non_none[0]
+
+    if get_origin(inner_type) is list:
+        (elem_type,) = get_args(inner_type)
+        def convert(s: str):
+            stripped = s.strip()
+            if not stripped:
+                return []
+            return [elem_type(part.strip()) for part in stripped.split(",")]
+        return str, convert
+    return inner_type, None
+
+
+def _typer_param_for(param: inspect.Parameter):
+    """
+    Translate a factory parameter into the form Typer expects:
+    Annotated[Optional[T], typer.Option(help=...)] with default None.
+    Returns (typer_param, converter) — converter is non-None for list-typed
+    factory params, which become Optional[str] on the CLI and need
+    string-to-list parsing at call time.
+
+    All CLI flags become Optional[T] = None so "not passed" is distinguishable
+    from "passed with the factory's default value" — critical when --config is
+    used: only flags the user actually set should override YAML values. Factory
+    defaults still apply (the wrapper drops None kwargs before calling the
+    factory, so the factory's own defaults kick in).
+
+    Pulls help text from pydantic Field(description=...) attached via Annotated.
+    Suffixes the factory default into the help text so --help still tells the
+    user what they get when they omit a flag. Adds a (comma-separated) hint
+    when the param is list-typed.
+    """
+    annotation = param.annotation
+    inner_type = annotation
+    help_text = ""
+
+    if get_origin(annotation) is Annotated:
+        annotation_args = get_args(annotation)
+        inner_type = annotation_args[0]
+        for meta in annotation_args[1:]:
+            if isinstance(meta, FieldInfo) and meta.description:
+                help_text = meta.description
+                break
+
+    cli_type, converter = _cli_type_and_converter(inner_type)
+    if converter is not None:
+        help_text = f"{help_text} (comma-separated)".strip()
+
+    if param.default is not inspect.Parameter.empty:
+        suffix = f"[factory default: {param.default!r}]"
+        help_text = f"{help_text}  {suffix}" if help_text else suffix
+
+    new_annotation = Annotated[Optional[cli_type], typer.Option(help=help_text, show_default=False)]
+    return param.replace(annotation=new_annotation, default=None), converter
+
+
+def _config_param() -> inspect.Parameter:
+    """The injected --config / -c flag, common to every wrapped command."""
+    annotation = Annotated[
+        Optional[str],
+        typer.Option(
+            "--config",
+            "-c",
+            help=(
+                f"Path to a YAML config file. If set (or ${CONFIG_ENV_VAR} is exported), "
+                "the YAML is used to build the experiment context and per-field flags are ignored."
+            ),
+        ),
+    ]
+    return inspect.Parameter(
+        "config",
+        kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        default=None,
+        annotation=annotation,
+    )
+
+
+def data_class_wrap(target: Callable, *, name: str):
+    """
+    Decorator that splices `target`'s parameters into the wrapped Typer command,
+    plus a `--config / -c` flag for YAML-driven config.
+
+    Final-value precedence for any field of `target` (low → high; later wins):
+
+      1. Factory default (`target`'s parameter default).
+      2. The YAML's `extends:` chain — recursive deep-merge of parent docs;
+         the child wins at every level (including `_leaf_defaults` and any
+         other top-level base block).
+      3. **Phase overlay: top-level `<func_name>: { ... }` block.** Only
+         applied when this command runs (matched by the wrapped function's
+         Python name — `fw`, `run_idx`, `partition_cleanup`, etc.). The
+         block mirrors the main YAML's shape; the supported targets are
+         `_leaf_defaults: {...}` (rule-level — propagates to every
+         component using `_base_:`) and `components: {<name>: {...}}`
+         (per-component, scoped strictly to the named component, so e.g.
+         `experiment_context_node_1` can be overridden without touching
+         the group). Flat-key forms like `boot: { latencies_ns_list: [...] }`
+         are rejected — write `boot: { _leaf_defaults: {...} }` or
+         `boot: { components: {experiment_context: {...}} }` instead.
+      4. The component's `_base_:` resolution against the (possibly
+         phase-modified) `_leaf_defaults` — applied once at the outermost
+         `load_config` call, AFTER the phase overlay so its `_leaf_defaults`
+         changes propagate.
+      5. The component's own per-leaf `experiment_context*: { ... }` block
+         (e.g. `experiment_context_node_0`'s explicit overrides). Wins
+         over `_base_` because OmegaConf.merge keeps the component's keys
+         on top of the merged base.
+      6. CLI flag the user explicitly passed (`--core-count`, `--memory-gb`, …).
+
+    At call time:
+
+    - If --config was passed, or $QFLEX_CONFIG is set in the environment,
+      resolve the YAML path (flag wins over env), build the experiment context
+      via DI honouring the precedence above, and inject the result as
+      kwargs[name].
+    - Otherwise, harvest the per-field flag values that were actually set, call
+      target(**harvested), and inject the result as kwargs[name]. Raises a
+      friendly error if any factory-required field wasn't provided.
+
+    `target` is the factory whose signature is the single source of truth for
+    both the YAML/DI path and the CLI. Pydantic Field(description=...) on
+    target's parameters becomes the Typer --help text.
+    """
+    target_params = list(inspect.signature(target).parameters.values())
+    target_param_names = {p.name for p in target_params}
+    target_required_param_names = {
+        p.name for p in target_params if p.default is inspect.Parameter.empty
+    }
+    if "config" in target_param_names:
+        raise ValueError(
+            f"Cannot wrap {target.__name__}: it has a parameter named 'config' "
+            "which collides with the injected --config/-c flag."
+        )
+    typer_params = [_config_param()]
+    converters: dict[str, Callable] = {}
+    for p in target_params:
+        new_param, converter = _typer_param_for(p)
+        typer_params.append(new_param)
+        if converter is not None:
+            converters[p.name] = converter
 
     def func_wrapper(func):
+        # Captured at decoration time so the wrapper can match the YAML's
+        # top-level `<func_name>: { ... }` section to the running command.
+        # Python form (underscores) — e.g. `fw`, `run_idx`, `partition_cleanup`.
+        cmd_name = func.__name__
 
-        # TODO add check so no one can have args
         @functools.wraps(func)
-        def wrapper(
-            *args,
-            **kwargs,
-        ):
-            print(root_names)
-            for root_name, init_function in root_name_to_init_funciton.items():
-                
-                # Create a dictionary of the parameters that are needed for the init function
-                selected_kwargs ={}
-                
-                for nested_param in root_name_to_params[root_name]:
-                    # TODO double check this
-                    nested_param_name = nested_param.name
-                    
-                    if nested_param_name in kwargs:
-                        selected_kwargs[nested_param_name] = kwargs[nested_param_name]
-                    else:
-                        if nested_param.default is not inspect.Parameter.empty:
-                            # TODO create a test for this and also check it doesn't apply when value is given
-                            selected_kwargs[nested_param_name] = nested_param.default
-                        else:
-                            raise ValueError(f"Missing required parameter {nested_param_name} for {root_name}")
+        def wrapper(*args, **kwargs):
+            config_path = kwargs.pop("config", None) or os.environ.get(CONFIG_ENV_VAR)
 
-                for nested_param_name in selected_kwargs.keys():
-                    kwargs.pop(nested_param_name)
-                
-                value = init_function(**selected_kwargs)
-                kwargs[root_name] = value
+            cli_overrides = {}
+            for n in target_param_names:
+                if n in kwargs:
+                    v = kwargs.pop(n)
+                    if v is None:
+                        continue
+                    if n in converters:
+                        v = converters[n](v)
+                    # Click renders multi-value options (List[T]) as `()` / `[]`
+                    # when the flag is omitted; treat that as "not passed".
+                    if isinstance(v, (list, tuple)) and len(v) == 0:
+                        continue
+                    cli_overrides[n] = v
 
+            yaml_keys: set[str] = set()
+            cfg = None
+            if config_path:
+                from dep_injection.config_loader import load_config
+                from dep_injection.di_loader import RESERVED_KEYS
+                # Resolve everything the YAML can supply (extends → phase
+                # overlay → _base_) so missing-flag detection sees the same
+                # field set the DI graph will. The phase block can add fields
+                # via `_leaf_defaults: {...}` which propagate into the group
+                # component when its `_base_:` is resolved.
+                cfg = load_config(config_path, cmd_name=cmd_name)
+                comp = cfg.get("components", {}).get(name)
+                if comp is not None:
+                    yaml_keys = {k for k in comp.keys() if k not in RESERVED_KEYS}
+                    deps = comp.get("_deps_") or {}
+                    yaml_keys.update(deps.keys())
+
+            provided = cli_overrides.keys() | yaml_keys
+            missing = target_required_param_names - provided
+            if missing:
+                flag_names = sorted(f"--{m.replace('_', '-')}" for m in missing)
+                msg = "Missing required option(s): " + ", ".join(flag_names) + "."
+                if config_path:
+                    msg += f" Add them to the YAML config at {config_path} or pass them as CLI flags."
+                else:
+                    msg += f" Either pass them as flags or provide --config <path> (or set ${CONFIG_ENV_VAR})."
+                raise typer.BadParameter(msg)
+
+            if config_path:
+                from dep_injection.builder import build_experiment_context
+                comp_overrides = None
+                if cli_overrides:
+                    target_path = f"{target.__module__}.{target.__qualname__}"
+                    comp_overrides = {
+                        cn: cli_overrides
+                        for cn, c in cfg.get("components", {}).items()
+                        if c.get("_target_") == target_path
+                    }
+                kwargs[name] = build_experiment_context(
+                    config_path,
+                    cmd_name=cmd_name,
+                    component_overrides=comp_overrides,
+                )
+            else:
+                kwargs[name] = target(**cli_overrides)
             return func(*args, **kwargs)
 
-        # TODO this is a simple solution, check if typer uses other attributes or not
-        # TODO make it more robust for the *args and **kwargs
-        func_params = [param for name, param in inspect.signature(func).parameters.items() if name not in root_names]
-
-        # TODO this order of appending always thinks the values coming from composites are none defaults
-        params_final = list(params)+func_params
-        wrapper.__signature__ = inspect.Signature(parameters=params_final)
-
-
+        func_params = [
+            p for p_name, p in inspect.signature(func).parameters.items()
+            if p_name != name
+        ]
+        wrapper.__signature__ = inspect.Signature(parameters=typer_params + func_params)
         return wrapper
 
     return func_wrapper
-
-
-
-

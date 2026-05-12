@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+        "./qemu",
+        "./parallel-qemu",
+        "./flexus",
+        "./WormCacheQFlex",
+        "./qemu/middleware"
+    ]
+  }
+}
