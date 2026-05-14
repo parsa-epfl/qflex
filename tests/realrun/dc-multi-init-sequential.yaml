@@ -1,0 +1,17 @@
+# Init-phase variant: sequential mode (is_parallel=false, icount-driven RR).
+# Validates the BH-deferred qemu_plugin_notify_fully_warmed handshake under RR.
+# PWQ=100000 (100 us), MNQ=1000000 (1 ms).
+# Used by test_chained_pipeline.py::test_04b_init_warm_sequential_after_test_04.
+extends: dc-multi
+
+initialize:
+  _leaf_defaults:
+    loadvm_name: loaded-test
+    is_parallel: false
+    quantum_size: 100000
+    check_period_quantum_coeff: 10
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]

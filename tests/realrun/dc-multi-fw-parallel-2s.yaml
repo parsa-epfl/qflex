@@ -1,0 +1,18 @@
+# FW variant: parallel mode (is_parallel=true), 2-second population.
+# PWQ=100000 (100 us), MNQ=1000000 (1 ms).
+# Used by test_chained_pipeline.py::test_04c_fw_parallel_2s_after_test_04.
+extends: dc-multi
+
+fw:
+  _leaf_defaults:
+    loadvm_name: init_warmed
+    sample_size: 20
+    population_seconds: 2
+    is_parallel: true
+    quantum_size: 100000
+    check_period_quantum_coeff: 10
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]

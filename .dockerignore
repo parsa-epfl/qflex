@@ -12,7 +12,8 @@ include qemu/.gitignore
 out/
 qemu-saved/
 parallel-qemu-saved/
-**/build/
+qemu/build/
+parallel-qemu/build/
 Dockerfile
 images/
 .github/

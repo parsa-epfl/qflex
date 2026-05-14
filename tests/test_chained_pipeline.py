@@ -48,8 +48,14 @@ def _yaml_leaf_field(cmd_name: str, field: str):
     Single source of truth: the YAML. Tests that need to assert on a YAML
     value (e.g. sample_size) should derive it via this helper rather than
     re-declaring the value as a python constant."""
+    return _yaml_leaf_field_from(cmd_name, field, REALRUN_YAML)
+
+
+def _yaml_leaf_field_from(cmd_name: str, field: str, yaml_path: str):
+    """Like _yaml_leaf_field but for an alternate YAML (used by the test_04*
+    variants that override sample_size / population_seconds / is_parallel)."""
     from dep_injection.builder import build_experiment_context
-    ctx = build_experiment_context(REALRUN_YAML, cmd_name=cmd_name)
+    ctx = build_experiment_context(yaml_path, cmd_name=cmd_name)
     return getattr(ctx.sub_experiments[0], field)
 
 
@@ -334,6 +340,173 @@ def test_04_init_warm_creates_init_warmed_snapshot(dev_container):
         assert os.path.exists(base), (
             f"expected {base} after init_warm — incremental-base mem file missing"
         )
+
+
+def _assert_init_warmed_landed(mounting: str):
+    """Common post-init check: each node's qcow2 has the init_warmed snapshot
+    and the external-incremental-base state + mem files exist."""
+    for n, sub in enumerate(NODE_SUB_NAMES):
+        qcow2 = _node_qcow2(mounting, n)
+        assert _qcow2_has_snapshot(qcow2, INIT_WARMED_SNAPSHOT), (
+            f"init_warmed snapshot did NOT land in {qcow2} — check "
+            f"{mounting}/experiments/{sub}/InitWarm.log / InitWarm.err"
+        )
+        state = f"{mounting}/experiments/{sub}/run/{INIT_WARMED_SNAPSHOT}.state.zstd"
+        base = f"{mounting}/experiments/{sub}/run/{INIT_WARMED_SNAPSHOT}.mem/base"
+        assert os.path.exists(state), (
+            f"node {n}: expected {state} after init_warm"
+        )
+        assert os.path.exists(base), (
+            f"node {n}: expected {base} after init_warm"
+        )
+
+
+def _assert_fw_produced_snapshots(mounting: str, sample_size: int):
+    """Common post-fw check: at least sample_size-1 per-sample state files
+    landed per node, and the plugin's exit log line shows up on at least one
+    node (the deterministic completion signal)."""
+    for sub in NODE_SUB_NAMES:
+        err_path = f"{mounting}/experiments/{sub}/FunctionalWarming.err"
+        if os.path.exists(err_path):
+            with open(err_path) as f:
+                err_content = f.read()
+            for marker in ("qemu-system-aarch64:", "Failed to", "Segmentation fault", "Aborted"):
+                assert marker not in err_content, (
+                    f"{sub} FunctionalWarming.err contains qemu-side error "
+                    f"(matched marker {marker!r}):\n{err_content[-2000:]}"
+                )
+
+    quit_marker = f"Generate {sample_size} snapshots. Quit."
+    saw_quit_log = False
+    for n, sub in enumerate(NODE_SUB_NAMES):
+        log = f"{mounting}/experiments/{sub}/FunctionalWarming.log"
+        assert os.path.exists(log), f"expected {log} from FW run"
+        with open(log) as f:
+            if quit_marker in f.read():
+                saw_quit_log = True
+
+        run_dir = f"{mounting}/experiments/{sub}/run"
+        sample_files = [
+            f for f in os.listdir(run_dir)
+            if f.startswith("snapshot_") and f.endswith(".state.zstd")
+        ]
+        assert len(sample_files) >= sample_size - 1, (
+            f"node {n} only produced {len(sample_files)} of {sample_size} "
+            f"per-sample state files in {run_dir} — FW didn't reach the end."
+        )
+
+    assert saw_quit_log, (
+        f"none of the nodes' FunctionalWarming.log contained {quit_marker!r}"
+    )
+
+
+def _clean_fw_snapshots_above_zero(mounting: str):
+    """Per the user's spec: after the new FW tests run, remove snapshot_<N> for
+    N >= 1 (state.zstd + mem dir). snapshot_0 is left in place so test_05's
+    require_snapshot still finds init_warmed intact."""
+    cmd = " && ".join(
+        f"rm -rf {mounting}/experiments/{sub}/run/snapshot_[1-9]*.state.zstd "
+        f"{mounting}/experiments/{sub}/run/snapshot_[1-9]*.mem"
+        for sub in NODE_SUB_NAMES
+    )
+    _exec_in_container(cmd, timeout=60)
+
+
+def test_04a_init_warm_parallel_after_test_04(dev_container):
+    """Re-run `./qflex initialize` in PARALLEL mode (is_parallel=true) after
+    test_04. Validates that the BH-deferred qemu_plugin_notify_fully_warmed
+    + cooperative MNQ pause work under the canonical MTTCG path."""
+    mounting = dev_container
+    require_snapshot(
+        [_node_qcow2(mounting, n) for n in range(len(NODE_SUB_NAMES))],
+        LOADED_TEST_SNAPSHOT,
+        "run test_03 first",
+    )
+    r = _exec_in_container(
+        "./qflex initialize -c tests/realrun/dc-multi-init-parallel.yaml",
+        timeout=900,
+    )
+    assert r.returncode == 0, (
+        f"initialize (parallel) failed (rc={r.returncode}).\n"
+        f"stdout (last 2k):\n{r.stdout[-2000:]}\n"
+        f"stderr (last 2k):\n{r.stderr[-2000:]}"
+    )
+    _assert_init_warmed_landed(mounting)
+
+
+def test_04b_init_warm_sequential_after_test_04(dev_container):
+    """Re-run `./qflex initialize` in SEQUENTIAL mode (is_parallel=false, RR).
+    Pre-fix this deadlocked when master finished warming first and called
+    qemu_plugin_notify_fully_warmed inline from the RR vCPU loop. With the
+    BH-defer in pf_api.c the call returns immediately, the RR thread yields,
+    peers drain CHECKPOINT_INIT_STEP, the snapshot lands."""
+    mounting = dev_container
+    require_snapshot(
+        [_node_qcow2(mounting, n) for n in range(len(NODE_SUB_NAMES))],
+        LOADED_TEST_SNAPSHOT,
+        "run test_03 first",
+    )
+    r = _exec_in_container(
+        "./qflex initialize -c tests/realrun/dc-multi-init-sequential.yaml",
+        timeout=900,
+    )
+    assert r.returncode == 0, (
+        f"initialize (sequential) failed (rc={r.returncode}).\n"
+        f"stdout (last 2k):\n{r.stdout[-2000:]}\n"
+        f"stderr (last 2k):\n{r.stderr[-2000:]}"
+    )
+    _assert_init_warmed_landed(mounting)
+
+
+def test_04c_fw_parallel_2s_after_test_04(dev_container):
+    """`./qflex fw` for 2 s in PARALLEL mode (is_parallel=true). Drift monitor
+    is on (qemu-pdes/net/pdes-wwt.c) — this run asserts that PWQ stays aligned
+    with MNQ across every quantum-boundary sync. snapshot_<N> for N>=1 is
+    cleaned at the end so test_05 starts from a known state."""
+    mounting = dev_container
+    require_snapshot(
+        [_node_qcow2(mounting, n) for n in range(len(NODE_SUB_NAMES))],
+        INIT_WARMED_SNAPSHOT,
+        "run test_04 (or 04a/04b) first",
+    )
+    yaml_path = "tests/realrun/dc-multi-fw-parallel-2s.yaml"
+    sample_size = _yaml_leaf_field_from("fw", "sample_size", yaml_path)
+    r = _exec_in_container(
+        f"./qflex fw -c {yaml_path}",
+        timeout=1380,
+    )
+    assert r.returncode == 0, (
+        f"fw 10s (parallel) failed (rc={r.returncode}).\n"
+        f"stdout (last 2k):\n{r.stdout[-2000:]}\n"
+        f"stderr (last 2k):\n{r.stderr[-2000:]}"
+    )
+    _assert_fw_produced_snapshots(mounting, sample_size)
+    _clean_fw_snapshots_above_zero(mounting)
+
+
+def test_04d_fw_sequential_2s_after_test_04(dev_container):
+    """`./qflex fw` for 2 s in SEQUENTIAL mode (is_parallel=false, RR). Same
+    drift-monitor / cooperative-pause validation as test_04c, in the path that
+    was the original regression risk. Cleans snapshot_>=1 at the end."""
+    mounting = dev_container
+    require_snapshot(
+        [_node_qcow2(mounting, n) for n in range(len(NODE_SUB_NAMES))],
+        INIT_WARMED_SNAPSHOT,
+        "run test_04 (or 04a/04b) first",
+    )
+    yaml_path = "tests/realrun/dc-multi-fw-sequential-2s.yaml"
+    sample_size = _yaml_leaf_field_from("fw", "sample_size", yaml_path)
+    r = _exec_in_container(
+        f"./qflex fw -c {yaml_path}",
+        timeout=1380,
+    )
+    assert r.returncode == 0, (
+        f"fw 10s (sequential) failed (rc={r.returncode}).\n"
+        f"stdout (last 2k):\n{r.stdout[-2000:]}\n"
+        f"stderr (last 2k):\n{r.stderr[-2000:]}"
+    )
+    _assert_fw_produced_snapshots(mounting, sample_size)
+    _clean_fw_snapshots_above_zero(mounting)
 
 
 def test_05_fw_creates_per_sample_snapshots(dev_container):

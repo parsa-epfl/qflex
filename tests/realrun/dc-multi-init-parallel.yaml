@@ -1,0 +1,17 @@
+# Init-phase variant: parallel mode (is_parallel=true).
+# PWQ=100000 (100 us intra-machine quantum_size), MNQ=1000000 (1 ms inter-machine
+# latencies_ns_list = WWT's quantum_ns via pdes-wwt.c:68).
+# Used by test_chained_pipeline.py::test_04a_init_warm_parallel_after_test_04.
+extends: dc-multi
+
+initialize:
+  _leaf_defaults:
+    loadvm_name: loaded-test
+    is_parallel: true
+    quantum_size: 100000
+    check_period_quantum_coeff: 10
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]
