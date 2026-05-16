@@ -106,7 +106,8 @@ case $SIM in
                         --enable-libqflex                   \
                         --enable-snapvm-external            \
                         --disable-gtk                       \
-                        --with-bxdb=../../../bxdb/             \
+                        --with-bxdb=../../../bxdb/          \
+                        --enable-zstd                       \
                         --enable-debug
         else
             ./configure --target-list=aarch64-softmmu       \
@@ -116,7 +117,8 @@ case $SIM in
                         --enable-libqflex                   \
                         --disable-gtk                       \
                         --enable-snapvm-external            \
-                        --with-bxdb=../../../bxdb/
+                        --with-bxdb=../../../bxdb/          \
+                        --enable-zstd
         fi
         popd
         make -C qemu -j
