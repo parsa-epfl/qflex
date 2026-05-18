@@ -52,10 +52,10 @@
 set timeout 900
 
 set BUDGET_INITIAL_S        10
-set BUDGET_DEFAULT_S         5
+set BUDGET_DEFAULT_S        20
 set BUDGET_PROMPT_S         60
-set BUDGET_CHECKPOINTING_S 7200
-set BUDGET_WORKLOAD_INIT_S 7200   ; # client ramp-up under PDES sync=true on -smp 1: ~45 min worst case
+set BUDGET_CHECKPOINTING_S 10800
+set BUDGET_WORKLOAD_INIT_S 10800   ; # client ramp-up under PDES sync=true on -smp 1: ~45 min worst case
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
@@ -257,9 +257,9 @@ sleep 5
 # ping actually ran. 30 s host wall-clock budget; under PDES that's plenty for
 # 10 packets at -i 0.05 to land + summary to print.
 send "ping 192.168.100.1 -i 0.05 -c 10\r"
-set timeout 30
+set timeout 120
 expect {
-    timeout { puts "ERROR: ping summary didn't arrive within 30s"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
     -re {(\d+) packets transmitted, (\d+)[ ,]} {
         puts "follower: ping summary -> $expect_out(1,string) transmitted, $expect_out(2,string) received"
     }

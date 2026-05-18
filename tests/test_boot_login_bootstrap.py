@@ -125,13 +125,19 @@ def test_init_alpine_boot_login_savevm(dev_container):
 def test_init_multi_boot_login_savevm(dev_container):
     """Bootstrap the multi-node `boot-login` snapshot in each per-node qcow2.
 
-    Wipes the experiment folders (so set_up_folders regenerates core_info.csv
-    fresh against this run's core_count / doubled_vcpu) but DOES NOT touch the
-    per-node qcow2s. They're test-world files (`root-single-node-node{0,1}.qcow2`,
-    only ever populated by the test-world experiment names `qflex_test_multi-*`
-    — never by user real-experiment runs), and rebuilding them via `cp -u` from
-    the 6+ GB master qcow2 takes 20+ minutes on this disk; `cp -u` is a no-op
-    once they exist, so subsequent init runs are fast.
+    Wipes the experiment folders AND the per-node qcow2s so `cp -u` pulls a
+    fresh copy from the master image. The qcow2 wipe is necessary whenever
+    the VM topology changes (core_count, doubled_vcpu, memory_gb in some
+    paths) — QEMU's migration framework rejects topology-mismatched savevm
+    state with "Not a migration stream / Error -22 while loading VM state".
+
+    Cost: rebuilding each per-node qcow2 via `cp -u` from the 6+ GB master
+    takes ~20 minutes on this disk. That's the price of `QFLEX_INIT_TEST=1`;
+    it's an opt-in bootstrap, not part of the default `make test` path.
+
+    These qcow2s are test-world files (`root-single-node-node{0,1}.qcow2`),
+    only populated by the `qflex_test_multi-*` experiment names — they don't
+    collide with user real-experiment runs.
     """
     mounting = dev_container
 
@@ -140,6 +146,11 @@ def test_init_multi_boot_login_savevm(dev_container):
     ]
     for sub in MULTI_NODE_SUB_NAMES:
         rm_targets.append(f"{mounting}/experiments/{sub}")
+    # Wipe per-node qcow2s so any prior savevm state (which was captured at the
+    # previous core_count / doubled_vcpu) doesn't survive into the new bootstrap
+    # and trip "Error -22 while loading VM state" on subsequent loadvm.
+    for n in range(len(MULTI_NODE_SUB_NAMES)):
+        rm_targets.append(_node_qcow2(mounting, n))
     rm_cmd = " && ".join(f"rm -rf {t}" for t in rm_targets)
     rm_result = _exec_in_container(rm_cmd, timeout=120)
     assert rm_result.returncode == 0, (

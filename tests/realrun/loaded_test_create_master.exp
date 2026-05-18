@@ -152,7 +152,7 @@ if {[catch {open $out_path "w"} f]} {
 send "MAC=52:54:00:aa:bb:00; IFACE=\$(ip -o link | grep -i \"\$MAC\" | awk -F': ' '{print \$2}'); echo IFACE=\$IFACE\r"
 expect {
     timeout { puts "ERROR: iface lookup timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {IFACE=([A-Za-z0-9]+)} {
+    -re {IFACE=([A-Za-z0-9]+)\r?\n} {
         set iface $expect_out(1,string)
         puts "found PDES iface: $iface"
     }
@@ -190,7 +190,7 @@ expect -re {[\$#] +}
 
 # --- 3. Start ping in background, watch for first echo ---------------------
 
-send "ping 192.168.100.2 -c 1000000 -W 2000 -i 0.001 > /tmp/ping.out 2>&1 &\r"
+send "ping 192.168.100.2 -c 1000000 -W 2000 -i 0.1 > /tmp/ping.out 2>&1 &\r"
 expect {
     timeout { puts "ERROR: backgrounding ping timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}

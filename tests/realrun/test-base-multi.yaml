@@ -11,3 +11,7 @@ _leaf_defaults:
   # icount-based virtual-time path stalls so far behind wall-clock under
   # PDES sync that even short drain windows take 10+ minutes.
   is_parallel: false
+  # Test-only override: 2 cores so we exercise both RR (one host thread
+  # alternating between 2 vCPUs) and MTTCG (2 host threads, one per vCPU).
+  # Production base (conf/DC/DC_base.yaml) stays at core_count: 1.
+  core_count: 2

@@ -304,15 +304,12 @@ def test_04_init_warm_creates_init_warmed_snapshot(dev_container):
         "run tests/test_chained_pipeline.py::test_03_boot_creates_loaded_test_with_workload first",
     )
 
-    # 10 minute wall budget — per the user's "make init be able to continue
-    # for 10 minutes". Under parallel-mode init (forced by the YAML override
-    # in `initialize:` to dodge the icount/sequential deadlock — see TODO in
-    # commands/init_warm.py) the savevm path is the EXTERNAL_INCREMENTAL_BASE
-    # memory dump; if 10 min isn't enough it likely means the bug above is
-    # back, not that the budget is too tight. Bump rather than mask.
+    # 20 minute wall budget — 2x the original 10-min budget because the
+    # test-only core_count=2 (test-base-multi.yaml) makes wall-clock ~2x slower
+    # in sequential RR mode. Bump rather than mask if it still doesn't fit.
     r = _exec_in_container(
         "./qflex initialize -c tests/realrun/dc-multi.yaml",
-        timeout=600,
+        timeout=1200,
     )
     assert r.returncode == 0, (
         f"initialize from loaded-test failed (rc={r.returncode}).\n"
@@ -446,9 +443,14 @@ def test_04b_init_warm_sequential_after_test_04(dev_container):
         LOADED_TEST_SNAPSHOT,
         "run test_03 first",
     )
+    # Sequential (RR) + core_count=2: WormCache fill is dominated by virtual-time
+    # progress, which is ~2x slower per vCPU; effective slowdown is more like 4x
+    # because both vCPUs share the single RR host thread. Empirically 30 min isn't
+    # enough; bump to 1 hour. If this gets tighter again, the right fix is to
+    # shrink the WormCache fill threshold via the test YAML, not bump further.
     r = _exec_in_container(
         "./qflex initialize -c tests/realrun/dc-multi-init-sequential.yaml",
-        timeout=900,
+        timeout=3600,
     )
     assert r.returncode == 0, (
         f"initialize (sequential) failed (rc={r.returncode}).\n"
@@ -496,9 +498,12 @@ def test_04d_fw_sequential_2s_after_test_04(dev_container):
     )
     yaml_path = "tests/realrun/dc-multi-fw-sequential-2s.yaml"
     sample_size = _yaml_leaf_field_from("fw", "sample_size", yaml_path)
+    # 2x the parallel-mode timeout: RR is one host thread alternating between
+    # 2 vCPUs (test-base-multi.yaml core_count=2), so wall-clock is ~2x slower
+    # for the same simulated workload.
     r = _exec_in_container(
         f"./qflex fw -c {yaml_path}",
-        timeout=1380,
+        timeout=2760,
     )
     assert r.returncode == 0, (
         f"fw 10s (sequential) failed (rc={r.returncode}).\n"
@@ -530,9 +535,10 @@ def test_05_fw_creates_per_sample_snapshots(dev_container):
         "run tests/test_chained_pipeline.py::test_04_init_warm_creates_init_warmed_snapshot first",
     )
 
+    # 2x: sequential (RR) mode under test-base-multi.yaml core_count=2.
     r = _exec_in_container(
         f"./qflex fw -c {REALRUN_YAML}",
-        timeout=1800,
+        timeout=3600,
     )
     assert r.returncode == 0, (
         f"fw failed (rc={r.returncode}).\n"
@@ -667,9 +673,10 @@ def test_07_run_idx_single_sample(dev_container):
             "tests/test_chained_pipeline.py::test_06_partition_splits_samples_into_chunks first"
         )
 
+    # 2x: sequential (RR) mode under test-base-multi.yaml core_count=2.
     r = _exec_in_container(
         "./qflex run-idx -c tests/realrun/dc-multi.yaml",
-        timeout=180,
+        timeout=360,
     )
     assert r.returncode == 0, (
         f"run-idx (part 0, idx 0) failed (rc={r.returncode}).\n"
@@ -780,9 +787,10 @@ def test_08_run_single_partition_sequential_idxs(dev_container):
             "tests/test_chained_pipeline.py::test_06_partition_splits_samples_into_chunks first"
         )
 
+    # 2x: sequential (RR) mode under test-base-multi.yaml core_count=2.
     r = _exec_in_container(
         "./qflex run-single-partition -c tests/realrun/dc-multi.yaml",
-        timeout=3600,
+        timeout=7200,
     )
     assert r.returncode == 0, (
         f"run-single-partition (part 0) failed (rc={r.returncode}).\n"
@@ -835,10 +843,12 @@ def test_09_run_partition_full_fanout(dev_container):
         )
 
     # All 5 partitions × ~6 idxs each × 2 nodes (parallel). At a few minutes
-    # per idx with Flexus, this can run many minutes; cap at 2 hours.
+    # per idx with Flexus, this can run many minutes; cap at 4 hours (2x the
+    # original 2-hour cap because test-base-multi.yaml sets core_count=2 and
+    # the run-* phases are sequential/RR).
     r = _exec_in_container(
         "./qflex run-partition -c tests/realrun/dc-multi.yaml",
-        timeout=7200,
+        timeout=14400,
     )
     assert r.returncode == 0, (
         f"run-partition failed (rc={r.returncode}).\n"
