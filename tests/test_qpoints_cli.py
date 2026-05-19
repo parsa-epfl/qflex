@@ -55,6 +55,7 @@ def test_qflex_qpoints_run_gem5_help_exposes_tracing_options():
     )
 
     assert "--branch-trace" in result.stdout
+    assert "tage-decision" in result.stdout
     assert "--data-trace" in result.stdout
     assert "--dump-cache-state" in result.stdout
     assert "--timing-ruby" in result.stdout
@@ -71,6 +72,7 @@ def test_qpoints_run_gem5_forwards_tracing_options():
             inst=1000,
             core_count=1,
             branch_trace=True,
+            tage_decision_trace=True,
             data_trace=True,
             dump_cache_state=True,
             timing_ruby=True,
@@ -84,6 +86,7 @@ def test_qpoints_run_gem5_forwards_tracing_options():
         inst=1000,
         core_count=1,
         branch_trace=True,
+        tage_decision_trace=True,
         data_trace=True,
         dump_cache_state=True,
         timing_ruby=True,
@@ -244,3 +247,23 @@ def test_prepare_snapshot_gem5_uarch_skips_when_postprocessor_script_missing(
     assert "prepare_gem5_uarch.py not found; skipping gem5 uarch preparation" in (
         capsys.readouterr().err
     )
+
+
+def test_test_worm_rejects_trace_limit_without_tracing():
+    module = _load_qflex_module()
+    with pytest.raises(module.typer.BadParameter, match="requires --tage-decision-trace"):
+        module.test_worm.__wrapped__(
+            experiment_context=mock.sentinel.ctx,
+            tage_decision_trace=False,
+            tage_decision_trace_limit=10,
+        )
+
+
+def test_test_worm_rejects_negative_trace_limit():
+    module = _load_qflex_module()
+    with pytest.raises(module.typer.BadParameter, match="must be non-negative"):
+        module.test_worm.__wrapped__(
+            experiment_context=mock.sentinel.ctx,
+            tage_decision_trace=True,
+            tage_decision_trace_limit=-1,
+        )
