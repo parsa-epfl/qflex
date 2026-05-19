@@ -1,0 +1,125 @@
+#!/usr/bin/env expect
+# SINGLE-NODE WSV boot. Logs in as qflex/qflex, then `savevm booted` over the
+# monitor and quits.
+#
+# Wire into a YAML's `boot:` section:
+#   experiment_context:
+#     interaction_script: /home/dev/qflex/conf/WSV/expects/boot_savevm_booted_single.exp
+#
+# tmux is assumed already installed in the qcow2 (manually by the user). No
+# package install needed here.
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_BOOT_LOGIN_S   1800   ; # cold-boot login under emulation can be minutes
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+# --- 1. Connect serial + login as qflex/qflex --------------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_BOOT_LOGIN_S
+send "\r"
+expect {
+    timeout { puts "ERROR: login prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }
+}
+
+set timeout $BUDGET_PROMPT_S
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: password prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Pp]assword: }
+}
+send "qflex\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+# --- 2. savevm booted via the monitor ----------------------------------------
+
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+
+set timeout $BUDGET_DEFAULT_S
+expect {
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    "(qemu) "
+}
+
+# delvm best-effort idempotency — savevm refuses to overwrite.
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm booted\r"
+expect {
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm booted\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return"; exit 1 }
+    "(qemu) "
+}
+
+send "quit\r"
+catch {expect eof}
+exit 0

@@ -1,0 +1,224 @@
+#!/usr/bin/env expect
+# MULTI-NODE FOLLOWER (node_number > 0) WSV load. Loads from `booted`,
+# brings up the PDES NIC, ping-verifies the wire to master (0-drop required),
+# waits for master's server-ready sentinel, runs the faban client on the
+# serial spawn targeting 192.168.100.1, waits for `Ramp up completed`, signals
+# master, then waits for its OWN per-node `savevm log 7` (PDES drain cascade)
+# before sleeping 60s and exiting.
+#
+# Pair with conf/WSV/expects/load_savevm_loaded_master.exp on node 0.
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_WORKLOAD_INIT_S 10800
+set BUDGET_CHECKPOINTING_S 10800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+set group_folder      [file dirname $exp_folder]
+set wire_master_flag  "$group_folder/wsv_load_wire_master.flag"
+set wire_wait_flag    "$group_folder/wsv_load_wire_wait.flag"
+set server_ready_flag "$group_folder/wsv_load_server_ready.flag"
+set ramp_up_done_flag "$group_folder/wsv_load_ramp_up_done.flag"
+catch {file delete -force $wire_wait_flag}
+catch {file delete -force $ramp_up_done_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]; set content [read $fh]; close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
+# --- 1. Connect serial + nudge for post-loadvm prompt -----------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out after loadvm"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 10
+
+# --- 2. IP bring-up on the PDES NIC (eth0) ----------------------------------
+
+send "su\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
+    -re {[Aa]uthentication failure|incorrect password} {
+        puts "ERROR: su rejected empty creds"; quit_qemu $monitor_port; exit 1
+    }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
+}
+send "ip link show\r";                              expect -re {# +}
+send "ip link set eth0 down\r";                     expect -re {# +}
+send "ip link set eth0 address 52:54:00:aa:bb:0a\r"; expect -re {# +}
+send "ip link set eth0 up\r";                       expect -re {# +}
+send "ip addr add 192.168.100.2/24 dev eth0\r";     expect -re {# +}
+send "ip addr show eth0\r";                         expect -re {# +}
+send "su qflex\r";                                  expect -re {\$ +}
+
+sleep 5
+
+# --- 3. Ping verify the wire to master (0-drop required) ------------------
+
+send "ping 192.168.100.1 -i 0.05 -c 10\r"
+set timeout 120
+expect {
+    timeout { puts "ERROR: ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        set tx $expect_out(1,string); set rx $expect_out(2,string)
+        puts "follower: ping summary -> $tx transmitted, $rx received"
+        if {$tx != $rx} {
+            puts "ERROR: ping drops detected (tx=$tx rx=$rx); aborting"
+            quit_qemu $monitor_port; exit 1
+        }
+    }
+}
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "WARN: prompt didn't return after ping summary; continuing" }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# --- 4. Wire-ready handshake ------------------------------------------------
+
+if {[catch {set f [open $wire_wait_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $wire_wait_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "follower: wire verified; wrote $wire_wait_flag; waiting for $wire_master_flag..."
+wait_for_file $wire_master_flag $BUDGET_PROMPT_S
+
+# --- 5. Wait for master to dispatch web_server ------------------------------
+
+puts "follower: waiting for $server_ready_flag..."
+wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
+puts "follower: master's server-ready signal received; launching faban client."
+
+# --- 6. Rewrite ./run_client.sh so --cpuset-cpus=0 (was 1) — follower is -smp 1.
+
+send "cat > ./run_client.sh <<'WRITE_CLIENT_EOF'\r"
+send "#!/bin/sh\r"
+send "\r"
+send "docker run -it --net=host --rm --name=faban_client \\\r"
+send "    -v \$(pwd)/client/gen.test_server.py:/web20_benchmark/run/gen \\\r"
+send "    --cpuset-cpus=0 \\\r"
+send "    --entrypoint=bash \\\r"
+send "    cloudsuite/web-serving:faban_client\r"
+send "WRITE_CLIENT_EOF\r"
+expect {
+    timeout { puts "ERROR: writing ./run_client.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "chmod +x ./run_client.sh\r"
+expect {
+    timeout { puts "ERROR: chmod ./run_client.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+sleep 5
+
+# --- 7. Run faban client on serial spawn (no tmux on follower) -------------
+
+send "./run_client.sh\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: faban container prompt didn't arrive"; quit_qemu $monitor_port; exit 1 }
+    -re {root@qflex:/web20_benchmark#}
+}
+puts "follower: faban container ready; dispatching entrypoint.sh..."
+
+send "./run/entrypoint.sh 192.168.100.1 4 --encryption=1 --ramp-up=3 --ramp-down=1800 --steady=86400 --oper=run --min=0 --max=0 --type=THINKTIME\r"
+puts "follower: entrypoint.sh dispatched; waiting for 'Ramp up completed'..."
+expect {
+    timeout { puts "ERROR: never saw 'Ramp up completed' within ${BUDGET_WORKLOAD_INIT_S}s"; quit_qemu $monitor_port; exit 1 }
+    -re {Ramp up completed}
+}
+puts "follower: saw 'Ramp up completed'; writing $ramp_up_done_flag."
+
+if {[catch {set f [open $ramp_up_done_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $ramp_up_done_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+
+# --- 8. Wait for own per-node savevm log 7 + 60s settle --------------------
+
+puts "follower: waiting for own 'savevm log 7' in Load.log..."
+wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "follower: saw 'savevm log 7' — per-node savevm finalised. Sleeping 60s..."
+sleep 60
+
+quit_qemu $monitor_port
+exit 0

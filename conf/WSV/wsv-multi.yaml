@@ -1,4 +1,4 @@
-extends: WS_base
+extends: WSV_base
 
 # Optional per-leaf hooks for boot/load only (other phases ignore these):
 #   experiment_context_node_0:
@@ -44,7 +44,7 @@ boot:
     experiment_context_node_0:
       latencies_ns_list: [1000000]
       syncs_list: ["false"]
-      interaction_script: /home/dev/qflex/conf/WSV/expects/boot_savevm_booted.exp
+      interaction_script: /home/dev/qflex/conf/WSV/expects/boot_savevm_booted_master.exp
     experiment_context_node_1:
       latencies_ns_list: [1000000]
       syncs_list: ["false"]

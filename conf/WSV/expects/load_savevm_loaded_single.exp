@@ -1,13 +1,13 @@
 #!/usr/bin/env expect
-# SINGLE-NODE WSV load. Loads from `boot`, brings up an in-guest detached tmux
+# SINGLE-NODE WSV load. Loads from `booted`, brings up an in-guest detached tmux
 # session with 4 windows, runs the cloudsuite/web-serving stack across them
 # (database, memcached, web_server, faban_client), waits for the faban
-# benchmark's ramp-up, then `savevm load` over the monitor and quits.
+# benchmark's ramp-up, then `savevm loaded` over the monitor and quits.
 #
 # Wire into a YAML's `load:` section:
 #   experiment_context:
-#     interaction_script: /home/dev/qflex/conf/WSV/expects/load_savevm_load_single.exp
-#     loadvm_name:        boot
+#     interaction_script: /home/dev/qflex/conf/WSV/expects/load_savevm_loaded_single.exp
+#     loadvm_name:        booted
 #
 # Single-node guest has 2 vCPUs (core_count=1 × doubled_vcpu=true). The
 # in-image ./run_*.sh scripts already pin db/memcached/web_server to cpu 0 and
@@ -214,7 +214,7 @@ sleep 5
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}
 
-# --- 7. savevm load via the monitor -----------------------------------------
+# --- 7. savevm loaded via the monitor ---------------------------------------
 
 set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
 set spawn_id $monitor_sid
@@ -226,12 +226,12 @@ expect {
 }
 
 set timeout $BUDGET_CHECKPOINTING_S
-send "delvm load\r"
+send "delvm loaded\r"
 expect {
     timeout { puts "WARN: delvm didn't return; continuing anyway" }
     "(qemu) "
 }
-send "savevm load\r"
+send "savevm loaded\r"
 expect {
     timeout { puts "ERROR: savevm didn't return"; exit 1 }
     "(qemu) "

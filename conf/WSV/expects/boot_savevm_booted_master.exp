@@ -1,21 +1,26 @@
 #!/usr/bin/env expect
-# SINGLE-NODE WSV boot. Logs in as qflex/qflex, then `savevm boot` over the
-# monitor and quits. Snapshot is named `boot` (not `booted`) — the WSV YAMLs
-# wire `load.loadvm_name: boot` accordingly.
+# MULTI-NODE MASTER (node_number == 0) WSV boot. Boots Alpine, logs in as
+# qflex/qflex, writes the master-login sentinel, waits for the follower's
+# login sentinel, then `savevm booted` via the monitor and quits.
 #
-# Wire into a YAML's `boot:` section:
-#   experiment_context:
-#     interaction_script: /home/dev/qflex/conf/WSV/expects/boot_savevm_boot_single.exp
+# Pair with conf/WSV/expects/boot_savevm_booted_wait.exp on every non-master
+# leaf. PDES `savevm` is a distributed snapshot — the master's monitor command
+# drives a drain that writes every node's per-node qcow2; we just need the
+# follower to be at the shell prompt before we trigger it so neither leaf
+# saves a half-initialised guest.
 #
-# tmux is assumed already installed in the qcow2 (manually by the user). No
-# package install needed here.
+# Wire into a YAML's `boot:` section per leaf, e.g.:
+#   experiment_context_node_0:
+#     interaction_script: /home/dev/qflex/conf/WSV/expects/boot_savevm_booted_master.exp
+#   experiment_context_node_1:
+#     interaction_script: /home/dev/qflex/conf/WSV/expects/boot_savevm_booted_wait.exp
 
 set timeout 900
 
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
-set BUDGET_BOOT_LOGIN_S   1800   ; # cold-boot login under emulation can be minutes
+set BUDGET_BOOT_LOGIN_S   1800   ; # cold-boot login under multi-node PDES can be many minutes
 set BUDGET_CHECKPOINTING_S 1800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
@@ -24,6 +29,11 @@ set exp_folder   $env(EXP_FOLDER)
 
 catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
+
+set group_folder              [file dirname $exp_folder]
+set master_login_flag         "$group_folder/wsv_boot_master_login.flag"
+set wait_login_flag           "$group_folder/wsv_boot_wait_login.flag"
+catch {file delete -force $master_login_flag}
 
 proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
@@ -68,6 +78,15 @@ proc quit_qemu {monitor_port} {
     }
 }
 
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
 # --- 1. Connect serial + login as qflex/qflex --------------------------------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
@@ -94,10 +113,27 @@ expect {
 
 sleep 5
 
+send "ls\r"
+expect {
+    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# --- 2. Sentinel handshake: announce we're at shell, wait for follower ------
+
+if {[catch {set f [open $master_login_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $master_login_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: wrote $master_login_flag; waiting for follower at $wait_login_flag..."
+wait_for_file $wait_login_flag $BUDGET_BOOT_LOGIN_S
+puts "master: follower at shell; proceeding to savevm booted."
+
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}
 
-# --- 2. savevm boot via the monitor ------------------------------------------
+# --- 3. savevm booted via the monitor ---------------------------------------
 
 set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
 set spawn_id $monitor_sid
@@ -108,18 +144,19 @@ expect {
     "(qemu) "
 }
 
-# delvm best-effort idempotency — savevm refuses to overwrite.
 set timeout $BUDGET_CHECKPOINTING_S
-send "delvm boot\r"
+send "delvm booted\r"
 expect {
     timeout { puts "WARN: delvm didn't return; continuing anyway" }
     "(qemu) "
 }
-send "savevm boot\r"
+send "savevm booted\r"
 expect {
     timeout { puts "ERROR: savevm didn't return"; exit 1 }
     "(qemu) "
 }
+
+sleep 5
 
 send "quit\r"
 catch {expect eof}
