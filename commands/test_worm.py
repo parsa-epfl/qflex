@@ -23,6 +23,12 @@ class TestWorm(Executor):
         self.branch_trace = branch_trace
         self.tage_decision_trace = tage_decision_trace
         self.tage_decision_trace_limit = tage_decision_trace_limit
+        if self.tage_decision_trace_limit is not None and self.tage_decision_trace_limit < 0:
+            raise ValueError("tage_decision_trace_limit must be non-negative")
+        if self.tage_decision_trace_limit is not None and not self.tage_decision_trace:
+            raise ValueError(
+                "tage_decision_trace_limit requires tage_decision_trace to be enabled"
+            )
         self.collect_gem5_bbl_btb = collect_gem5_bbl_btb
         self.monitor_port = monitor_port
 
