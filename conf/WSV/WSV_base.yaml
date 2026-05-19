@@ -1,0 +1,36 @@
+_leaf_defaults:
+  _target_: commands.config.create_experiment_context
+  quantum_size: 10000
+  check_period_quantum_coeff: 10
+  core_count: 1
+  doubled_vcpu: false
+  llc_size_per_tile_mb: 2
+  is_parallel: true
+  network: none
+  population_seconds: 10
+  is_consolidated: false
+  primary_ipc: 2.0
+  primary_core_start: 0
+  memory_gb: 16
+  host_name: ZEN3
+  workload_name: web-serving
+  image_folder: /mnt/sdc/multi-node/image-1c/wsv/
+  mounting_folder: /mnt/sdc/multi-node/
+  image_name: root.qcow2
+  keep_experiment_unique: false
+  use_image_directly: true
+  sample_size: 1000
+  warming_ratio: 2
+  measurement_ratio: 1
+  partition_count: 16
+
+
+
+run_idx:
+  _leaf_defaults:
+    partition_number: 0
+    idx: 0
+
+run_single_partition:
+  _leaf_defaults:
+    partition_number: 0
