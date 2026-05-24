@@ -7,13 +7,61 @@
 # the monitor and quits.
 #
 # Pair with conf/WSV/expects/load_savevm_loaded_wait.exp on the follower.
+#
+# === IN-IMAGE WORKLOAD SCRIPT REFERENCE ======================================
+# Three baked scripts live in /home/qflex/ inside the alpine guest. This expect
+# DRIVES them via `tmux send-keys` but ALSO REWRITES one (./run_server.sh) in
+# place before launch — see heredoc further down. If you need to change what
+# any of these do for this run, edit the heredoc HERE, not the in-image baked
+# file: the qcow2 owns the canonical copy and a fresh loadvm wipes any guest-
+# side edits to the baked files.
+#
+# ./run_database.sh   — NOT REWRITTEN.
+#   #!/bin/sh
+#   docker run -it --net=host --rm --name=database_server \
+#       -v $(pwd)/backup:/backup \
+#       -v $(pwd)/db/entrypoint.sh:/etc/entrypoint.sh \
+#       --cpuset-cpus=0 \
+#       cloudsuite/web-serving:db_server
+#   cpuset=0 works under -smp 1; mariadb listens on 127.0.0.1 inside master's
+#   --net=host network namespace, which is fine because the web_server runs on
+#   the same alpine host. No cross-wire access to the DB needed.
+#
+# ./run_memcached.sh  — NOT REWRITTEN.
+#   #!/bin/sh
+#   docker run -dt --net=host --rm \
+#       --cpuset-cpus=0 \
+#       --name=memcache_server cloudsuite/web-serving:memcached_server
+#   Same rationale as ./run_database.sh — local-only listener under --net=host
+#   is fine because web_server connects from the same alpine namespace.
+#
+# ./run_server.sh     — REWRITTEN by heredoc in section 6 below.
+#   Baked version (passes 127.0.0.1 as the http-server bind IP):
+#   #!/bin/sh
+#   docker run -dt --rm --net=host --name=web_server \
+#       -v $(pwd)/server/bootstrap.sh:/etc/bootstrap.sh \
+#       --cpuset-cpus=0 \
+#       cloudsuite/web-serving:web_server \
+#       /etc/bootstrap.sh \
+#       https 127.0.0.1 127.0.0.1 127.0.0.1 4 4
+#   The THIRD positional arg is the web server's listen/server address; we set
+#   it to 192.168.100.1 (the wire IP the follower's faban connects to). That
+#   alone makes browse/login work over the wire, but it does NOT change Elgg's
+#   site URL: the image bakes $CONFIG->wwwroot = https://127.0.0.1:8443/ in
+#   settings.php, and Elgg builds its login-redirect + notifications URLs from
+#   wwwroot. So a SEPARATE step (section 8b) rewrites settings.php's wwwroot to
+#   192.168.100.1 after the container starts, or every getNotifications fails
+#   (the follower chases its own 127.0.0.1). DB + memcache args (positions 1
+#   and 2) stay 127.0.0.1 — local to the master, no cross-wire reachability
+#   needed. Single-node needs neither change (its client targets 127.0.0.1).
+# =============================================================================
 
 set timeout 900
 
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
-set BUDGET_WORKLOAD_INIT_S 10800   ; # cloudsuite stack init + faban ramp-up under PDES
+set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h: server init + waiting for follower's faban ramp-up=120 (can be many hours under PDES)
 set BUDGET_CHECKPOINTING_S 10800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
@@ -23,12 +71,18 @@ set exp_folder   $env(EXP_FOLDER)
 catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
 
-set group_folder              [file dirname $exp_folder]
+if {[info exists env(GROUP_EXP_FOLDER)]} {
+    set group_folder $env(GROUP_EXP_FOLDER)
+} else {
+    set group_folder [file dirname $exp_folder]
+}
 set wire_master_flag          "$group_folder/wsv_load_wire_master.flag"
 set wire_wait_flag            "$group_folder/wsv_load_wire_wait.flag"
+set nc_listen_ready_flag      "$group_folder/wsv_load_nc_listen_ready.flag"
 set server_ready_flag         "$group_folder/wsv_load_server_ready.flag"
 set ramp_up_done_flag         "$group_folder/wsv_load_ramp_up_done.flag"
 catch {file delete -force $wire_master_flag}
+catch {file delete -force $nc_listen_ready_flag}
 catch {file delete -force $server_ready_flag}
 
 proc connect_telnet {host port {budget_seconds 5}} {
@@ -98,6 +152,7 @@ proc wait_for_substring {path needle budget_seconds} {
 # Poll a tmux pane for a literal substring, fail-fast on bash syntax errors.
 proc wait_for_pane_substring {session window needle budget_seconds} {
     global timeout
+    set saved_timeout $timeout
     set deadline [expr {[clock seconds] + $budget_seconds}]
     while {[clock seconds] < $deadline} {
         send "tmux capture-pane -t ${session}:${window} -p\r"
@@ -107,14 +162,16 @@ proc wait_for_pane_substring {session window needle budget_seconds} {
             -re {.+} { append buf $expect_out(buffer); exp_continue }
             timeout { }
         }
-        if {[string first $needle $buf] >= 0} { return }
+        if {[string first $needle $buf] >= 0} { set timeout $saved_timeout; return }
         foreach err {"bash: syntax error" "syntax error near unexpected"} {
             if {[string first $err $buf] >= 0} {
+                set timeout $saved_timeout
                 error "wait_for_pane_substring: bash error in $session:$window: '$err' (waiting for '$needle')"
             }
         }
         sleep 2
     }
+    set timeout $saved_timeout
     error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
 }
 
@@ -150,6 +207,11 @@ send "ip link show\r";                              expect -re {# +}
 send "ip link set eth0 down\r";                     expect -re {# +}
 send "ip link set eth0 address 52:54:00:aa:bb:00\r"; expect -re {# +}
 send "ip link set eth0 up\r";                       expect -re {# +}
+send "ip addr flush dev eth0\r"
+expect {
+    timeout { puts "ERROR: ip addr flush timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
 send "ip addr add 192.168.100.1/24 dev eth0\r";     expect -re {# +}
 send "ip addr show eth0\r";                         expect -re {# +}
 send "su qflex\r";                                  expect -re {\$ +}
@@ -186,7 +248,29 @@ if {[catch {set f [open $wire_master_flag "w"]; close $f} err]} {
 }
 puts "master: wire verified; wrote $wire_master_flag; waiting for $wire_wait_flag..."
 wait_for_file $wire_wait_flag $BUDGET_PROMPT_S
-puts "master: both wires verified; starting tmux + cloudsuite services."
+puts "master: both wires verified; running nc data-path preflight."
+
+# --- 4.5 nc data-path preflight: prove TCP works follower->master on :8443 --
+# ICMP ping doesn't prove a TCP listener is reachable across the wire; faban
+# connects to 192.168.100.1:8443. Listen in the FOREGROUND so the token shows
+# on the serial, and expect it directly — that IS the proof data flowed.
+if {[catch {set f [open $nc_listen_ready_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $nc_listen_ready_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: nc listener coming up on :8443; wrote $nc_listen_ready_flag; waiting for token..."
+send "nc -l -p 8443\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: nc preflight: no token on :8443 (TCP path broken)"; quit_qemu $monitor_port; exit 1 }
+    -re {Hello from VM2} { puts "master: nc preflight OK -- received 'Hello from VM2!' over :8443" }
+}
+# busybox `nc -l` exits when the follower's `nc -w` closes; Ctrl-C guarantees
+# the shell is clean before we reuse it (so the next command isn't typed into
+# a still-running nc).
+send "\003"
+expect { timeout { } -re {[\$#] +} }
+sleep 2
+puts "master: nc preflight passed; starting tmux + cloudsuite services."
 
 # --- 5. Create detached tmux session with 3 windows -------------------------
 
@@ -210,17 +294,71 @@ puts "wsv: mysql ALTER USER returned."
 
 # --- 7. Window 1: memcached (detached docker) -------------------------------
 
-send "tmux send-keys -t wsv:1 './run_memcached.sh' Enter\r"
+send "tmux send-keys -t wsv:1 './run_memcached.sh && echo WSV_MEMCACHED_OK' Enter\r"
 expect -re {[\$#] +}
-puts "wsv: window 1 (memcached) dispatched; settling 1s host time..."
-sleep 1
+puts "wsv: window 1 (memcached) launched; waiting for container-start confirmation..."
+wait_for_pane_substring wsv 1 "WSV_MEMCACHED_OK" $BUDGET_WORKLOAD_INIT_S
+puts "wsv: memcached container started."
 
 # --- 8. Window 2: web_server (detached docker) ------------------------------
+# Rewrite ./run_server.sh so the web server's advertised address (3rd bootstrap
+# arg) is 192.168.100.1 — the address the follower's faban connects to. Was
+# 127.0.0.1 (loopback-only, unreachable from the wire); 0.0.0.0 connected at
+# TCP level but broke Elgg's site URL. See the IN-IMAGE banner at the top.
+send "cat > ./run_server.sh <<'WRITE_SERVER_EOF'\r"
+send "#!/bin/sh\r"
+send "\r"
+send "docker run -dt --rm --net=host --name=web_server \\\r"
+send "  -v \$(pwd)/server/bootstrap.sh:/etc/bootstrap.sh \\\r"
+send "  --cpuset-cpus=0 \\\r"
+send "  cloudsuite/web-serving:web_server \\\r"
+send "  /etc/bootstrap.sh \\\r"
+send "  https 127.0.0.1 127.0.0.1 192.168.100.1 4 4\r"
+send "WRITE_SERVER_EOF\r"
+expect {
+    timeout { puts "ERROR: writing ./run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "chmod +x ./run_server.sh\r"
+expect {
+    timeout { puts "ERROR: chmod ./run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+sleep 5
 
-send "tmux send-keys -t wsv:2 './run_server.sh' Enter\r"
+send "tmux send-keys -t wsv:2 './run_server.sh && echo WSV_SERVER_OK' Enter\r"
 expect -re {[\$#] +}
-puts "wsv: window 2 (web_server) dispatched; settling 1s host time..."
-sleep 1
+puts "wsv: window 2 (web_server) launched; waiting for container-start confirmation..."
+wait_for_pane_substring wsv 2 "WSV_SERVER_OK" $BUDGET_WORKLOAD_INIT_S
+puts "wsv: web_server container started."
+
+# --- 8b. Point Elgg's wwwroot at the master's wire IP -----------------------
+# The web_server image bakes $CONFIG->wwwroot = https://127.0.0.1:8443/ in
+# settings.php; Elgg builds its login-redirect + notifications URLs from it, so
+# the follower's faban would chase its own 127.0.0.1 and every getNotifications
+# would fail (browse works because it hits the target directly). Rewrite wwwroot
+# to 192.168.100.1 once Elgg has written settings.php, flush Elgg's cache, and
+# reload php-fpm. Single-node does NOT need this (its client targets 127.0.0.1).
+send "cat > ./fix_wwwroot.sh <<'WSV_FIX_EOF'\r"
+send "#!/bin/sh\r"
+send "until docker exec web_server grep -q '127.0.0.1:8443' /usr/share/nginx/html/elgg/elgg-config/settings.php 2>/dev/null; do sleep 5; done\r"
+send "docker exec web_server sed -i 's#https://127.0.0.1:8443/#https://192.168.100.1:8443/#' /usr/share/nginx/html/elgg/elgg-config/settings.php\r"
+send "docker exec web_server sh -c 'cd /usr/share/nginx/html/elgg && php elgg-cli flush -y' 2>/dev/null || true\r"
+send "docker exec web_server sh -c 'kill -USR2 \$(cat /var/run/php/php8.1-fpm.pid 2>/dev/null) 2>/dev/null || pkill -USR2 php-fpm' || true\r"
+send "echo WSV_WWWROOT_FIXED\r"
+send "WSV_FIX_EOF\r"
+expect {
+    timeout { puts "ERROR: writing fix_wwwroot.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "sh ./fix_wwwroot.sh\r"
+puts "wsv: fixing Elgg wwwroot -> https://192.168.100.1:8443/ (await settings.php, sed, flush, php-fpm reload)..."
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: wwwroot fix never completed"; quit_qemu $monitor_port; exit 1 }
+    -re {WSV_WWWROOT_FIXED}
+}
+puts "wsv: Elgg wwwroot set to 192.168.100.1; signalling follower."
 
 # --- 9. Signal follower that server is starting ----------------------------
 

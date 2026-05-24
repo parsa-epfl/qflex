@@ -7,13 +7,37 @@
 # before sleeping 60s and exiting.
 #
 # Pair with conf/WSV/expects/load_savevm_loaded_master.exp on node 0.
+#
+# === IN-IMAGE WORKLOAD SCRIPT REFERENCE ======================================
+# One baked script lives in /home/qflex/ inside the alpine guest on this leaf,
+# and we REWRITE it in place before launch — see heredoc in section 6 below.
+# If you need to change anything about ./run_client.sh for this run, edit the
+# heredoc HERE, not the in-image baked file: the qcow2 owns the canonical
+# copy and a fresh loadvm wipes any guest-side edits to the baked file.
+#
+# ./run_client.sh     — REWRITTEN by heredoc in section 6 below.
+#   Baked version:
+#   #!/bin/sh
+#   docker run -it --net=host --rm --name=faban_client \
+#       -v $(pwd)/client/gen.test_server.py:/web20_benchmark/run/gen \
+#       --cpuset-cpus=1 \
+#       --entrypoint=bash \
+#       cloudsuite/web-serving:faban_client
+#   We change --cpuset-cpus=1 → --cpuset-cpus=0 because this leaf runs at
+#   -smp 1 (doubled_vcpu: false), so cpu 1 does not exist and docker would
+#   refuse the container. After the rewrite + container start we send
+#   `./run/entrypoint.sh 192.168.100.1 4 --encryption=1 ...` inside the
+#   faban container's bash — that's the actual benchmark launch, target IP
+#   is master over the PDES wire (port 8443 on Apache, whose advertised
+#   address master's load_savevm_loaded_master.exp sets to 192.168.100.1).
+# =============================================================================
 
 set timeout 900
 
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
-set BUDGET_WORKLOAD_INIT_S 10800
+set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h client budget (ramp-up=120 guest-sec can be many hours wall-clock)
 set BUDGET_CHECKPOINTING_S 10800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
@@ -23,11 +47,16 @@ set exp_folder   $env(EXP_FOLDER)
 catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
 
-set group_folder      [file dirname $exp_folder]
-set wire_master_flag  "$group_folder/wsv_load_wire_master.flag"
-set wire_wait_flag    "$group_folder/wsv_load_wire_wait.flag"
-set server_ready_flag "$group_folder/wsv_load_server_ready.flag"
-set ramp_up_done_flag "$group_folder/wsv_load_ramp_up_done.flag"
+if {[info exists env(GROUP_EXP_FOLDER)]} {
+    set group_folder $env(GROUP_EXP_FOLDER)
+} else {
+    set group_folder [file dirname $exp_folder]
+}
+set wire_master_flag     "$group_folder/wsv_load_wire_master.flag"
+set wire_wait_flag       "$group_folder/wsv_load_wire_wait.flag"
+set nc_listen_ready_flag "$group_folder/wsv_load_nc_listen_ready.flag"
+set server_ready_flag    "$group_folder/wsv_load_server_ready.flag"
+set ramp_up_done_flag    "$group_folder/wsv_load_ramp_up_done.flag"
 catch {file delete -force $wire_wait_flag}
 catch {file delete -force $ramp_up_done_flag}
 
@@ -126,6 +155,11 @@ send "ip link show\r";                              expect -re {# +}
 send "ip link set eth0 down\r";                     expect -re {# +}
 send "ip link set eth0 address 52:54:00:aa:bb:0a\r"; expect -re {# +}
 send "ip link set eth0 up\r";                       expect -re {# +}
+send "ip addr flush dev eth0\r"
+expect {
+    timeout { puts "ERROR: ip addr flush timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
 send "ip addr add 192.168.100.2/24 dev eth0\r";     expect -re {# +}
 send "ip addr show eth0\r";                         expect -re {# +}
 send "su qflex\r";                                  expect -re {\$ +}
@@ -162,6 +196,18 @@ if {[catch {set f [open $wire_wait_flag "w"]; close $f} err]} {
 }
 puts "follower: wire verified; wrote $wire_wait_flag; waiting for $wire_master_flag..."
 wait_for_file $wire_master_flag $BUDGET_PROMPT_S
+
+# --- 4.5 nc data-path preflight: connect to master:8443 and send a token ----
+puts "follower: waiting for master's nc listener ($nc_listen_ready_flag)..."
+wait_for_file $nc_listen_ready_flag $BUDGET_PROMPT_S
+# -w 2 => nc closes 2s after sending instead of hanging for the server to close.
+send "echo 'Hello from VM2!' | nc -w 2 192.168.100.1 8443\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: nc send timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+puts "follower: sent 'Hello from VM2!' to 192.168.100.1:8443."
 
 # --- 5. Wait for master to dispatch web_server ------------------------------
 
@@ -201,13 +247,21 @@ expect {
 }
 puts "follower: faban container ready; dispatching entrypoint.sh..."
 
-send "./run/entrypoint.sh 192.168.100.1 4 --encryption=1 --ramp-up=3 --ramp-down=1800 --steady=86400 --oper=run --min=0 --max=0 --type=THINKTIME\r"
-puts "follower: entrypoint.sh dispatched; waiting for 'Ramp up completed'..."
+send "./run/entrypoint.sh 192.168.100.1 4 --encryption=1 --ramp-up=120 --ramp-down=1800 --steady=86400 --oper=run --min=0 --max=0 --type=THINKTIME\r"
+# 'Ramp up completed' is a TIMER, not proof of success — faban prints it even
+# when every request fails. The real proof the client did work is
+# 'Successfully browsed Elgg'. Gate on that FIRST; do not weaken this gate.
+puts "follower: entrypoint.sh dispatched; waiting for a SUCCESSFUL client op (Successfully browsed Elgg)..."
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: never saw 'Ramp up completed' within ${BUDGET_WORKLOAD_INIT_S}s"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: client never logged 'Successfully browsed Elgg' -- workload is broken (Ramp up completed alone is NOT success)"; quit_qemu $monitor_port; exit 1 }
+    -re {Successfully browsed Elgg} { puts "follower: client succeeded (browsed Elgg)" }
+}
+expect {
+    timeout { puts "ERROR: 'Ramp up completed' never arrived after a successful browse"; quit_qemu $monitor_port; exit 1 }
     -re {Ramp up completed}
 }
-puts "follower: saw 'Ramp up completed'; writing $ramp_up_done_flag."
+puts "follower: ramp-up complete WITH verified successful client ops; writing $ramp_up_done_flag."
 
 if {[catch {set f [open $ramp_up_done_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $ramp_up_done_flag: $err"; quit_qemu $monitor_port; exit 1

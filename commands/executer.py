@@ -189,6 +189,12 @@ class Executor(abc.ABC):
             sentinel_dir = outer_sentinel_dir
             sentinel_dir_owner = False
 
+        # Give each leaf a ref to the group folder that holds .sentinels, so the
+        # leaf's interaction_script places its cross-node sentinels there too.
+        group_folder_for_subs = os.path.dirname(sentinel_dir)
+        for sub in sub_experiments:
+            sub.parent_experiment_folder = group_folder_for_subs
+
         if _is_dry_run(dry_run):
             for sub in sub_experiments:
                 original = self.experiment_context

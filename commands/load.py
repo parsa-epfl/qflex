@@ -45,7 +45,8 @@ class Load(SimulationCommand):
             f"TELNET_MONITOR_PORT={exp.telnet_port} "
             f"SERIAL_LOG_PATH=./serial.log "
             f"EXP_FOLDER={exp.get_experiment_folder_address()} "
-            f"NODE_NUMBER={exp.node_number}"
+            f"NODE_NUMBER={exp.node_number} "
+            f"GROUP_EXP_FOLDER={exp.parent_experiment_folder or exp.get_experiment_folder_address()}"
         )
         return (
             f"cd {exp.get_experiment_folder_address()}/run && "

@@ -1,0 +1,15 @@
+# DIAGNOSTIC ONLY — loadvm the `loaded` snapshot (server+memcache+db+faban
+# already running in it) and dump the web_server container's logs to find why
+# getNotifications returns non-200. Does NOT savevm. Run:
+#   ./qflex load -c conf/WSV/wsv-multi-diag.yaml
+# Reuses the same per-node qcow2s (root-node{0,1}.qcow2) which hold `loaded`.
+extends: wsv-multi
+
+load:
+  components:
+    experiment_context_node_0:
+      interaction_script: /home/dev/qflex/conf/WSV/expects/diag_server_logs_master.exp
+      loadvm_name: loaded
+    experiment_context_node_1:
+      interaction_script: /home/dev/qflex/conf/WSV/expects/diag_wait.exp
+      loadvm_name: loaded

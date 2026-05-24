@@ -135,6 +135,7 @@ class ExperimentContext(BaseModel):
     sub_experiments: List["ExperimentContext"] = Field(default_factory=list, description="Optional sub-experiments. If non-empty, this context is a group node; leaf-level fields are unused and the executor recurses into each sub-experiment.")
     wait_for_nodes: List[int] = Field(default_factory=list, description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master. Set to e.g. [0] to wait for the master, or [2] to wait for node 2.")
     experiment_group_name: str = Field(default="", description="Parent group's experiment_name for this leaf; included in PDES shm names so concurrent projects on the same host don't collide. Auto-populated by the factory when sub_experiments is built.")
+    parent_experiment_folder: str = Field(default="", description="Parent group's experiment folder address for this leaf; set by the executor at dispatch so the leaf's interaction_script can place cross-node sentinels in the shared group folder. Empty for single-node.")
     _creation_kwargs: dict = PrivateAttr(default_factory=dict)
 
 

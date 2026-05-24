@@ -1,0 +1,104 @@
+#!/usr/bin/env expect
+# DIAGNOSTIC (master) — loadvm `loaded` (server+memcache+db+faban already
+# running in the snapshot), then dump the web_server container's logs to the
+# serial so we can see WHY getNotifications returns non-200. Does NOT savevm.
+# Pair with diag_wait.exp on the follower. Wire via conf/WSV/wsv-multi-diag.yaml.
+
+set timeout 900
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+if {[info exists env(GROUP_EXP_FOLDER)]} {
+    set group_folder $env(GROUP_EXP_FOLDER)
+} else {
+    set group_folder [file dirname $exp_folder]
+}
+set diag_done_flag "$group_folder/wsv_diag_done.flag"
+catch {file delete -force $diag_done_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} { set timeout $saved_timeout; return $this_sid }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} { return }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " { send -i $sid "quit\r"; catch {expect -i $sid eof} }
+    }
+}
+
+# Run a guest command, drain its output to the serial/log, return to prompt.
+proc run_guest {cmd label} {
+    global monitor_port BUDGET_PROMPT_S
+    puts "DIAG: ===== $label ====="
+    send "$cmd\r"
+    set timeout $BUDGET_PROMPT_S
+    expect { timeout { puts "DIAG: ($label) timed out" } -re {[\$#] +} }
+}
+
+# --- 1. Post-loadvm prompt nudge --------------------------------------------
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect { timeout { puts "ERROR: no shell after loadvm"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+sleep 5
+
+# su to root so docker + log reads work.
+send "su\r"
+expect {
+    timeout { puts "ERROR: no root prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[Aa]uthentication failure} { puts "ERROR: su failed"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
+}
+
+# --- 2. Dump web_server container state + logs (nginx + php-fpm) ------------
+run_guest "docker ps -a" "docker ps -a"
+run_guest "docker exec web_server sh -c 'ls -la /var/log/nginx 2>/dev/null'" "web_server: nginx log dir"
+run_guest "docker exec web_server sh -c 'grep -iE \"notif\" /var/log/nginx/*access* 2>/dev/null | tail -25'" "web_server: nginx access notif lines"
+run_guest "docker exec web_server sh -c 'tail -40 /var/log/nginx/*access* 2>/dev/null'" "web_server: nginx access.log tail"
+run_guest "docker exec web_server sh -c 'tail -50 /var/log/nginx/*error* 2>/dev/null'" "web_server: nginx error.log tail"
+run_guest "docker exec web_server sh -c 'cat /var/log/php8.1-fpm.log 2>/dev/null'" "web_server: php-fpm.log"
+run_guest "docker exec web_server sh -c 'find /var/www -name \"*.log\" 2>/dev/null | head; tail -50 /var/www/*/data*/logs/* 2>/dev/null'" "web_server: elgg data logs"
+run_guest "docker exec web_server sh -c 'wget --no-check-certificate -S -O /dev/null https://127.0.0.1:8443/ 2>&1 | grep HTTP | head -3'" "web_server: localhost browse status (wget)"
+
+# --- 3. Signal follower we're done, quit (NO savevm) ------------------------
+catch {set f [open $diag_done_flag "w"]; close $f}
+puts "DIAG: master done; wrote $diag_done_flag; quitting (no savevm)."
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+quit_qemu $monitor_port
+exit 0

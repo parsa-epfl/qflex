@@ -30,7 +30,11 @@ set exp_folder   $env(EXP_FOLDER)
 catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
 
-set group_folder              [file dirname $exp_folder]
+if {[info exists env(GROUP_EXP_FOLDER)]} {
+    set group_folder $env(GROUP_EXP_FOLDER)
+} else {
+    set group_folder [file dirname $exp_folder]
+}
 set master_login_flag         "$group_folder/wsv_boot_master_login.flag"
 set wait_login_flag           "$group_folder/wsv_boot_wait_login.flag"
 catch {file delete -force $master_login_flag}
