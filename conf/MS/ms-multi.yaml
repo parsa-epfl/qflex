@@ -1,0 +1,86 @@
+extends: MS_base
+
+# Optional per-leaf hooks for boot/load only (other phases ignore these):
+#   experiment_context_node_0:
+#     interaction_script: ./scripts/setup_node_0.exp   # Path A: drive QEMU automatically.
+#     # OR
+#     interactive_tmux: true                            # Path B: open a tmux window per leaf.
+
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: media-streaming-multi-node-0
+    _deps_:
+      sub_experiments:
+        - name: node_0
+        - name: node_1
+
+  experiment_context_node_0:
+    _base_: _leaf_defaults
+    _name_: node_0
+    experiment_name: media-streaming-node-0-0
+    node_number: 0
+    neighbor_node_list: [1]
+    pdes_net_devs: ["virtio-net-pci"]
+    latencies_ns_list: [100000]
+    syncs_list: ["true"]
+
+  experiment_context_node_1:
+    _base_: _leaf_defaults
+    _name_: node_1
+    experiment_name: media-streaming-node-1-0
+    node_number: 1
+    neighbor_node_list: [0]
+    pdes_net_devs: ["virtio-net-pci"]
+    latencies_ns_list: [100000]
+    syncs_list: ["true"]
+    wait_for_nodes: [0]
+
+# Boot relaxes the wire (high latency, sync off); other phases keep the per-leaf
+# defaults. Scoped to the per-leaf components so the unnamed group context
+# (which has no neighbours) doesn't get the override at all.
+boot:
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+      interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_master.exp
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]
+      syncs_list: ["false"]
+      interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_wait.exp
+
+load:
+  components:
+    experiment_context_node_0:
+      # loadvm_name: loaded
+      # interactive_tmux: true
+      interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_master.exp
+      loadvm_name: booted
+    experiment_context_node_1:
+      # loadvm_name: loaded
+      # interactive_tmux: true
+      interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_wait.exp
+      loadvm_name: booted
+
+
+initialize:
+  components:
+    experiment_context_node_0:
+      loadvm_name: loaded
+    experiment_context_node_1:
+      loadvm_name: loaded
+
+
+# TODO see if you have to pass in sample size 3 times or not
+fw:
+  components:
+    experiment_context:
+      loadvm_name: init_warmed
+    experiment_context_node_0:
+      loadvm_name: init_warmed
+    experiment_context_node_1:
+      loadvm_name: init_warmed
+
+
+
