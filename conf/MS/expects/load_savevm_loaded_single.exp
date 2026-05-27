@@ -1,0 +1,255 @@
+#!/usr/bin/env expect
+# SINGLE-NODE MS load. Loads from `booted`, brings up an in-guest detached tmux
+# session with 2 windows on ONE QEMU guest:
+#   window 0: cloudsuite/media-streaming:server (nginx in docker)
+#   window 1: xusine/media-streaming:client (hammar warm + hammar load)
+# Both communicate over the guest's 127.0.0.1 (docker --net host). Once the
+# hammar load reports tasks created, `savevm loaded` and quit.
+#
+# Wire into a YAML's `load:` section:
+#   experiment_context:
+#     interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_single.exp
+#     loadvm_name:        booted
+#
+# Single-node guest has 2 vCPUs (core_count=1 × doubled_vcpu=true). run_server.sh
+# pins the server docker to host cpu 0 (--cpuset-cpus=0); the client's hammar is
+# taskset'd to cpu 1 (the doubled-vcpu phantom). The in-image scripts are NOT
+# rewritten here — guest qcow2 owns the canonical copies.
+#
+# tmux is assumed already installed in the qcow2. The script never attaches
+# into tmux — it drives the session entirely from the alpine shell via
+# `tmux send-keys` and reads window output via `tmux capture-pane -p`.
+#
+# TODO multi-node: hammar load currently pinned to core 1 (vCPU 1, the
+# doubled-vcpu phantom). Multi-node single-core-per-leaf will be core 0.
+# Per-4-cores fan-out (see ./run_multiple.sh) is a later step.
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h client budget (hammar warm/load can take minutes-hours wall-clock under emulation)
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+# Poll a tmux pane for a literal substring. Drives `tmux capture-pane -p` over
+# the alpine shell spawn, accumulates the response, and searches for the
+# needle. Wall-clock deadline (outer `set timeout` doesn't bound Tcl loops).
+# Fail-fasts if the pane shows a bash syntax error.
+proc wait_for_pane_substring {session window needle budget_seconds} {
+    global timeout
+    set saved_timeout $timeout
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        send "tmux capture-pane -t ${session}:${window} -p\r"
+        set buf ""
+        set timeout 5
+        expect {
+            -re {.+} { append buf $expect_out(buffer); exp_continue }
+            timeout { }
+        }
+        if {[string first $needle $buf] >= 0} { set timeout $saved_timeout; return }
+        foreach err {"bash: syntax error" "syntax error near unexpected"} {
+            if {[string first $err $buf] >= 0} {
+                set timeout $saved_timeout
+                error "wait_for_pane_substring: bash error in $session:$window: '$err' (waiting for '$needle')"
+            }
+        }
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
+}
+
+# --- 1. Connect serial + nudge for shell prompt (post-loadvm) ---------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out after loadvm"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+# --- 2. Clear any leftover containers from a prior run ----------------------
+# Best-effort: if there are none, docker errors out cleanly and we move on.
+
+send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# --- 3. Create detached tmux session with 2 windows -------------------------
+
+send "tmux new-session -d -s ms\r"
+expect {
+    timeout { puts "ERROR: tmux new-session timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "tmux new-window -t ms:1\r"
+expect {
+    timeout { puts "ERROR: tmux new-window 1 timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# --- 4. Window 0: server ----------------------------------------------------
+# run_server.sh: docker run -it --entrypoint=bash cloudsuite/media-streaming:server
+# Drops into root shell inside the server container.
+
+send "tmux send-keys -t ms:0 './run_server.sh' Enter\r"
+expect {
+    timeout { puts "ERROR: dispatching run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+puts "ms: window 0 (server) launched; waiting for 'root@qflex:/#'..."
+wait_for_pane_substring ms 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
+puts "ms: window 0 at root shell inside server container; dispatching ./etc/entrypoint.sh..."
+
+# entrypoint.sh: openssl + sed + nginx -g 'daemon off;' (foregrounded).
+# `-----` is the cert footer printed by openssl as its last output before the
+# silent seds and the nginx exec. After we see it we trust nginx is up.
+send "tmux send-keys -t ms:0 './etc/entrypoint.sh' Enter\r"
+expect {
+    timeout { puts "ERROR: dispatching entrypoint.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+puts "ms: entrypoint.sh dispatched; waiting for openssl cert footer '-----'..."
+wait_for_pane_substring ms 0 "-----" $BUDGET_WORKLOAD_INIT_S
+puts "ms: server cert generated; nginx daemon should be up. Settling 5s..."
+sleep 5
+
+# --- 5. Window 1: client ----------------------------------------------------
+# run_client.sh: docker run -it xusine/media-streaming:client
+# Drops into root shell inside the client container.
+
+send "tmux send-keys -t ms:1 './run_client.sh' Enter\r"
+expect {
+    timeout { puts "ERROR: dispatching run_client.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+puts "ms: window 1 (client) launched; waiting for 'root@qflex:/#'..."
+wait_for_pane_substring ms 1 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
+puts "ms: window 1 at root shell inside client container; sanity 'ls' for hammar..."
+
+send "tmux send-keys -t ms:1 'ls' Enter\r"
+expect {
+    timeout { puts "ERROR: dispatching ls timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+wait_for_pane_substring ms 1 "hammar" $BUDGET_PROMPT_S
+puts "ms: hammar present; dispatching warm..."
+
+# Warm: pre-populates hammar's internal video state. Finishes with
+# 'Compressed history: <N>' then prompt.
+send "tmux send-keys -t ms:1 'taskset -c 1 ./hammar/target/release/warm ./videos 1' Enter\r"
+expect {
+    timeout { puts "ERROR: dispatching warm timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+puts "ms: warm dispatched; waiting for 'Compressed history:'..."
+wait_for_pane_substring ms 1 "Compressed history:" $BUDGET_WORKLOAD_INIT_S
+puts "ms: warm done; settling 5s before load..."
+sleep 5
+
+# Load: 4 threads × 8 connections, no encryption. Prints 'All tasks are
+# created.' once per thread (4 total). We gate on the first occurrence and
+# settle — TODO could harden to 4× match if needed.
+send "tmux send-keys -t ms:1 'taskset -c 1 ./hammar/target/release/hammar ./videos/logs 4 8 false' Enter\r"
+expect {
+    timeout { puts "ERROR: dispatching hammar load timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+puts "ms: hammar load dispatched; waiting for 'All tasks are created.'..."
+wait_for_pane_substring ms 1 "All tasks are created." $BUDGET_WORKLOAD_INIT_S
+puts "ms: tasks created; settling 5s host time before savevm..."
+sleep 5
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+# --- 6. savevm loaded via the monitor ---------------------------------------
+
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+
+set timeout $BUDGET_DEFAULT_S
+expect {
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    "(qemu) "
+}
+
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm loaded\r"
+expect {
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm loaded\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return"; exit 1 }
+    "(qemu) "
+}
+
+send "quit\r"
+catch {expect eof}
+exit 0

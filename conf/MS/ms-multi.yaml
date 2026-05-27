@@ -15,6 +15,13 @@ components:
         - name: node_0
         - name: node_1
 
+  # Telnet ports are bumped +1000 from the qflex defaults (55558 monitor,
+  # 55600 serial) so multi-node never fights single-node (which falls back
+  # to those defaults because node_number=-1 doesn't satisfy the `>0`
+  # condition in compute_runtime_settings). Without this override both
+  # processes try to bind 55558+55600 if they run concurrently, the loser's
+  # QEMU dies mid-chardev-init, and the peer-kill SIGKILLs the surviving
+  # leaf once its serial probe times out.
   experiment_context_node_0:
     _base_: _leaf_defaults
     _name_: node_0
@@ -24,6 +31,8 @@ components:
     pdes_net_devs: ["virtio-net-pci"]
     latencies_ns_list: [100000]
     syncs_list: ["true"]
+    telnet_port: 56558
+    serial_telnet_port: 56600
 
   experiment_context_node_1:
     _base_: _leaf_defaults
@@ -35,6 +44,8 @@ components:
     latencies_ns_list: [100000]
     syncs_list: ["true"]
     wait_for_nodes: [0]
+    telnet_port: 56559
+    serial_telnet_port: 56601
 
 # Boot relaxes the wire (high latency, sync off); other phases keep the per-leaf
 # defaults. Scoped to the per-leaf components so the unnamed group context
@@ -44,24 +55,30 @@ boot:
     experiment_context_node_0:
       latencies_ns_list: [1000000]
       syncs_list: ["false"]
-      interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_master.exp
+      # interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_master.exp
+      interactive_tmux: true
+      loadvm_name: pooria-test
     experiment_context_node_1:
       latencies_ns_list: [1000000]
       syncs_list: ["false"]
-      interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_wait.exp
+      # interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_wait.exp
+      interactive_tmux: true
+      loadvm_name: pooria-test
+
+      
 
 load:
   components:
     experiment_context_node_0:
       # loadvm_name: loaded
-      # interactive_tmux: true
-      interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_master.exp
-      loadvm_name: booted
+      interactive_tmux: true
+      # interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_master.exp
+      loadvm_name: pooria-test
     experiment_context_node_1:
       # loadvm_name: loaded
-      # interactive_tmux: true
-      interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_wait.exp
-      loadvm_name: booted
+      interactive_tmux: true
+      # interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_wait.exp
+      loadvm_name: pooria-test
 
 
 initialize:

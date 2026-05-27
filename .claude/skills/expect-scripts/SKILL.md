@@ -1,6 +1,6 @@
 ---
 name: expect-scripts
-description: Use when writing or debugging expect scripts under [sample_scripts/](../../../sample_scripts/) (general-purpose) or [tests/realrun/](../../../tests/realrun/) (test-specific) — the Path A drivers that talk to QEMU over telnet serial + telnet monitor, capture guest output, and shut QEMU down. Covers connect_telnet polling with named wall-clock budgets, the drain-based ls capture pattern, why prompt-regex anchoring is fragile, the post-loadvm queued-replay race, the master/non-master split for multi-node savevm, the symmetric peer-kill that guarantees both nodes exit, and why the outer `set timeout` does NOT bound Tcl while/sleep loops. TRIGGER when the user mentions an `.exp` script, the `interaction_script` field, connect_telnet hangs, expect timeouts not firing, "ls didn't return" / partial-capture errors after loadvm, the savevm-done sentinel, or anything else about driving QEMU from expect via Path A. SKIP for the YAML/DI wiring of `interaction_script` (qflex-dependency-injection skill), the underlying executor's bash wrapper / mp.Process dispatch (executor skill), or how Path A relates to Path B / tmux (boot-load-interactive skill — that one covers the higher-level architecture; this one covers the script internals).
+description: Use when writing, **creating**, editing, or debugging expect scripts under [sample_scripts/](../../../sample_scripts/) (general-purpose), [tests/realrun/](../../../tests/realrun/) (test-specific), or **any `conf/<WORKLOAD>/expects/` directory** (per-workload Path A drivers — e.g. [conf/WSV/expects/](../../../conf/WSV/expects/), [conf/MS/expects/](../../../conf/MS/expects/), [conf/DC/expects/](../../../conf/DC/expects/)). These are the Path A scripts that talk to QEMU over telnet serial + telnet monitor, capture guest output, and shut QEMU down. Covers the **mandatory `chmod +x` after every fresh `Write` of a new `.exp`** (the executor invokes the script directly via bash; missing exec bit silently kills that leaf with `Permission denied` and the failure surfaces on the *other* leaf via the peer-kill — looks like a coordination bug but isn't), connect_telnet polling with named wall-clock budgets, the drain-based ls capture pattern, why prompt-regex anchoring is fragile, the post-loadvm queued-replay race, the master/non-master split for multi-node savevm, the symmetric peer-kill that guarantees both nodes exit, and why the outer `set timeout` does NOT bound Tcl while/sleep loops. **TRIGGER on ANY interaction with a `.exp` file**: writing a new one, editing an existing one, chmod'ing one, or even just adding / changing an `interaction_script:` YAML field that points at one — read this skill BEFORE the first `Write` call, not after. Also fire when the user mentions `connect_telnet`, expect timeouts not firing, "ls didn't return" / partial-capture errors after loadvm, the savevm-done sentinel, or anything else about driving QEMU from expect via Path A. SKIP for the YAML/DI wiring of `interaction_script` beyond the field name itself (qflex-dependency-injection skill), the underlying executor's bash wrapper / mp.Process dispatch (executor skill), or how Path A relates to Path B / tmux (boot-load-interactive skill — that one covers the higher-level architecture; this one covers the script internals).
 ---
 
 # Writing expect scripts for QEMU under qflex Path A
@@ -124,6 +124,46 @@ captures pre-OpenRC state, and the OpenRC pass that runs on every loadvm
 re-resume re-tries DHCP and may stomp our static IP. Configuring after the
 post-loadvm settle, before `savevm loaded`, bakes the configured eth0 into
 the `loaded` snapshot, which is what the simulation phases re-resume from.
+
+## Bake working internet into the booted snapshot — eth1 up + udhcpc + DNS
+
+**Default in every new boot expect** that needs guest internet egress (any
+workload that later does `apk add`, `curl`, `wget`, …), unless explicitly
+told the guest must have no internet. After the post-login `su` (still
+root, before `savevm booted`):
+
+```tcl
+send "ip link set eth1 up\r";                                    expect -re {# +}
+send "udhcpc -i eth1\r";                                          expect -re {# +}
+send "echo 'nameserver 10.0.2.3' > /etc/resolv.conf\r";           expect -re {# +}
+send "echo 'nameserver 8.8.8.8'  >> /etc/resolv.conf\r";          expect -re {# +}
+```
+
+What each line does:
+
+- `ip link set eth1 up` — eth1 (the e1000 NAT NIC at PCI addr 0x11 in
+  multi-node; the only NIC in single-node) is sometimes left DOWN by the
+  guest's openrc pass. Without it, the next steps have no link.
+- `udhcpc -i eth1` — pulls a lease from QEMU's user-mode DHCP (default
+  10.0.2.15) and installs the default route via 10.0.2.2. Internet egress
+  works after this.
+- The two resolv.conf echos: first overwrites whatever udhcpc wrote with a
+  clean `nameserver 10.0.2.3` (QEMU's user-mode DNS proxy — fast when it
+  works), then **appends** `nameserver 8.8.8.8` as a public-DNS fallback.
+  `udhcpc` alone often leaves `/etc/resolv.conf` pointing at only
+  `10.0.2.3`, which is flaky and silently drops queries under load
+  (observed: `ping: bad address 'google.com'` from a guest with a working
+  10.0.2.x lease and default route). The 8.8.8.8 fallback fixes that.
+
+Put it in **boot**, not load: eth1's up state, the lease, the default
+route, and `/etc/resolv.conf` are all part of the snapshot. Writing them
+once at boot bakes them into every downstream snapshot (`loaded`,
+`init_warmed`, sample-unit checkpoints, …). Putting any of it in load
+forces every loadvm-resumed run to redo the setup, racing the workload's
+networking config.
+
+Skip the rule only when the user says "this guest must have no internet"
+or names a specific NIC / DNS server (in which case substitute).
 
 ## Outer `set timeout` does NOT bound Tcl while/sleep loops
 

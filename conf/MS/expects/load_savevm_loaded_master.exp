@@ -1,0 +1,349 @@
+#!/usr/bin/env expect
+# === DEBUG MODE =============================================================
+# This script does NOT savevm `loaded`. After the follower confirms it's
+# inside the client container with the DNAT in place, master issues
+# `savevm pooria-test` (distributed snapshot — both nodes save) and exits.
+# Use `loadvm pooria-test` to resume manually and investigate why hammar's
+# https://127.0.0.1/... still hits ConnectionRefused (DNAT not catching the
+# packet? MASQUERADE missing on the return path? TLS handshake failing
+# upstream of the connection-refused?). Once debugged, restore section 9-10
+# to the savevm-loaded flow (git diff or the WSV master expect template).
+# ============================================================================
+# MULTI-NODE MASTER (node_number == 0) MS load. Loads from `booted`, brings
+# up the PDES NIC, ping-verifies the wire to the follower (0-drop required),
+# does an nc data-path preflight on port 443 (nginx's real listen port —
+# privileged, so the preflight runs as root), then launches an in-guest
+# detached tmux session with ONE window for the cloudsuite/media-streaming
+# server (nginx in docker, foregrounded by `nginx -g 'daemon off;'`).
+# Signals follower when nginx is up, waits for follower's "tasks created"
+# sentinel, then `savevm loaded` via the monitor and quits.
+#
+# Pair with conf/MS/expects/load_savevm_loaded_wait.exp on the follower.
+#
+# === IN-IMAGE WORKLOAD SCRIPT REFERENCE ======================================
+# One baked script lives in /home/qflex/ inside the alpine guest on this leaf,
+# and is NOT REWRITTEN. The container's nginx binds 0.0.0.0:443 under
+# --net=host so 192.168.100.1:443 is reachable from the follower's wire IP
+# without any docker-side IP plumbing.
+#
+# ./run_server.sh    — NOT REWRITTEN.
+#   #!/bin/sh
+#   docker run -it --rm \
+#       -v $(pwd)/videos:/videos \
+#       -v $(pwd)/entrypoint.sh:/etc/entrypoint.sh \
+#       --cpuset-cpus=0 \
+#       --entrypoint=bash \
+#       --net host cloudsuite/media-streaming:server
+#
+# ./etc/entrypoint.sh — inside the server container; NOT REWRITTEN.
+#   Generates an SSL cert (last output: `-----` from openssl), patches
+#   nginx.conf worker_connections + access_log, then `nginx -g 'daemon off;'`
+#   (foregrounded; never returns). The `-----` marker is the "ready" gate.
+# =============================================================================
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         60
+set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h: server init + waiting for follower's hammar load (can be many hours under PDES)
+set BUDGET_CHECKPOINTING_S 10800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+if {[info exists env(GROUP_EXP_FOLDER)]} {
+    set group_folder $env(GROUP_EXP_FOLDER)
+} else {
+    set group_folder [file dirname $exp_folder]
+}
+set wire_master_flag     "$group_folder/ms_load_wire_master.flag"
+set wire_wait_flag       "$group_folder/ms_load_wire_wait.flag"
+set nc_listen_ready_flag "$group_folder/ms_load_nc_listen_ready.flag"
+set server_ready_flag    "$group_folder/ms_load_server_ready.flag"
+set done_flag            "$group_folder/ms_load_done.flag"
+catch {file delete -force $wire_master_flag}
+catch {file delete -force $nc_listen_ready_flag}
+catch {file delete -force $server_ready_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]; set content [read $fh]; close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
+proc wait_for_pane_substring {session window needle budget_seconds} {
+    global timeout
+    set saved_timeout $timeout
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        send "tmux capture-pane -t ${session}:${window} -p\r"
+        set buf ""
+        set timeout 5
+        expect {
+            -re {.+} { append buf $expect_out(buffer); exp_continue }
+            timeout { }
+        }
+        if {[string first $needle $buf] >= 0} { set timeout $saved_timeout; return }
+        foreach err {"bash: syntax error" "syntax error near unexpected"} {
+            if {[string first $err $buf] >= 0} {
+                set timeout $saved_timeout
+                error "wait_for_pane_substring: bash error in $session:$window: '$err' (waiting for '$needle')"
+            }
+        }
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
+}
+
+# --- 1. Connect serial + nudge for post-loadvm prompt -----------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out after loadvm"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 10
+
+# --- 2. IP bring-up on the PDES NIC (eth0). STAY ROOT for the nc preflight on
+# port 443 (privileged); su qflex happens after section 5.
+
+send "su\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
+    -re {[Aa]uthentication failure|incorrect password} {
+        puts "ERROR: su rejected empty creds"; quit_qemu $monitor_port; exit 1
+    }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
+}
+send "ip link show\r";                               expect -re {# +}
+send "ip link set eth0 down\r";                      expect -re {# +}
+send "ip link set eth0 address 52:54:00:aa:bb:00\r"; expect -re {# +}
+send "ip link set eth0 up\r";                        expect -re {# +}
+send "ip addr flush dev eth0\r"
+expect {
+    timeout { puts "ERROR: ip addr flush timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip addr add 192.168.100.1/24 dev eth0\r";      expect -re {# +}
+send "ip addr show eth0\r";                          expect -re {# +}
+
+sleep 5
+
+# --- 3. Ping verify the wire to follower (0-drop required) ------------------
+
+send "ping 192.168.100.2 -i 0.05 -c 10\r"
+set timeout 120
+expect {
+    timeout { puts "ERROR: ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        set tx $expect_out(1,string); set rx $expect_out(2,string)
+        puts "master: ping summary -> $tx transmitted, $rx received"
+        if {$tx != $rx} {
+            puts "ERROR: ping drops detected (tx=$tx rx=$rx); aborting"
+            quit_qemu $monitor_port; exit 1
+        }
+    }
+}
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "WARN: prompt didn't return after ping summary; continuing" }
+    -re {# +}
+}
+
+sleep 5
+
+# --- 4. Wire-ready handshake ------------------------------------------------
+
+if {[catch {set f [open $wire_master_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $wire_master_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: wire verified; wrote $wire_master_flag; waiting for $wire_wait_flag..."
+wait_for_file $wire_wait_flag $BUDGET_PROMPT_S
+puts "master: both wires verified; running nc data-path preflight on :443."
+
+# --- 5. nc data-path preflight on the real benchmark port (443) -------------
+# Hammar connects to nginx over TCP/443. nc -l on 443 is privileged so this
+# runs while we're still root. The follower (still qflex) connects in.
+if {[catch {set f [open $nc_listen_ready_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $nc_listen_ready_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: nc listener coming up on :443 (as root); wrote $nc_listen_ready_flag; waiting for token..."
+send "nc -l -p 443\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: nc preflight: no token on :443 (TCP path broken)"; quit_qemu $monitor_port; exit 1 }
+    -re {Hello from VM2} { puts "master: nc preflight OK -- received 'Hello from VM2!' over :443" }
+}
+send "\003"
+expect { timeout { } -re {# +} }
+sleep 2
+
+# --- 6. Drop to qflex + docker cleanup --------------------------------------
+
+send "su qflex\r"
+expect {
+    timeout { puts "ERROR: su qflex didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {\$ +}
+}
+
+send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+# --- 7. One-window tmux session for the server ------------------------------
+# nginx is foregrounded by `nginx -g 'daemon off;'`, so we run it in a tmux
+# pane so the main serial stays free for the savevm step.
+
+send "tmux new-session -d -s ms\r"
+expect {
+    timeout { puts "ERROR: tmux new-session timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+send "tmux send-keys -t ms:0 './run_server.sh' Enter\r"
+expect -re {[\$#] +}
+puts "ms: window 0 (server) launched; waiting for 'root@qflex:/#' inside server container..."
+wait_for_pane_substring ms 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
+puts "ms: server container ready; dispatching ./etc/entrypoint.sh..."
+
+send "tmux send-keys -t ms:0 './etc/entrypoint.sh' Enter\r"
+expect -re {[\$#] +}
+puts "ms: entrypoint.sh dispatched; waiting for openssl cert footer '-----'..."
+wait_for_pane_substring ms 0 "-----" $BUDGET_WORKLOAD_INIT_S
+puts "ms: server cert generated; nginx daemon should be up. Settling 5s..."
+sleep 5
+
+# --- 8. Signal follower that nginx is up ------------------------------------
+
+if {[catch {set f [open $server_ready_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $server_ready_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: wrote $server_ready_flag; waiting for follower's pooria-test ready signal..."
+
+# --- 9. DEBUG MODE: wait for pooria-test ready + savevm pooria-test ---------
+# Skips the savevm-loaded path entirely while we debug the hammar
+# connection. Follower writes ms_load_pooria_test_ready.flag once it's
+# inside the client container (with the DNAT installed); master then
+# issues `savevm pooria-test` via the monitor (drains both nodes — per-
+# node CPU+mem state is persisted to each node's qcow2). User can later
+# `loadvm pooria-test` to resume at this exact state and investigate why
+# hammar's https://127.0.0.1/... still gets ConnectionRefused.
+
+set pooria_test_ready_flag "$group_folder/ms_load_pooria_test_ready.flag"
+catch {file delete -force $pooria_test_ready_flag}
+wait_for_file $pooria_test_ready_flag $BUDGET_WORKLOAD_INIT_S
+puts "master: follower at client-container shell; closing serial and issuing savevm pooria-test..."
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+
+set timeout $BUDGET_DEFAULT_S
+expect {
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    "(qemu) "
+}
+
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm pooria-test\r"
+expect {
+    timeout { puts "WARN: delvm pooria-test didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm pooria-test\r"
+expect {
+    timeout { puts "ERROR: savevm pooria-test didn't return"; exit 1 }
+    "(qemu) "
+}
+
+# --- 10. Wait for own per-node savevm log 7 + 60s settle -------------------
+
+puts "master: savevm pooria-test returned; polling Load.log for 'savevm log 7'..."
+wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "master: saw 'savevm log 7' — pooria-test snapshot finalised. Sleeping 60s..."
+sleep 60
+
+send "quit\r"
+catch {expect eof}
+exit 0
