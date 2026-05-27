@@ -55,30 +55,30 @@ boot:
     experiment_context_node_0:
       latencies_ns_list: [1000000]
       syncs_list: ["false"]
-      # interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_master.exp
-      interactive_tmux: true
-      loadvm_name: pooria-test
+      interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_master.exp
+      # interactive_tmux: true
+      # loadvm_name: pooria-test
     experiment_context_node_1:
       latencies_ns_list: [1000000]
       syncs_list: ["false"]
-      # interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_wait.exp
-      interactive_tmux: true
-      loadvm_name: pooria-test
+      interaction_script: /home/dev/qflex/conf/MS/expects/boot_savevm_booted_wait.exp
+      # interactive_tmux: true
+      # loadvm_name: pooria-test
 
       
 
 load:
   components:
     experiment_context_node_0:
-      # loadvm_name: loaded
-      interactive_tmux: true
-      # interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_master.exp
-      loadvm_name: pooria-test
+      # loadvm_name: pooria-test
+      # interactive_tmux: true
+      loadvm_name: booted
+      interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_master.exp
     experiment_context_node_1:
-      # loadvm_name: loaded
-      interactive_tmux: true
-      # interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_wait.exp
-      loadvm_name: pooria-test
+      # loadvm_name: pooria-test
+      # interactive_tmux: true
+      loadvm_name: booted
+      interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_wait.exp
 
 
 initialize:

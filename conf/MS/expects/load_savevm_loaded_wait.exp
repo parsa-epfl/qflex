@@ -1,27 +1,11 @@
 #!/usr/bin/env expect
-# === DEBUG MODE =============================================================
-# This script does NOT run hammar warm/load. After reaching the client
-# container shell with the loopback DNAT (section 2.5) installed, the
-# follower signals the master to take a distributed `savevm pooria-test`
-# snapshot and exits once its own per-node save is finalised. Use
-# `loadvm pooria-test` to resume manually and investigate from inside the
-# wait alpine guest (e.g. `iptables -t nat -nvL OUTPUT` for DNAT counters,
-# `curl -kv https://127.0.0.1/` from inside the client container, etc.).
-# Once debugged, restore section 7-end to the warm + hammar load + done.flag
-# flow (git diff).
-#
-# RESTORATION HINT: the load binary path is `./hammar/target/release/hammar`
-# (parallels the warm binary at `./hammar/target/release/warm`). `./hammar`
-# on its own is a directory and `bash: ./hammar: Is a directory` will fail
-# the load. The first revision of this file had it wrong; don't reintroduce.
-# ============================================================================
 # MULTI-NODE FOLLOWER (node_number > 0) MS load. Loads from `booted`,
 # brings up the PDES NIC, ping-verifies the wire to master (0-drop required),
 # nc-preflights TCP/443 to master (matches the real hammar->nginx path),
 # waits for master's server-ready sentinel, then runs hammar warm + hammar
-# load on the serial spawn targeting master via $SERVER_IP. Signals master
-# when 'All tasks are created.' appears, waits for its OWN per-node savevm
-# log 7 (PDES drain cascade), sleeps 60s, then quits.
+# load on the serial spawn. Signals master when 'All tasks are created.'
+# appears, waits for its OWN per-node savevm log 7 (PDES drain cascade),
+# sleeps 60s, then quits.
 #
 # Pair with conf/MS/expects/load_savevm_loaded_master.exp on node 0.
 #
@@ -35,16 +19,18 @@
 #       --network host \
 #       -v $(pwd)/videos:/videos xusine/media-streaming:client
 #
-# === SERVER-IP REDIRECTION (kernel-level, not env-var) =======================
+# === SERVER-IP REDIRECTION (baked into the booted snapshot) ==================
 # Hammar's source HARDCODES `https://127.0.0.1/...` (warm.rs:66 in the
-# xusine/media-streaming:client image — confirmed by the ConnectionRefused
-# panic when run on a leaf without a local nginx). Env-var prefixes did
-# nothing. We fix it the same way you'd fix any baked-in URL: rewrite the
-# packet at the kernel. Before docker run client, the wait alpine guest
-# installs an iptables OUTPUT DNAT 127.0.0.1:443 -> $SERVER_IP:443; since
-# docker --net=host shares the guest's netns, the rule applies to the
-# container's traffic too. route_localnet=1 lifts Linux's default-deny on
-# routing 127.0.0.0/8 off the lo interface.
+# xusine/media-streaming:client image). The wait's BOOT expect installs a
+# userspace `socat TCP-LISTEN:443,bind=127.0.0.1 ... TCP:192.168.100.1:443`
+# forwarder and bakes it into the booted snapshot, so every loadvm-resumed
+# load (this script) already has the proxy live. Docker --net=host shares
+# the guest netns, so hammar inside the container hits the socat listener.
+# Nothing to do on the load side beyond bringing up eth0 for the PDES wire.
+#
+# Boot snapshot resumes at root (`#`) since the boot expect su'd to install
+# iproute2/socat. The initial `su` from previous revisions is dropped; we
+# do IP bring-up directly and drop to qflex at the end of section 2.
 #
 # TODO multi-node: hammar load is single-threaded here. Per-4-cores fan-out
 # (see ./run_multiple.sh) is a later step once the basic path works.
@@ -159,18 +145,10 @@ expect {
 sleep 10
 
 # --- 2. IP bring-up on the PDES NIC (eth0); drop back to qflex --------------
+# Boot already left us at the root prompt (it installed socat as root), so
+# we go straight to ip-link/addr setup with no `su`. The final `su qflex`
+# drops us back to the unprivileged shell for ping/nc/docker.
 
-send "su\r"
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
-    -re {[Aa]uthentication failure|incorrect password} {
-        puts "ERROR: su rejected empty creds"; quit_qemu $monitor_port; exit 1
-    }
-    -re {[Ll]ogin: }    { send "\r"; exp_continue }
-    -re {[Pp]assword: } { send "\r"; exp_continue }
-    -re {# +}
-}
 send "ip link show\r";                               expect -re {# +}
 send "ip link set eth0 down\r";                      expect -re {# +}
 send "ip link set eth0 address 52:54:00:aa:bb:0a\r"; expect -re {# +}
@@ -182,21 +160,6 @@ expect {
 }
 send "ip addr add 192.168.100.2/24 dev eth0\r";      expect -re {# +}
 send "ip addr show eth0\r";                          expect -re {# +}
-
-# --- 2.5 Loopback DNAT for hammar's hardcoded 127.0.0.1 (root only) --------
-# See header "SERVER-IP REDIRECTION" banner. Must run before docker run
-# client. Rule survives across su qflex since iptables lives in the kernel.
-send "sysctl -w net.ipv4.conf.all.route_localnet=1\r"
-expect {
-    timeout { puts "ERROR: sysctl route_localnet timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
-}
-send "iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport 443 -j DNAT --to-destination $SERVER_IP:443\r"
-expect {
-    timeout { puts "ERROR: iptables DNAT install timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
-}
-puts "follower: installed loopback DNAT 127.0.0.1:443 -> $SERVER_IP:443."
 
 send "su qflex\r";                                   expect -re {\$ +}
 
@@ -264,19 +227,10 @@ expect {
     -re {[\$#] +}
 }
 
-# --- 7. Enter client container + signal master to savevm pooria-test -------
-# DEBUG MODE: we DO NOT run hammar warm/load here. The wait gets into the
-# client container with the DNAT (section 2.5) installed and the server
-# pingable+nc-verified, then asks the master to take a distributed
-# `savevm pooria-test` snapshot. Once the per-node save is finalised
-# (deterministic `savevm log 7` in Load.log) we exit. The user can then
-# `loadvm pooria-test` interactively and investigate why hammar's
-# https://127.0.0.1/... still hits ConnectionRefused (e.g. iptables -nvL
-# OUTPUT to see DNAT counters, curl -k https://127.0.0.1/ for the actual
-# error, etc.).
-
-set pooria_test_ready_flag "$group_folder/ms_load_pooria_test_ready.flag"
-catch {file delete -force $pooria_test_ready_flag}
+# --- 7. Enter client container + run hammar warm + hammar load -------------
+# Hammar URLs are hardcoded to 127.0.0.1; the boot-baked socat listener on
+# 127.0.0.1:443 forwards transparently to $SERVER_IP:443. taskset -c 0
+# because this leaf is 1 vCPU (no doubled_vcpu in multi-node).
 
 send "./run_client.sh\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
@@ -296,17 +250,42 @@ expect {
     timeout { }
     -re {root@qflex:/#}
 }
-puts "follower: hammar present; signalling master to savevm pooria-test..."
+puts "follower: hammar present; dispatching warm..."
 
-if {[catch {set f [open $pooria_test_ready_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $pooria_test_ready_flag: $err"; quit_qemu $monitor_port; exit 1
+send "taskset -c 0 ./hammar/target/release/warm ./videos 1\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: warm didn't produce 'Compressed history:'"; quit_qemu $monitor_port; exit 1 }
+    -re {Compressed history:}
 }
-puts "follower: wrote $pooria_test_ready_flag; waiting for own 'savevm log 7' in Load.log..."
+puts "follower: warm done; settling 5s before load..."
+sleep 5
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { }
+    -re {root@qflex:/#}
+}
 
-# --- 8. Wait for own per-node pooria-test savevm to finalise ---------------
+send "taskset -c 0 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: hammar load didn't print 'All tasks are created.'"; quit_qemu $monitor_port; exit 1 }
+    -re {All tasks are created\.}
+}
+puts "follower: hammar load reported tasks created; settling 5s..."
+sleep 5
+
+# --- 8. Signal master that load is done ------------------------------------
+
+if {[catch {set f [open $done_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $done_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "follower: wrote $done_flag; waiting for own 'savevm log 7' in Load.log..."
+
+# --- 9. Wait for own per-node savevm log 7 + 60s settle --------------------
 
 wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
-puts "follower: saw 'savevm log 7' — pooria-test snapshot captured. Sleeping 60s for master settle..."
+puts "follower: saw 'savevm log 7' — per-node savevm finalised. Sleeping 60s..."
 sleep 60
 
 quit_qemu $monitor_port

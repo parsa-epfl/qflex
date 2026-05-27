@@ -1,14 +1,4 @@
 #!/usr/bin/env expect
-# === DEBUG MODE =============================================================
-# This script does NOT savevm `loaded`. After the follower confirms it's
-# inside the client container with the DNAT in place, master issues
-# `savevm pooria-test` (distributed snapshot — both nodes save) and exits.
-# Use `loadvm pooria-test` to resume manually and investigate why hammar's
-# https://127.0.0.1/... still hits ConnectionRefused (DNAT not catching the
-# packet? MASQUERADE missing on the return path? TLS handshake failing
-# upstream of the connection-refused?). Once debugged, restore section 9-10
-# to the savevm-loaded flow (git diff or the WSV master expect template).
-# ============================================================================
 # MULTI-NODE MASTER (node_number == 0) MS load. Loads from `booted`, brings
 # up the PDES NIC, ping-verifies the wire to the follower (0-drop required),
 # does an nc data-path preflight on port 443 (nginx's real listen port —
@@ -297,24 +287,17 @@ sleep 5
 if {[catch {set f [open $server_ready_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $server_ready_flag: $err"; quit_qemu $monitor_port; exit 1
 }
-puts "master: wrote $server_ready_flag; waiting for follower's pooria-test ready signal..."
+puts "master: wrote $server_ready_flag; waiting for follower's $done_flag..."
 
-# --- 9. DEBUG MODE: wait for pooria-test ready + savevm pooria-test ---------
-# Skips the savevm-loaded path entirely while we debug the hammar
-# connection. Follower writes ms_load_pooria_test_ready.flag once it's
-# inside the client container (with the DNAT installed); master then
-# issues `savevm pooria-test` via the monitor (drains both nodes — per-
-# node CPU+mem state is persisted to each node's qcow2). User can later
-# `loadvm pooria-test` to resume at this exact state and investigate why
-# hammar's https://127.0.0.1/... still gets ConnectionRefused.
+# --- 9. Wait for follower's hammar load to report done ----------------------
 
-set pooria_test_ready_flag "$group_folder/ms_load_pooria_test_ready.flag"
-catch {file delete -force $pooria_test_ready_flag}
-wait_for_file $pooria_test_ready_flag $BUDGET_WORKLOAD_INIT_S
-puts "master: follower at client-container shell; closing serial and issuing savevm pooria-test..."
+wait_for_file $done_flag $BUDGET_WORKLOAD_INIT_S
+puts "master: follower finished hammar load; proceeding to savevm loaded."
 
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}
+
+# --- 10. savevm loaded via the monitor --------------------------------------
 
 set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
 set spawn_id $monitor_sid
@@ -326,22 +309,22 @@ expect {
 }
 
 set timeout $BUDGET_CHECKPOINTING_S
-send "delvm pooria-test\r"
+send "delvm loaded\r"
 expect {
-    timeout { puts "WARN: delvm pooria-test didn't return; continuing anyway" }
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
     "(qemu) "
 }
-send "savevm pooria-test\r"
+send "savevm loaded\r"
 expect {
-    timeout { puts "ERROR: savevm pooria-test didn't return"; exit 1 }
+    timeout { puts "ERROR: savevm didn't return"; exit 1 }
     "(qemu) "
 }
 
-# --- 10. Wait for own per-node savevm log 7 + 60s settle -------------------
+# --- 11. Wait for own per-node savevm log 7 + 60s settle --------------------
 
-puts "master: savevm pooria-test returned; polling Load.log for 'savevm log 7'..."
+puts "master: savevm returned; polling Load.log for 'savevm log 7'..."
 wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
-puts "master: saw 'savevm log 7' — pooria-test snapshot finalised. Sleeping 60s..."
+puts "master: saw 'savevm log 7' — savevm-loaded finalised. Sleeping 60s..."
 sleep 60
 
 send "quit\r"
