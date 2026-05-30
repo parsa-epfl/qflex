@@ -115,12 +115,22 @@ def parse_dev_info(dev_info_path, reg_map):
         queue0_offset 256
     """
     with open(dev_info_path, "r") as fh:
-        for line in fh:
+        for line_num, line in enumerate(fh, start=1):
             line = line.strip()
             if not line:
                 continue
             toks = line.split()
-            reg_map[toks[0]] = toks[1]
+            if len(toks) != 2:
+                raise ValueError(
+                    f"Malformed dev.info line {line_num} in {dev_info_path}: {line!r}"
+                )
+            try:
+                reg_map[toks[0]] = str(int(toks[1], 0))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid integer value for {toks[0]!r} on line {line_num} "
+                    f"in {dev_info_path}: {toks[1]!r}"
+                ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +158,9 @@ def reverse_byte_order(hex_str):
     """Reverse byte order of a 512-character hex string (256 bytes)."""
     assert len(hex_str) == 512
     rev = ""
-    for i in range(255, 0, -1):
+    # TODO: This needs to be verified. Copilot Review throws this as possible error, so resolved it.
+    # for i in range(255, 0, -1): Old code does this, but it seems to skip the last byte (index 0)
+    for i in range(255, -1, -1):
         rev += hex_str[2 * i : 2 * i + 2]
     return rev
 
@@ -209,7 +221,7 @@ def get_cc_reg_string(cpsr):
     return f"{nz} {c} {v} 0 0 0"
 
 
-def get_miscreg_output(miscreg_ref_path, reg_map):
+def get_miscreg_output(miscreg_ref_path, reg_map, verbose=False):
     """Build the misc-register KEY=VALUE block for the m5.cpt template.
 
     *miscreg_ref_path* is the gem5_misc_regs reference file that lists every
@@ -217,6 +229,7 @@ def get_miscreg_output(miscreg_ref_path, reg_map):
     override the defaults.
     """
     lines = []
+    missing_regs = []
     with open(miscreg_ref_path, "r") as fh:
         for line in fh:
             toks = line.split("=")
@@ -228,18 +241,18 @@ def get_miscreg_output(miscreg_ref_path, reg_map):
             elif reg_name in miscreg_map and miscreg_map[reg_name] in reg_map:
                 reg_val = reg_map[miscreg_map[reg_name]]
             else:
-                _eprint(f"{reg_name} not in reg_map")
+                missing_regs.append(reg_name)
 
             lines.append(f"{reg_name}={reg_val}")
 
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n", missing_regs
 
 
 # ---------------------------------------------------------------------------
 # Checkpoint generation
 # ---------------------------------------------------------------------------
 
-def generate_m5_cpt(gem_dir, num_cores, template_name=None):
+def generate_m5_cpt(gem_dir, num_cores, template_name=None, verbose=False):
     """Generate m5.cpt inside *gem_dir* from register-info.json + dev.info.
 
     Parameters
@@ -252,6 +265,8 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None):
         Override for the Jinja2 template filename.  Defaults to
         ``m5.cpt.template.j2`` for single-core,
         ``m5.cpt.multicore.template.j2`` for multi-core.
+    verbose : bool, optional
+        Enable verbose logging of missing registers (default: False).
     """
     gem_dir = Path(gem_dir)
     script_dir = Path(__file__).resolve().parent
@@ -271,12 +286,15 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None):
 
     template_path = templates_dir / template_name
 
+    all_missing_regs = []  # Track missing regs across all cores
+
     if num_cores == 1:
         reg_map = parse_register_json(json_path, cpu_index=0)
         parse_dev_info(dev_info_path, reg_map)
         fix_sp_regs(reg_map)
 
-        miscreg_str = get_miscreg_output(str(miscreg_ref), reg_map)
+        miscreg_str, missing_regs = get_miscreg_output(str(miscreg_ref), reg_map, verbose=verbose)
+        all_missing_regs.extend(missing_regs)
         intreg_str = get_intreg_string(reg_map)
         fpreg_str = get_fpreg_string(reg_map)
         ccreg_str = get_cc_reg_string(reg_map["cpsr"])
@@ -311,7 +329,8 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None):
             parse_dev_info(dev_info_path, reg_map[i])
             fix_sp_regs(reg_map[i])
 
-            miscreg_str[i] = get_miscreg_output(str(miscreg_ref), reg_map[i])
+            miscreg_str[i], missing_regs = get_miscreg_output(str(miscreg_ref), reg_map[i], verbose=verbose)
+            all_missing_regs.extend(missing_regs)
             intreg_str[i] = get_intreg_string(reg_map[i])
             fpreg_str[i] = get_fpreg_string(reg_map[i])
             ccreg_str[i] = get_cc_reg_string(reg_map[i]["cpsr"])
@@ -338,6 +357,13 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None):
         fh.write(rendered)
     _eprint(f"[gem5_chkpt] m5.cpt written to {out_path}")
 
+    # Print summary of missing registers if any found
+    if all_missing_regs:
+        unique_missing = sorted(set(all_missing_regs))
+        _eprint(f"[gem5_chkpt] WARNING: {len(unique_missing)} unique register(s) not found in register map")
+        if verbose:
+            _eprint(f"[gem5_chkpt] Missing registers: {', '.join(unique_missing)}")
+
 
 # ---------------------------------------------------------------------------
 # CLI entry point
@@ -363,9 +389,14 @@ def main():
         default=None,
         help="Override Jinja2 template filename (looked up in templates/)",
     )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose logging of missing registers",
+    )
 
     args = parser.parse_args()
-    generate_m5_cpt(args.gem_dir, args.num_cores, args.template)
+    generate_m5_cpt(args.gem_dir, args.num_cores, args.template, verbose=args.verbose)
 
 
 if __name__ == "__main__":
