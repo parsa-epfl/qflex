@@ -231,7 +231,7 @@ def qpoints_convert_multi_cmd(
     experiment_context: ExperimentContext,
     first: Annotated[str, typer.Option(help="First snapshot name, e.g. snapshot_0.")],
     last: Annotated[str, typer.Option(help="Last snapshot name, e.g. snapshot_99.")],
-    parallel: Annotated[int, typer.Option(help="Number of parallel conversions.")],
+    n_parallel: Annotated[int, typer.Option(help="Number of parallel conversions.")],
     gem5_ckp_dir: Annotated[str, typer.Option(help="Output gem5 checkpoint directory.")],
     overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directories.")] = False,
 ):
@@ -242,7 +242,7 @@ def qpoints_convert_multi_cmd(
     qpoints_convert_multi(
         first=first,
         last=last,
-        parallel=parallel,
+        parallel=n_parallel,
         experiment_context=experiment_context,
         gem5_ckp_dir=gem5_ckp_dir,
         overwrite=overwrite,

@@ -74,6 +74,11 @@ def data_class_wrap(*args):
 
         # TODO this order of appending always thinks the values coming from composites are none defaults
         params_final = list(params)+func_params
+        # Sort so required params (no default) come before optional ones (with default)
+        params_final = (
+            [p for p in params_final if p.default is inspect.Parameter.empty] +
+            [p for p in params_final if p.default is not inspect.Parameter.empty]
+        )
         wrapper.__signature__ = inspect.Signature(parameters=params_final)
 
 
