@@ -206,73 +206,45 @@ def result(
 
 
 @qpoints_app.command("convert-single")
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
 def qpoints_convert_single_cmd(
-    qflex_ckp_dir: Annotated[str, typer.Option(help="QFlex checkpoint directory.")],
-    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")],
-    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
-    memory_gb: Annotated[int, typer.Option(help="Memory size in GB.")],
-    base: Annotated[str, typer.Option(help="Base disk image (qcow2).")],
+    experiment_context: ExperimentContext,
     snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")],
-    ssh_host: Annotated[str, typer.Option(help="SSH host for the VM.")] = "127.0.0.1",
-    ssh_user: Annotated[str, typer.Option(help="SSH user for the VM.")] = "qflex",
-    monitor_base: Annotated[int, typer.Option(help="Base port for QEMU monitor.")] = 45454,
-    qmp_base: Annotated[int, typer.Option(help="Base port for QMP.")] = 4444,
-    ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
+    gem5_ckp_dir: Annotated[str, typer.Option(help="Output gem5 checkpoint directory.")],
     overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directory.")] = False,
 ):
     """
-    Convert a single QPoints snapshot by running the QEMU emulation and gem5 checkpoint generation.
+    Load a QEMU snapshot and generate a gem5-compatible checkpoint in <gem5_ckp_dir>/<snapshot>/.
+    No guest instructions are executed.
     """
     qpoints_convert_single(
-        qflex_ckp_dir=qflex_ckp_dir,
-        gem5_ckp_dir=gem5_ckp_dir,
-        core_count=core_count,
-        memory_gb=memory_gb,
-        base=base,
+        experiment_context=experiment_context,
         snapshot=snapshot,
-        ssh_host=ssh_host,
-        ssh_user=ssh_user,
-        monitor_base=monitor_base,
-        qmp_base=qmp_base,
-        ssh_base=ssh_base,
+        gem5_ckp_dir=gem5_ckp_dir,
         overwrite=overwrite,
     )
 
 
 @qpoints_app.command("convert-multi")
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
 def qpoints_convert_multi_cmd(
+    experiment_context: ExperimentContext,
     first: Annotated[str, typer.Option(help="First snapshot name, e.g. snapshot_0.")],
     last: Annotated[str, typer.Option(help="Last snapshot name, e.g. snapshot_99.")],
     parallel: Annotated[int, typer.Option(help="Number of parallel conversions.")],
-    qflex_ckp_dir: Annotated[str, typer.Option(help="QFlex checkpoint directory.")],
-    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")],
-    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
-    memory_gb: Annotated[int, typer.Option(help="Memory size in GB.")],
-    base: Annotated[str, typer.Option(help="Base disk image (qcow2).")],
-    ssh_host: Annotated[str, typer.Option(help="SSH host for the VM.")] = "127.0.0.1",
-    ssh_user: Annotated[str, typer.Option(help="SSH user for the VM.")] = "qflex",
-    monitor_base: Annotated[int, typer.Option(help="Base port for QEMU monitor.")] = 45454,
-    qmp_base: Annotated[int, typer.Option(help="Base port for QMP.")] = 4444,
-    ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
+    gem5_ckp_dir: Annotated[str, typer.Option(help="Output gem5 checkpoint directory.")],
     overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directories.")] = False,
 ):
     """
-    Convert a range of QPoints snapshots using run_all_multi_snapshot.sh.
+    Convert a range of QPoints snapshots to gem5-compatible checkpoints in parallel.
+    No guest instructions are executed per snapshot.
     """
     qpoints_convert_multi(
         first=first,
         last=last,
         parallel=parallel,
-        qflex_ckp_dir=qflex_ckp_dir,
+        experiment_context=experiment_context,
         gem5_ckp_dir=gem5_ckp_dir,
-        core_count=core_count,
-        memory_gb=memory_gb,
-        base=base,
-        ssh_host=ssh_host,
-        ssh_user=ssh_user,
-        monitor_base=monitor_base,
-        qmp_base=qmp_base,
-        ssh_base=ssh_base,
         overwrite=overwrite,
     )
 
