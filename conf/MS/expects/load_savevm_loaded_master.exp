@@ -51,14 +51,26 @@ if {[info exists env(GROUP_EXP_FOLDER)]} {
 } else {
     set group_folder [file dirname $exp_folder]
 }
-set wire_master_flag     "$group_folder/ms_load_wire_master.flag"
-set wire_wait_flag       "$group_folder/ms_load_wire_wait.flag"
-set nc_listen_ready_flag "$group_folder/ms_load_nc_listen_ready.flag"
-set server_ready_flag    "$group_folder/ms_load_server_ready.flag"
-set done_flag            "$group_folder/ms_load_done.flag"
+set master_docker_cleaned_flag "$group_folder/ms_load_master_docker_cleaned.flag"
+set wait_docker_cleaned_flag   "$group_folder/ms_load_wait_docker_cleaned.flag"
+set master_eth_done_flag       "$group_folder/ms_load_master_eth_done.flag"
+set wait_eth_done_flag         "$group_folder/ms_load_wait_eth_done.flag"
+set wire_master_flag         "$group_folder/ms_load_wire_master.flag"
+set wire_wait_flag           "$group_folder/ms_load_wire_wait.flag"
+set nc_listen_ready_flag     "$group_folder/ms_load_nc_listen_ready.flag"
+set server_ready_flag        "$group_folder/ms_load_server_ready.flag"
+set done_flag                "$group_folder/ms_load_done.flag"
+# TEMP: pooria_*_flag pair — remove with section 8.5 once multi-node load is fully working.
+set pooria_in_container_flag "$group_folder/ms_load_pooria_in_container.flag"
+set pooria_done_flag         "$group_folder/ms_load_pooria_done.flag"
+set loaded_done_flag         "$group_folder/ms_load_loaded_done.flag"
+catch {file delete -force $master_docker_cleaned_flag}
+catch {file delete -force $master_eth_done_flag}
 catch {file delete -force $wire_master_flag}
 catch {file delete -force $nc_listen_ready_flag}
 catch {file delete -force $server_ready_flag}
+catch {file delete -force $pooria_done_flag}
+catch {file delete -force $loaded_done_flag}
 
 proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
@@ -163,6 +175,30 @@ expect {
 
 sleep 10
 
+# --- 1.5 Serialized docker container cleanup (master first, then follower) --
+# Runs as qflex (member of docker group) before anything else: stale containers
+# from previous runs are torn down on master, then on the follower, then both
+# proceed to eth setup. Doing this before eth setup keeps docker daemon I/O
+# off the wire during the ARP/ping sensitive window.
+
+send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+if {[catch {set f [open $master_docker_cleaned_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $master_docker_cleaned_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: docker containers removed; wrote $master_docker_cleaned_flag; waiting for $wait_docker_cleaned_flag..."
+wait_for_file $wait_docker_cleaned_flag $BUDGET_PROMPT_S
+puts "master: follower docker also cleaned; proceeding to eth setup."
+
 # --- 2. IP bring-up on the PDES NIC (eth0). STAY ROOT for the nc preflight on
 # port 443 (privileged); su qflex happens after section 5.
 
@@ -189,11 +225,30 @@ expect {
 send "ip addr add 192.168.100.1/24 dev eth0\r";      expect -re {# +}
 send "ip addr show eth0\r";                          expect -re {# +}
 
+# Pin follower's ARP entry — `arp -s` sets a static (NUD_PERMANENT)
+# entry; the kernel never re-probes or demotes it to FAILED under PDES
+# wire pressure. Use `arp -s` (not `ip neigh add`) because master's
+# alpine still runs BusyBox `ip`, which doesn't implement `ip neigh add`.
+send "arp -s 192.168.100.2 52:54:00:aa:bb:0a\r"; expect -re {# +}
+send "arp -n 192.168.100.2\r";                   expect -re {# +}
+
+# --- 2.6 Eth-setup serialization sentinel -----------------------------------
+# Master eth + ARP ready. Signal follower to start its eth setup, then wait
+# for follower's "eth done" before pinging. Prevents ARP / link-state races
+# that cause random ping drops under PDES wire pressure.
+
+if {[catch {set f [open $master_eth_done_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $master_eth_done_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: eth ready; wrote $master_eth_done_flag; waiting for $wait_eth_done_flag..."
+wait_for_file $wait_eth_done_flag $BUDGET_PROMPT_S
+puts "master: follower eth ready; proceeding to ping."
+
 sleep 5
 
 # --- 3. Ping verify the wire to follower (0-drop required) ------------------
 
-send "ping 192.168.100.2 -i 0.05 -c 10\r"
+send "ping 192.168.100.2 -i 0.5 -c 10\r"
 set timeout 120
 expect {
     timeout { puts "ERROR: ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
@@ -240,23 +295,12 @@ send "\003"
 expect { timeout { } -re {# +} }
 sleep 2
 
-# --- 6. Drop to qflex + docker cleanup --------------------------------------
+# --- 6. Drop to qflex (docker cleanup already done in section 1.5) ----------
 
 send "su qflex\r"
 expect {
     timeout { puts "ERROR: su qflex didn't return prompt"; quit_qemu $monitor_port; exit 1 }
     -re {\$ +}
-}
-
-send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
-expect {
-    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
-expect {
-    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
 }
 
 # --- 7. One-window tmux session for the server ------------------------------
@@ -287,26 +331,52 @@ sleep 5
 if {[catch {set f [open $server_ready_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $server_ready_flag: $err"; quit_qemu $monitor_port; exit 1
 }
-puts "master: wrote $server_ready_flag; waiting for follower's $done_flag..."
+puts "master: wrote $server_ready_flag; waiting for follower's $pooria_in_container_flag..."
 
-# --- 9. Wait for follower's hammar load to report done ----------------------
+# --- 8.5 pooria-load-test checkpoint ----------------------------------------
+# TEMP: remove (along with the follower's section 7.5 and the pooria_*_flag
+# defs at the top of this file) once multi-node MS load is fully working.
+# User-requested delve-point: master snapshots "server up + client container
+# open" so the user can `loadvm pooria-load-test` later. Closes serial (no
+# longer needed) and opens the monitor; the same monitor is reused below.
 
-wait_for_file $done_flag $BUDGET_WORKLOAD_INIT_S
-puts "master: follower finished hammar load; proceeding to savevm loaded."
+wait_for_file $pooria_in_container_flag $BUDGET_WORKLOAD_INIT_S
 
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}
-
-# --- 10. savevm loaded via the monitor --------------------------------------
 
 set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
 set spawn_id $monitor_sid
 
 set timeout $BUDGET_DEFAULT_S
 expect {
-    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    timeout { puts "ERROR: monitor prompt timed out for pooria savevm"; exit 1 }
     "(qemu) "
 }
+
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm pooria-load-test\r"
+expect {
+    timeout { puts "WARN: delvm pooria-load-test didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm pooria-load-test\r"
+expect {
+    timeout { puts "ERROR: savevm pooria-load-test didn't return"; exit 1 }
+    "(qemu) "
+}
+
+if {[catch {set f [open $pooria_done_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $pooria_done_flag: $err"; exit 1
+}
+puts "master: pooria-load-test savevm complete; wrote $pooria_done_flag."
+
+# --- 9. Wait for follower's hammar load to report done ----------------------
+
+wait_for_file $done_flag $BUDGET_WORKLOAD_INIT_S
+puts "master: follower finished hammar load; proceeding to savevm loaded."
+
+# --- 10. savevm loaded via the monitor (reuses $monitor_sid from 8.5) -------
 
 set timeout $BUDGET_CHECKPOINTING_S
 send "delvm loaded\r"
@@ -320,11 +390,10 @@ expect {
     "(qemu) "
 }
 
-# --- 11. Wait for own per-node savevm log 7 + 60s settle --------------------
-
-puts "master: savevm returned; polling Load.log for 'savevm log 7'..."
-wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
-puts "master: saw 'savevm log 7' — savevm-loaded finalised. Sleeping 60s..."
+if {[catch {set f [open $loaded_done_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $loaded_done_flag: $err"; exit 1
+}
+puts "master: savevm loaded returned; wrote $loaded_done_flag. Sleeping 60s..."
 sleep 60
 
 send "quit\r"

@@ -208,6 +208,13 @@ class ExperimentContext(BaseModel):
         # TODO clean this up later, but done this for when need to make a directory but don't have the full context
         return get_experiment_folder_address(self.get_mounting_folder(), self.experiment_name)
 
+    def get_group_experiment_folder_address(self) -> str:
+        """Group's experiment folder. For a sub-experiment leaf this is the
+        parent_experiment_folder populated by the executor at dispatch; for
+        a group context itself or single-node it falls back to own folder.
+        Mirrors the GROUP_EXP_FOLDER fallback in commands/boot.py / load.py."""
+        return self.parent_experiment_folder or self.get_experiment_folder_address()
+
     def get_local_image_address(self) -> str:
         return self.image_address
     def get_vanila_qemu_build_folder(self) -> str:
@@ -360,7 +367,7 @@ class ExperimentContext(BaseModel):
 
         
     def shm_clean_up(self):
-        
+
         shm_recvs = self.get_shm_names(recieve=True)
         shm_sends = self.get_shm_names(recieve=False)
         all_shm_names = shm_recvs + shm_sends
@@ -374,9 +381,24 @@ class ExperimentContext(BaseModel):
             else:
                 print(f"Shared memory file {shm_path} does not exist, skipping removal.")
 
+    def group_sentinel_clean_up_master(self):
+        """Master removes all *.flag sentinels in the group folder. Workload
+        expects write these (ms_boot_*.flag, wsv_load_*.flag, etc.) to
+        coordinate per-leaf state; they should not persist across runs.
+        Non-master nodes and single-node are no-ops since is_master_node()
+        returns False for both."""
+        if not self.is_master_node():
+            return
+        import glob
+        group_folder = self.get_group_experiment_folder_address()
+        for flag_path in glob.glob(os.path.join(group_folder, "*.flag")):
+            if os.path.exists(flag_path):
+                print(f"Removing stale sentinel {flag_path}...")
+                os.system(f"rm -f {flag_path}")
 
     def clean_up(self):
         self.shm_clean_up()
+        self.group_sentinel_clean_up_master()
 
 
         
@@ -385,8 +407,12 @@ class ExperimentContext(BaseModel):
         # TODO move this to simulation context later
         # nic_command = self.simulation_context.qemu_nic.strip().lower()
         nic_command = self.simulation_context.qemu_nic.strip().lower() + " "
+        # Master clears the group folder's stale workload sentinels before
+        # launch — mirrors the per-neighbor shm cleanup below. No-op on
+        # non-master / single-node via the method's internal gate.
+        self.group_sentinel_clean_up_master()
         if self.is_multi_node():
-            
+
             shm_recvs = self.get_shm_names(recieve=True)
             shm_sends = self.get_shm_names(recieve=False)
             for i in range(self.get_neighbor_count()):
