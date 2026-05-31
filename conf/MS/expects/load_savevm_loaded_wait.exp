@@ -141,16 +141,17 @@ expect {
 wait_for_file $wire_master_flag $BUDGET_WORKLOAD_INIT_S
 # TODO: get the eth0 MAC from the experiment context (commands/config.py derives
 # it per node) instead of hard-coding 52:54:00:aa:bb:0a here.
-send "ip link set eth0 down\r";                      expect -re {# +}
-send "ip link set eth0 address 52:54:00:aa:bb:0a\r"; expect -re {# +}
-send "ip link set eth0 up\r";                        expect -re {# +}
+send "ip link set eth0 down\r";                      send "\r"; expect -re {# +}
+send "ip link set eth0 address 52:54:00:aa:bb:0a\r"; send "\r"; expect -re {# +}
+send "ip link set eth0 up\r";                        send "\r"; expect -re {# +}
 send "ip addr flush dev eth0\r"
+send "\r"
 expect {
     timeout { puts "ERROR: ip addr flush timed out"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
 }
-send "ip addr add 192.168.100.2/24 dev eth0\r";   expect -re {# +}
-send "ip addr show eth0\r";                        expect -re {# +}
+send "ip addr add 192.168.100.2/24 dev eth0\r";   send "\r"; expect -re {# +}
+send "ip addr show eth0\r";                        send "\r"; expect -re {# +}
 
 if {[catch {set f [open $wire_wait_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $wire_wait_flag: $err"; quit_qemu $monitor_port; exit 1
@@ -176,6 +177,7 @@ expect {
     }
 }
 set timeout $BUDGET_PROMPT_S
+send "\r"
 expect {
     timeout { puts "WARN: prompt didn't return after ping summary; continuing" }
     -re {# +}
@@ -189,11 +191,13 @@ puts "follower: ping OK; wrote $ping_wait_flag; continuing to docker cleanup."
 # --- 4. Clear leftover containers + rendezvous ------------------------------
 
 send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+send "\r"
 expect {
     timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
 }
 send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
+send "\r"
 expect {
     timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
@@ -209,11 +213,12 @@ wait_for_file $docker_master_flag $BUDGET_WORKLOAD_INIT_S
 # eth1 = e1000 user-mode NAT; gives the client container internet for apt-get.
 wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
 puts "follower: server is up; bringing up eth1 internet for the client container..."
-send "ip link set eth1 up\r"; expect -re {# +}
+send "ip link set eth1 up\r"; send "\r"; expect -re {# +}
 send "udhcpc -i eth1\r"
 set timeout $BUDGET_PROMPT_S
+send "\r"
 expect { timeout { puts "ERROR: udhcpc eth1 timed out"; quit_qemu $monitor_port; exit 1 } -re {# +} }
-send "echo 'nameserver 8.8.8.8' > /etc/resolv.conf\r"; expect -re {# +}
+send "echo 'nameserver 8.8.8.8' > /etc/resolv.conf\r"; send "\r"; expect -re {# +}
 send "ping google.com -i 0.05 -W 100 -c 10\r"
 set timeout 150
 expect {
@@ -226,7 +231,7 @@ expect {
     }
 }
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 
 # --- 6. Client container (bash entrypoint, privileged) + DNS + tools --------
 # entrypoint bash so we can set up iptables inside; --privileged/--cap-add NET_ADMIN
@@ -238,9 +243,9 @@ expect {
     -re {root@}
 }
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 puts "follower: in client container; setting DNS + installing tools..."
-send "echo 'nameserver 8.8.8.8' > /etc/resolv.conf\r"; expect -re {# +}
+send "echo 'nameserver 8.8.8.8' > /etc/resolv.conf\r"; send "\r"; expect -re {# +}
 # Marker-gate apt: its progress bars contain '# ' and would false-match a bare prompt
 # regex. The PID marker can't appear in apt output or the typed echo (literal `$$`).
 send "apt-get update; printf 'APTDONE%s\\n' \"\$\$\"\r"
@@ -250,7 +255,7 @@ expect {
     -re {APTDONE[0-9]+}
 }
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 send "apt-get install -y iptables iputils-ping netcat-openbsd; printf 'APTDONE%s\\n' \"\$\$\"\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
@@ -258,7 +263,7 @@ expect {
     -re {APTDONE[0-9]+}
 }
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 
 # --- 7. DNAT localhost -> master (192.168.100.1) inside the container -------
 send "cat > fix.sh << 'EOF'\r"
@@ -267,19 +272,20 @@ send "sysctl -w net.ipv4.conf.all.route_localnet=1\r"
 send "iptables -t nat -A OUTPUT -d 127.0.0.1 -j DNAT --to-destination 192.168.100.1\r"
 send "iptables -t nat -A POSTROUTING -d 192.168.100.1 -j MASQUERADE\r"
 send "EOF\r"
+send "\r"
 expect { timeout { puts "ERROR: writing fix.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {# +} }
-send "chmod +x fix.sh\r"; expect -re {# +}
+send "chmod +x fix.sh\r"; send "\r"; expect -re {# +}
 send "./fix.sh\r"
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 # Re-add in the nft backend (the default 'iptables'); clear legacy-backend dupes first.
-send "iptables-legacy -t nat -F OUTPUT\r";      expect { timeout { } -re {# +} }
-send "iptables-legacy -t nat -F POSTROUTING\r"; expect { timeout { } -re {# +} }
-send "sysctl -w net.ipv4.conf.all.route_localnet=1\r"; expect -re {# +}
-send "iptables -t nat -A OUTPUT -d 127.0.0.1 -j DNAT --to-destination 192.168.100.1\r"; expect -re {# +}
-send "iptables -t nat -A POSTROUTING -d 192.168.100.1 -j MASQUERADE\r"; expect -re {# +}
-send "iptables -t nat -L OUTPUT -v -n\r";      expect -re {# +}
-send "iptables -t nat -L POSTROUTING -v -n\r"; expect -re {# +}
+send "iptables-legacy -t nat -F OUTPUT\r";      send "\r"; expect { timeout { } -re {# +} }
+send "iptables-legacy -t nat -F POSTROUTING\r"; send "\r"; expect { timeout { } -re {# +} }
+send "sysctl -w net.ipv4.conf.all.route_localnet=1\r"; send "\r"; expect -re {# +}
+send "iptables -t nat -A OUTPUT -d 127.0.0.1 -j DNAT --to-destination 192.168.100.1\r"; send "\r"; expect -re {# +}
+send "iptables -t nat -A POSTROUTING -d 192.168.100.1 -j MASQUERADE\r"; send "\r"; expect -re {# +}
+send "iptables -t nat -L OUTPUT -v -n\r";      send "\r"; expect -re {# +}
+send "iptables -t nat -L POSTROUTING -v -n\r"; send "\r"; expect -re {# +}
 
 # --- 8. Verify the remap: localhost must now traverse the wire (non-0 latency)
 # ping 127.0.0.1 -> DNAT -> master. A ~0.0ms result means it stayed on loopback
@@ -304,7 +310,7 @@ expect {
     }
 }
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 send "ping 192.168.100.1 -i 0.05 -W 100 -c 10\r"
 set timeout 150
 expect {
@@ -325,7 +331,7 @@ expect {
     }
 }
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 
 # --- 9. nc data-path on :444 (127.0.0.1 -> DNAT -> master) ------------------
 wait_for_file $nc_ready_flag $BUDGET_WORKLOAD_INIT_S
@@ -334,7 +340,7 @@ puts "follower: sent 'hello world' to 127.0.0.1:444 (DNAT->master); waiting for 
 wait_for_file $nc_ok_flag $BUDGET_WORKLOAD_INIT_S
 send "\003"
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 puts "follower: master confirmed nc (nc_ok); starting warm/load."
 
 # --- 10. Warm + load (hammar; localhost -> DNAT -> master), pinned to cpu 0 -
@@ -344,7 +350,7 @@ expect {
     timeout { puts "ERROR: ls didn't show hammar"; quit_qemu $monitor_port; exit 1 }
     -re {hammar}
 }
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 send "taskset -c 0 ./hammar/target/release/warm ./videos 1\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
@@ -354,7 +360,7 @@ expect {
 puts "follower: warm done; settling 5s before load..."
 sleep 5
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 send "taskset -c 0 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {

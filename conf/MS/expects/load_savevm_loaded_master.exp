@@ -164,16 +164,17 @@ expect {
 # --- 2. IP bring-up on the PDES NIC (eth0 = 192.168.100.1) ------------------
 # TODO: get the eth0 MAC from the experiment context (commands/config.py derives
 # it per node) instead of hard-coding 52:54:00:aa:bb:00 here.
-send "ip link set eth0 down\r";                      expect -re {# +}
-send "ip link set eth0 address 52:54:00:aa:bb:00\r"; expect -re {# +}
-send "ip link set eth0 up\r";                        expect -re {# +}
+send "ip link set eth0 down\r";                      send "\r"; expect -re {# +}
+send "ip link set eth0 address 52:54:00:aa:bb:00\r"; send "\r"; expect -re {# +}
+send "ip link set eth0 up\r";                        send "\r"; expect -re {# +}
 send "ip addr flush dev eth0\r"
+send "\r"
 expect {
     timeout { puts "ERROR: ip addr flush timed out"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
 }
-send "ip addr add 192.168.100.1/24 dev eth0\r";   expect -re {# +}
-send "ip addr show eth0\r";                        expect -re {# +}
+send "ip addr add 192.168.100.1/24 dev eth0\r";   send "\r"; expect -re {# +}
+send "ip addr show eth0\r";                        send "\r"; expect -re {# +}
 
 if {[catch {set f [open $wire_master_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $wire_master_flag: $err"; quit_qemu $monitor_port; exit 1
@@ -199,6 +200,7 @@ expect {
     }
 }
 set timeout $BUDGET_PROMPT_S
+send "\r"
 expect {
     timeout { puts "WARN: prompt didn't return after ping summary; continuing" }
     -re {# +}
@@ -214,11 +216,13 @@ puts "master: follower's ping done; continuing to docker cleanup."
 # --- 4. Clear leftover containers + rendezvous ------------------------------
 
 send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+send "\r"
 expect {
     timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
 }
 send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
+send "\r"
 expect {
     timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
@@ -237,11 +241,13 @@ wait_for_file $docker_wait_flag $BUDGET_WORKLOAD_INIT_S
 # footer '-----' is the last output before nginx execs; after it nginx is up.
 
 send "tmux new-session -d -s ms\r"
+send "\r"
 expect {
     timeout { puts "ERROR: tmux new-session timed out"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
 }
 send "tmux send-keys -t ms:0 './run_server.sh' Enter\r"
+send "\r"
 expect {
     timeout { puts "ERROR: dispatching run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
@@ -251,6 +257,7 @@ wait_for_pane_substring ms 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
 puts "ms: server container at root shell; dispatching ./etc/entrypoint.sh..."
 
 send "tmux send-keys -t ms:0 './etc/entrypoint.sh' Enter\r"
+send "\r"
 expect {
     timeout { puts "ERROR: dispatching entrypoint.sh timed out"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
@@ -285,7 +292,7 @@ expect {
 send "\003"
 set timeout $BUDGET_PROMPT_S
 send "\r"
-expect { timeout { } -re {# +} }
+send "\r"; expect { timeout { } -re {# +} }
 if {[catch {set f [open $nc_ok_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $nc_ok_flag: $err"; quit_qemu $monitor_port; exit 1
 }
