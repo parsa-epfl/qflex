@@ -322,8 +322,6 @@ prvEvalTick=0
 currState=0
 prvEvalTick=0
 
-[system.cpu_cluster.cpus{{ i }}.mmu.itb]
-
 [system.cpu_cluster.cpus{{ i }}.mmu.dtb_walker]
 currState=0
 prvEvalTick=0
@@ -331,8 +329,6 @@ prvEvalTick=0
 [system.cpu_cluster.cpus{{ i }}.mmu.dtb_walker.power_state]
 currState=0
 prvEvalTick=0
-
-[system.cpu_cluster.cpus{{ i }}.mmu.dtb]
 
 [system.cpu_cluster.cpus{{ i }}.isa]
 
@@ -401,3 +397,4 @@ isa=arm
 [root.globals]
 curTick=9943912964000
 version_tags=arm-ccregs arm-contextidr-el2 arm-gem5-gic-ext arm-gicv2-banked-regs arm-hdlcd-upgrade arm-miscreg-teehbr arm-sve arm-sysreg-mapping-ns armv8 cpu-pid dvfs-perflevel etherswitch globals-to-root ide-dma-abort isa-is-simobject memory-per-range multiple-event-queues process-fdmap-rename remove-arm-cpsr-mode-miscreg ruby-block-size-bytes smt-interrupts x86-add-tlb
+{{ tlb_entries | default('') }}

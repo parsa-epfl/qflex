@@ -34,51 +34,47 @@ class ConvertSingle(Executor):
         qpoints_root = Path(__file__).resolve().parents[1] / "QPoints"
 
         # Check if gem5 checkpoint files already exist
-        gem5_dir = f"{run_dir}/{self.snapshot}.gem"
-        register_info = Path(f"{gem5_dir}/register-info.json")
-        dev_info = Path(f"{gem5_dir}/dev.info")
-        physmem = Path(f"{gem5_dir}/system.physmem.store1.pmem")
+        qemu_gem5_dump_dir = f"{run_dir}/{self.snapshot}.gem"
+        register_info = Path(f"{qemu_gem5_dump_dir}/register-info.json")
+        dev_info = Path(f"{qemu_gem5_dump_dir}/dev.info")
+        physmem = Path(f"{qemu_gem5_dump_dir}/system.physmem.store1.pmem")
         checkpoint_files_exist = register_info.exists() and dev_info.exists() and physmem.exists()
 
         # Check if TLB data exists
-        va_file = f"{run_dir}/{self.snapshot}.uarch/mmus-0.json"
+        va_file = f"{run_dir}/{self.snapshot}.uarch/mmus-0.json.zstd"
         tlb_data_exists = Path(va_file).exists()
 
-        qemu_cmd = f"""
-            ./qemu-system-aarch64 \
-            {self.qemu_common_parser.get_qemu_base_args()} \
-            {self.qemu_common_parser.quantum_args()} \
-            -convert-to-gem5-chkp {self.snapshot}
-        """
-
-        tlb_output_dir = f"{run_dir}/{self.snapshot}.gem"
-
         commands = [f"cd {run_dir}"]
+        
         if self.overwrite:
             commands.append(f"rm -rf {gem5_output}")
         
-        # Conditionally run qemu_cmd only if checkpoint files don't exist
+        # Conditionally run qemu_cmd only if gem5 checkpoint files don't exist
         if not checkpoint_files_exist:
+            qemu_cmd = f"""
+                ./qemu-system-aarch64 \
+                {self.qemu_common_parser.get_qemu_base_args()} \
+                {self.qemu_common_parser.quantum_args()} \
+                -convert-to-gem5-chkp {self.snapshot}
+            """
             commands.append(qemu_cmd)
         
         # Always run these
         commands.extend([
-            f"./qemu-img convert -f qcow2 -O raw -l {self.snapshot} {base_image_address} {self.snapshot}.gem/{self.snapshot}.img",
-            f"cp ./system.physmem.store0.pmem {self.snapshot}.gem/",
-            f"python3 ../create_gem5_checkpoint.py {self.snapshot}.gem --num-cores {core_count}",
+            f"mv {qemu_gem5_dump_dir} {gem5_output}",
+            f"./qemu-img convert -f qcow2 -O raw -l {self.snapshot} {base_image_address} {gem5_output}/{self.snapshot}.img",
+            f"cp ./system.physmem.store0.pmem {gem5_output}/",
+            f"python3 ../create_gem5_checkpoint.py {gem5_output} --num-cores {core_count}",
         ])
         
         # Conditionally run TLB-related commands only if TLB data exists
         if tlb_data_exists:
             commands.extend([
-                f"(cd {qpoints_root} && bash run_gem5.sh --gem5-ckp-dir {run_dir} --experiment experiment_{self.snapshot} --snapshot {self.snapshot} --inst 10000 --cores {core_count} --va-file {va_file} --tlb-output-dir {tlb_output_dir})",
-                f"rm -rf {self.snapshot}.gem/m5.cpt",
-                f"python3 ../create_gem5_checkpoint.py {self.snapshot}.gem --num-cores {core_count}",
+                f"(cd {qpoints_root} && bash run_gem5.sh --gem5-ckp-dir {self.gem5_ckp_dir} --experiment temp_experiment_{self.snapshot} --snapshot {self.snapshot} --inst 10000 --cores {core_count} --va-file {va_file} --tlb-output-dir {gem5_output})",
+                f"rm -rf {gem5_output}/m5.cpt",
+                f"python3 ../create_gem5_checkpoint.py {gem5_output} --num-cores {core_count}",
             ])
-        
-        # Always run final move
-        commands.append(f"mv {self.snapshot}.gem {gem5_output}")
-        
+                
         return commands
 
 
