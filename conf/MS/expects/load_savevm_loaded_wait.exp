@@ -1,50 +1,25 @@
 #!/usr/bin/env expect
-# MULTI-NODE FOLLOWER (node_number > 0) MS load. Loads from `booted`,
-# brings up the PDES NIC, ping-verifies the wire to master (0-drop required),
-# nc-preflights TCP/443 to master (matches the real hammar->nginx path),
-# waits for master's server-ready sentinel, then runs hammar warm + hammar
-# load on the serial spawn. Signals master when 'All tasks are created.'
-# appears, waits for its OWN per-node savevm log 7 (PDES drain cascade),
-# sleeps 60s, then quits.
+# MULTI-NODE FOLLOWER (node_number > 0) MS load. Loads from `booted`, brings up
+# the PDES NIC (eth0 = 192.168.100.2), ping-verifies the wire to master, sends a
+# token to master's nc listener, waits for master's nc-received + server-ready
+# signals, then runs the media-streaming client targeting the server over the
+# wire (SERVER_IP=192.168.100.1), and waits for its OWN per-node `savevm log 7`.
 #
-# Pair with conf/MS/expects/load_savevm_loaded_master.exp on node 0.
+# Pair with conf/MS/expects/load_savevm_loaded_master.exp on node 0. Does NOT
+# issue `savevm` over the monitor — savevm is master-only on multi-node.
 #
-# === IN-IMAGE WORKLOAD SCRIPT REFERENCE ======================================
-# One baked script lives in /home/qflex/ inside the alpine guest on this leaf.
-# It is NOT REWRITTEN — the docker run has no --cpuset-cpus and no IP arg.
-#
-# ./run_client.sh    — NOT REWRITTEN.
-#   #!/bin/sh
-#   docker run -it --name media-streaming-client \
-#       --network host \
-#       -v $(pwd)/videos:/videos xusine/media-streaming:client
-#
-# === SERVER-IP REDIRECTION (baked into the booted snapshot) ==================
-# Hammar's source HARDCODES `https://127.0.0.1/...` (warm.rs:66 in the
-# xusine/media-streaming:client image). The wait's BOOT expect installs a
-# userspace `socat TCP-LISTEN:443,bind=127.0.0.1 ... TCP:192.168.100.1:443`
-# forwarder and bakes it into the booted snapshot, so every loadvm-resumed
-# load (this script) already has the proxy live. Docker --net=host shares
-# the guest netns, so hammar inside the container hits the socat listener.
-# Nothing to do on the load side beyond bringing up eth0 for the PDES wire.
-#
-# Boot snapshot resumes at root (`#`) since the boot expect su'd to install
-# iproute2/socat. The initial `su` from previous revisions is dropped; we
-# do IP bring-up directly and drop to qflex at the end of section 2.
-#
-# TODO multi-node: hammar load is single-threaded here. Per-4-cores fan-out
-# (see ./run_multiple.sh) is a later step once the basic path works.
-# =============================================================================
+# The client is the single-node hammar flow; the ONLY change vs single-node is
+# passing SERVER_IP=192.168.100.1 to the client docker image (single-node has
+# both tiers in one guest on 127.0.0.1) and pinning to cpu 0 (leaves are -smp 1,
+# so the single-node `taskset -c 1` would reference a non-existent cpu).
 
 set timeout 900
 
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
-set BUDGET_PROMPT_S         60
-set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h client budget (hammar warm/load can take minutes-hours wall-clock under emulation)
+set BUDGET_PROMPT_S         120
+set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h client budget (hammar warm/load can take minutes-hours wall-clock under PDES)
 set BUDGET_CHECKPOINTING_S 10800
-
-set SERVER_IP "192.168.100.1"   ; # master's PDES wire IP — the only place this is set
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
@@ -58,24 +33,19 @@ if {[info exists env(GROUP_EXP_FOLDER)]} {
 } else {
     set group_folder [file dirname $exp_folder]
 }
-set master_docker_cleaned_flag "$group_folder/ms_load_master_docker_cleaned.flag"
-set wait_docker_cleaned_flag   "$group_folder/ms_load_wait_docker_cleaned.flag"
-set master_eth_done_flag       "$group_folder/ms_load_master_eth_done.flag"
-set wait_eth_done_flag         "$group_folder/ms_load_wait_eth_done.flag"
-set wire_master_flag         "$group_folder/ms_load_wire_master.flag"
-set wire_wait_flag           "$group_folder/ms_load_wire_wait.flag"
-set nc_listen_ready_flag     "$group_folder/ms_load_nc_listen_ready.flag"
-set server_ready_flag        "$group_folder/ms_load_server_ready.flag"
-set done_flag                "$group_folder/ms_load_done.flag"
-# TEMP: pooria_*_flag pair — remove with section 7.5 once multi-node load is fully working.
-set pooria_in_container_flag "$group_folder/ms_load_pooria_in_container.flag"
-set pooria_done_flag         "$group_folder/ms_load_pooria_done.flag"
-set loaded_done_flag         "$group_folder/ms_load_loaded_done.flag"
-catch {file delete -force $wait_docker_cleaned_flag}
-catch {file delete -force $wait_eth_done_flag}
+set docker_master_flag "$group_folder/ms_load_docker_master.flag"
+set docker_wait_flag   "$group_folder/ms_load_docker_wait.flag"
+set wire_master_flag   "$group_folder/ms_load_wire_master.flag"
+set wire_wait_flag     "$group_folder/ms_load_wire_wait.flag"
+set ping_master_flag   "$group_folder/ms_load_ping_master.flag"
+set ping_wait_flag     "$group_folder/ms_load_ping_wait.flag"
+set nc_ready_flag      "$group_folder/ms_load_nc_ready.flag"
+set server_ready_flag  "$group_folder/ms_load_server_ready.flag"
+set client_done_flag   "$group_folder/ms_load_client_done.flag"
+catch {file delete -force $docker_wait_flag}
 catch {file delete -force $wire_wait_flag}
-catch {file delete -force $done_flag}
-catch {file delete -force $pooria_in_container_flag}
+catch {file delete -force $ping_wait_flag}
+catch {file delete -force $client_done_flag}
 
 proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
@@ -141,7 +111,7 @@ proc wait_for_substring {path needle budget_seconds} {
     error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
 }
 
-# --- 1. Connect serial + nudge for post-loadvm prompt -----------------------
+# --- 1. Connect serial + nudge for post-loadvm prompt; su to root -----------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
 set spawn_id $serial_sid
@@ -153,46 +123,24 @@ expect {
     -re {[\$#] +}
 }
 
-sleep 10
+sleep 5
 
-# --- 1.5 Serialized docker container cleanup (after master finishes) --------
-# Boot left us at root (#), which has docker socket access. Wait for master's
-# docker cleanup sentinel, then tear down any stale containers from prior
-# runs, then signal master we're done. Keeps docker daemon I/O out of the
-# ARP/ping window that follows.
-
-puts "follower: waiting for master's $master_docker_cleaned_flag before docker cleanup..."
-wait_for_file $master_docker_cleaned_flag $BUDGET_PROMPT_S
-
-send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+send "su\r"
 expect {
-    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
+    -re {[Aa]uthentication failure|incorrect password} {
+        puts "ERROR: su rejected empty creds"; quit_qemu $monitor_port; exit 1
+    }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
 }
-send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
-expect {
-    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
 
-if {[catch {set f [open $wait_docker_cleaned_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $wait_docker_cleaned_flag: $err"; quit_qemu $monitor_port; exit 1
-}
-puts "follower: docker containers removed; wrote $wait_docker_cleaned_flag."
+# --- 2. IP bring-up on the PDES NIC (eth0 = 192.168.100.2), after master's --
 
-# --- 2. IP bring-up on the PDES NIC (eth0); drop back to qflex --------------
-# Boot already left us at the root prompt (it installed socat as root), so
-# we go straight to ip-link/addr setup with no `su`. The final `su qflex`
-# drops us back to the unprivileged shell for ping/nc/docker.
-
-# Wait for master's eth + ARP to be ready before bringing our own up —
-# serializes eth/ARP setup across nodes to prevent ping drops under
-# PDES wire pressure.
-puts "follower: waiting for master's $master_eth_done_flag before eth setup..."
-wait_for_file $master_eth_done_flag $BUDGET_PROMPT_S
-puts "follower: master eth ready; proceeding to eth setup."
-
-send "ip link show\r";                               expect -re {# +}
+wait_for_file $wire_master_flag $BUDGET_WORKLOAD_INIT_S
+# TODO: get the eth0 MAC from the experiment context (commands/config.py derives
+# it per node) instead of hard-coding 52:54:00:aa:bb:0a here.
 send "ip link set eth0 down\r";                      expect -re {# +}
 send "ip link set eth0 address 52:54:00:aa:bb:0a\r"; expect -re {# +}
 send "ip link set eth0 up\r";                        expect -re {# +}
@@ -201,182 +149,111 @@ expect {
     timeout { puts "ERROR: ip addr flush timed out"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
 }
-send "ip addr add 192.168.100.2/24 dev eth0\r";      expect -re {# +}
-send "ip addr show eth0\r";                          expect -re {# +}
-
-# Pin master's ARP entry — see load_savevm_loaded_master.exp for rationale.
-# `arp -s` works on both BusyBox and iproute2.
-send "arp -s 192.168.100.1 52:54:00:aa:bb:00\r"; expect -re {# +}
-send "arp -n 192.168.100.1\r";                   expect -re {# +}
-
-# --- 2.5 Defensive iptables flush + socat 127.0.0.1:443 -> master:443 -------
-# Hammar's URLs are hardcoded to 127.0.0.1 (warm.rs:66). Boot baked a socat
-# forwarder into the snapshot, but loadvm-resumed state under PDES isn't
-# guaranteed to keep the listener live — re-install here so the client
-# container's --net=host traffic to 127.0.0.1:443 reaches $SERVER_IP:443.
-# Must run as root (iptables + privileged port 443).
-
-send "iptables -t nat -F OUTPUT\r"; expect -re {# +}
-send "socat TCP-LISTEN:443,bind=127.0.0.1,reuseaddr,fork TCP:$SERVER_IP:443 &\r"
-expect -re {# +}
-sleep 2
-
-send "ss -tln | grep 127.0.0.1:443\r"
-expect {
-    timeout { puts "ERROR: ss didn't return after socat verify"; quit_qemu $monitor_port; exit 1 }
-    -re {127\.0\.0\.1:443} { puts "follower: socat listening on 127.0.0.1:443 -> $SERVER_IP:443" }
-}
-expect -re {# +}
-sleep 5
-
-# --- 2.6 Eth-setup serialization sentinel -----------------------------------
-# Follower eth + socat ready. Tell master, so master can run its ping.
-if {[catch {set f [open $wait_eth_done_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $wait_eth_done_flag: $err"; quit_qemu $monitor_port; exit 1
-}
-puts "follower: eth + socat ready; wrote $wait_eth_done_flag."
-
-send "su qflex\r";                                   expect -re {\$ +}
-
-# Wait for master's ping to finish before we start ours — serializes the two
-# pings so they don't race on PDES wire / ARP cache.
-puts "follower: waiting for master's $wire_master_flag (ping done) before pinging..."
-wait_for_file $wire_master_flag $BUDGET_PROMPT_S
-puts "follower: master ping done; proceeding to our ping."
-
-sleep 5
-
-# --- 3a. Direct wire ping (192.168.100.1, traverses eth0 -> PDES -> master) -
-
-send "ping $SERVER_IP -i 0.5 -c 10\r"
-set timeout 120
-expect {
-    timeout { puts "ERROR: direct ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
-    -re {(\d+) packets transmitted, (\d+)[ ,]} {
-        set tx $expect_out(1,string); set rx $expect_out(2,string)
-        puts "follower: direct wire ping -> $tx transmitted, $rx received"
-        if {$tx != $rx} {
-            puts "ERROR: direct ping drops detected (tx=$tx rx=$rx); aborting"
-            quit_qemu $monitor_port; exit 1
-        }
-    }
-}
-set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {[\$#] +} }
-
-sleep 2
-
-# --- 3b. Localhost ping (loopback sanity — ICMP can't traverse socat) -------
-# Note: socat only forwards TCP, so this is loopback only — it can't actually
-# exercise the redirector. Kept for parity with the hello world test below
-# (both "via localhost") and as a baseline sanity check on the local lo path.
-
-send "ping 127.0.0.1 -i 0.5 -c 5\r"
-set timeout 60
-expect {
-    timeout { puts "ERROR: localhost ping summary didn't arrive"; quit_qemu $monitor_port; exit 1 }
-    -re {(\d+) packets transmitted, (\d+)[ ,]} {
-        set tx $expect_out(1,string); set rx $expect_out(2,string)
-        puts "follower: localhost ping -> $tx transmitted, $rx received"
-        if {$tx != $rx} {
-            puts "ERROR: localhost ping drops (tx=$tx rx=$rx) — loopback broken"
-            quit_qemu $monitor_port; exit 1
-        }
-    }
-}
-set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {[\$#] +} }
-
-sleep 5
-
-# --- 4. Wire-ready handshake ------------------------------------------------
+send "ip addr add 192.168.100.2/24 dev eth0\r";   expect -re {# +}
+send "ip addr show eth0\r";                        expect -re {# +}
 
 if {[catch {set f [open $wire_wait_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $wire_wait_flag: $err"; quit_qemu $monitor_port; exit 1
 }
-puts "follower: wire verified; wrote $wire_wait_flag; waiting for $wire_master_flag..."
-wait_for_file $wire_master_flag $BUDGET_PROMPT_S
+puts "follower: eth0 up at 192.168.100.2; wrote $wire_wait_flag."
 
-# --- 5. nc data-path preflight via socat redirect ---------------------------
-# Hello world goes to 127.0.0.1:443 (NOT $SERVER_IP) so socat actually has to
-# forward the bytes through the PDES wire to master. Master's nc -l -p 443
-# (section 5 of load_savevm_loaded_master.exp) receives the bytes — same
-# data, but now travelling the full follower -> socat -> wire -> master
-# path, i.e. exactly what hammar will do later.
-puts "follower: waiting for master's nc listener ($nc_listen_ready_flag)..."
-wait_for_file $nc_listen_ready_flag $BUDGET_PROMPT_S
-# -w 5 = nc closes 5s after last byte; needs budget for redirected SYN/SYN-ACK
-# + data + master FIN under PDES virtual time.
-send "echo 'Hello from VM2!' | nc -w 5 127.0.0.1 443\r"
+# --- 3. Ping verify the wire to master, AFTER master's ping (0-drop) --------
+# Serialised: wait for master to finish its ping ($ping_master_flag) before we
+# ping, then signal our ping done ($ping_wait_flag) so master continues.
+
+wait_for_file $ping_master_flag $BUDGET_WORKLOAD_INIT_S
+send "ping 192.168.100.1 -i 0.05 -W 100 -c 10\r"
+set timeout 150
+expect {
+    timeout { puts "ERROR: ping summary didn't arrive within 150s"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        set tx $expect_out(1,string); set rx $expect_out(2,string)
+        puts "follower: ping summary -> $tx transmitted, $rx received"
+        if {$tx != $rx} {
+            puts "ERROR: ping drops detected (tx=$tx rx=$rx); aborting"
+            quit_qemu $monitor_port; exit 1
+        }
+    }
+}
 set timeout $BUDGET_PROMPT_S
 expect {
-    timeout { puts "ERROR: nc send timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    timeout { puts "WARN: prompt didn't return after ping summary; continuing" }
+    -re {# +}
 }
-puts "follower: sent 'Hello from VM2!' to 127.0.0.1:443 (via socat -> $SERVER_IP:443)."
 
-# --- 6. Wait for master's nginx to be ready --------------------------------
+if {[catch {set f [open $ping_wait_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $ping_wait_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "follower: ping OK; wrote $ping_wait_flag; continuing to docker cleanup."
 
-puts "follower: waiting for $server_ready_flag..."
+# --- 4. Clear leftover containers + rendezvous ------------------------------
+
+send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+
+if {[catch {set f [open $docker_wait_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $docker_wait_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "follower: docker cleared; wrote $docker_wait_flag; waiting for $docker_master_flag..."
+wait_for_file $docker_master_flag $BUDGET_WORKLOAD_INIT_S
+
+# --- 5. nc data-path: send a token, Ctrl-C our nc, then wait for the server -
+# Wait for nc_ready, sleep 10s HOST wall-clock (bind is a fast local syscall) then
+# send. Ctrl-C our own nc right after so our shell is free regardless of when the
+# connection closes (busybox nc would otherwise hold it for -w GUEST seconds).
+
+wait_for_file $nc_ready_flag $BUDGET_WORKLOAD_INIT_S
+sleep 10
+send "echo 'hello world' | nc -w 10 192.168.100.1 443\r"
+sleep 5
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {# +} }
+puts "follower: sent 'hello world' and freed nc; waiting for server-ready..."
+
+# --- 6. Wait for master to bring the server up ------------------------------
+
 wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
-puts "follower: master's server-ready signal received; launching client container."
+puts "follower: server is up; launching client (SERVER_IP=192.168.100.1)."
 
-# Docker cleanup already done in section 1.5 (before eth setup).
+# --- 7. Client (no tmux, on serial). Same as single-node hammar flow, but the
+# docker image is given SERVER_IP=192.168.100.1 and hammar is pinned to cpu 0.
 
-# --- 7. Enter client container + run hammar warm + hammar load -------------
-# Hammar URLs are hardcoded to 127.0.0.1; the boot-baked socat listener on
-# 127.0.0.1:443 forwards transparently to $SERVER_IP:443. taskset -c 0
-# because this leaf is 1 vCPU (no doubled_vcpu in multi-node).
-
-send "./run_client.sh\r"
+send "docker run -it --name media-streaming-client --network host -v \$(pwd)/videos:/videos xusine/media-streaming:client 192.168.100.1\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: client container prompt didn't arrive"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: client container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
     -re {root@qflex:/#}
 }
-puts "follower: inside client container; sanity-check hammar..."
+puts "follower: client container at root shell; sanity 'ls' for hammar..."
 
 send "ls\r"
 set timeout $BUDGET_PROMPT_S
 expect {
-    timeout { puts "ERROR: ls didn't return"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: ls didn't show hammar"; quit_qemu $monitor_port; exit 1 }
     -re {hammar}
 }
-expect {
-    timeout { }
-    -re {root@qflex:/#}
-}
+expect { timeout { } -re {root@qflex:/#} }
 puts "follower: hammar present; dispatching warm..."
-
-# --- 7.5 pooria-load-test handshake -----------------------------------------
-# TEMP: remove (along with master's section 8.5 and the pooria_*_flag defs
-# at the top of this file) once multi-node MS load is fully working.
-# Signal master we're inside the container at hammar prompt; wait for master
-# to finalise savevm pooria-load-test before pushing hammar's load. After the
-# savevm drain, settle 10s before hitting the wire hard.
-
-if {[catch {set f [open $pooria_in_container_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $pooria_in_container_flag: $err"
-    quit_qemu $monitor_port; exit 1
-}
-puts "follower: wrote $pooria_in_container_flag; waiting for $pooria_done_flag..."
-wait_for_file $pooria_done_flag $BUDGET_CHECKPOINTING_S
-puts "follower: pooria-load-test savevm complete; settling 10s before hammar warm..."
-sleep 10
 
 send "taskset -c 0 ./hammar/target/release/warm ./videos 1\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: warm didn't produce 'Compressed history:'"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: warm didn't print 'Compressed history:'"; quit_qemu $monitor_port; exit 1 }
     -re {Compressed history:}
 }
 puts "follower: warm done; settling 5s before load..."
 sleep 5
 set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { }
-    -re {root@qflex:/#}
-}
+expect { timeout { } -re {root@qflex:/#} }
 
 send "taskset -c 0 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
@@ -384,24 +261,17 @@ expect {
     timeout { puts "ERROR: hammar load didn't print 'All tasks are created.'"; quit_qemu $monitor_port; exit 1 }
     -re {All tasks are created\.}
 }
-puts "follower: hammar load reported tasks created; settling 5s..."
-sleep 5
+puts "follower: tasks created; client load done."
 
-# --- 8. Signal master that load is done ------------------------------------
-
-if {[catch {set f [open $done_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $done_flag: $err"; quit_qemu $monitor_port; exit 1
+if {[catch {set f [open $client_done_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $client_done_flag: $err"; quit_qemu $monitor_port; exit 1
 }
-puts "follower: wrote $done_flag; waiting for master's $loaded_done_flag..."
+puts "follower: wrote $client_done_flag; waiting for own 'savevm log 7' in Load.log..."
 
-# --- 9. Wait for master's savevm-loaded marker + 60s settle ----------------
-# Gating on loaded_done_flag (written by master after `savevm loaded` returns)
-# instead of `savevm log 7` in our own Load.log, because the TEMP section 7.5
-# already produced one `savevm log 7` for pooria-load-test — wait_for_substring
-# returns on first match and would fire prematurely.
+# --- 8. Wait for own per-node savevm log 7 + 60s settle --------------------
 
-wait_for_file $loaded_done_flag $BUDGET_CHECKPOINTING_S
-puts "follower: master reported savevm loaded complete. Sleeping 60s..."
+wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "follower: saw 'savevm log 7' — per-node savevm finalised. Sleeping 60s..."
 sleep 60
 
 quit_qemu $monitor_port

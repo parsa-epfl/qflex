@@ -129,58 +129,6 @@ expect {
 
 sleep 5
 
-# --- 1.5 Bake internet + socat localhost->master forwarder into snapshot ----
-# Runs BEFORE ms_boot_wait_login.flag so master's savevm booted waits until
-# socat is live. Everything stays in the guest's kernel/process state, so
-# loadvm-resumed phases inherit a working 127.0.0.1:443 -> $SERVER_IP:443
-# proxy with no per-run setup race. Stays at `#` (root) for the rest of the
-# boot expect.
-
-set SERVER_IP "192.168.100.1"
-
-send "su\r"
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
-    -re {[Aa]uthentication failure|incorrect password} { puts "ERROR: su rejected empty creds"; quit_qemu $monitor_port; exit 1 }
-    -re {[Ll]ogin: }    { send "\r"; exp_continue }
-    -re {[Pp]assword: } { send "\r"; exp_continue }
-    -re {# +}
-}
-
-send "ip link set eth1 up\r"; expect -re {# +}
-send "udhcpc -i eth1\r";       expect -re {# +}
-
-send "echo 'nameserver 10.0.2.3' > /etc/resolv.conf\r";  expect -re {# +}
-send "echo 'nameserver 8.8.8.8'  >> /etc/resolv.conf\r"; expect -re {# +}
-
-set timeout $BUDGET_BOOT_LOGIN_S
-send "apk add iproute2\r"
-expect {
-    timeout { puts "ERROR: apk add iproute2 timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
-}
-send "apk add socat\r"
-expect {
-    timeout { puts "ERROR: apk add socat timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
-}
-
-set timeout $BUDGET_PROMPT_S
-send "iptables -t nat -F OUTPUT\r"; expect -re {# +}
-
-send "socat TCP-LISTEN:443,bind=127.0.0.1,reuseaddr,fork TCP:$SERVER_IP:443 &\r"
-expect -re {# +}
-sleep 2
-
-send "ss -tln | grep 127.0.0.1:443\r"
-expect {
-    timeout { puts "ERROR: ss didn't return after socat verify"; quit_qemu $monitor_port; exit 1 }
-    -re {127\.0\.0\.1:443} { puts "follower: socat listening on 127.0.0.1:443 -> $SERVER_IP:443" }
-}
-expect -re {# +}
-sleep 5
-
 # --- 2. Sentinel handshake: announce we're at shell, wait for master --------
 
 if {[catch {set f [open $wait_login_flag "w"]; close $f} err]} {

@@ -429,6 +429,8 @@ class ExperimentContext(BaseModel):
 
                 sync = self.syncs_list[i]
                 latency_ns = self.latencies_ns_list[i]
+                # TODO: expose this derived MAC to interaction_script (e.g. an env var)
+                # so expect scripts don't hard-code 52:54:00:aa:bb:<node*10+i>.
                 mac_address = f"mac=52:54:00:aa:bb:{self.node_number * 10 + i:02x}"
                 if net_dev == 'e1000':
                     dev = f" -device e1000,netdev=net{i},{mac_address} "

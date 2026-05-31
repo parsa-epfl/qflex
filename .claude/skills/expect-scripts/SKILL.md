@@ -165,6 +165,28 @@ networking config.
 Skip the rule only when the user says "this guest must have no internet"
 or names a specific NIC / DNS server (in which case substitute).
 
+## The guest is Alpine; its containers are Debian — `apk` outside, `apt` inside
+
+Two different package managers, two different network prerequisites:
+
+- **Inside QEMU you're in Alpine Linux** (busybox + `apk`). To use a tool the
+  base image doesn't ship (`iproute2` for `ss`, `socat`, `iptables`, …) you must
+  first bring the internet NIC up and lease it — `ip link set eth1 up; udhcpc -i
+  eth1` (eth1 = the e1000 NAT at PCI 0x11; see the internet section above) — then
+  `apk add <pkg>`. Do this in **boot**, so the tool is baked into the snapshot;
+  installing at load time is slow under PDES and may have no egress on that leaf.
+- **Don't assume a tool exists across nodes.** The per-node boot scripts differ,
+  so a package `apk add`-ed on the follower is NOT on the master. Concrete case:
+  the MS boot *follower* installs `iproute2`, the *master* doesn't — so `ss` is
+  absent on node 0, and a load-time `ss` probe there silently fails. Prefer a
+  busybox built-in / procfs / a tool-free handshake (a `nc_ready` flag + a
+  host-clock `sleep`) over probing with a tool one node lacks.
+- **Inside a docker container running in the guest you are NOT in Alpine.** The
+  cloudsuite / xusine images are Debian/Ubuntu-based, so to add something there
+  use `apt-get update && apt-get install -y <pkg>` (and the container needs its
+  own egress — it shares the guest's `--net host`, so the eth1 lease above must
+  already work).
+
 ## Outer `set timeout` does NOT bound Tcl while/sleep loops
 
 Expect's `set timeout 900` only fires inside an `expect { … }` block. A bare Tcl `while {true}` with `sleep 2` between iterations is not affected by it. Same for `wait_for_savevm_done`-style file-watching loops. Without a separate wall-clock deadline, a polling loop spins forever the moment its target transitions from "not yet alive" to "dead" — e.g. you're polling QEMU's monitor port via telnet, a peer process kills QEMU, every subsequent attempt gets `Connection refused`, and the loop keeps retrying.
@@ -323,8 +345,28 @@ Pick one of:
 * **Throttle every loop** that talks to the peer over the PDES NIC. The `urandom→nc→cmp` sender in `loaded_test_verify_and_swap_workload.exp` has `sleep 1` between iterations — without it, the WWT race fires within seconds of workload start.
 * **Don't leave a `ping -i 0.001 -c 1000000` running across savevm/loadvm.** When the snapshot is later loaded, the ping process resumes and immediately starts blasting the wire — the WWT race fires before any test logic can step in. The load script `pkill`s any leftover ping as its very first action post-loadvm; mirror that pattern in any script that loads a snapshot known to contain a fast pinger.
 * **The peer-ping verification at script start should also be slow.** Ten packets at 100ms is enough to confirm "the wire works"; 100 at 1ms is a race trigger.
+* **ALWAYS pass `-W <timeout>` (e.g. `-W 100`) on a verification ping**, and gate 0-drop on it. The inter-node wire is a *simulated* link: under PDES the one-way `latencyns` plus the icount/Flexus slowdown makes real RTTs hundreds of ms to several seconds (observed 1.5s+, with spikes). `ping`'s default per-packet reply window (~1s) then counts a perfectly-good-but-slow reply as a drop, and your `tx != rx` check aborts a healthy wire. A large `-W` (we use 100s) gives each echo a generous reply window so only a genuinely dead wire fails. The canonical verification ping is therefore `ping <peer> -i 0.5 -W 100 -c 10` — slow interval (no WWT burst), generous reply window (no false drop), small count (fast enough). Size the surrounding `expect` timeout above `-W` (a single slow packet can defer the summary by ~`-W` seconds — e.g. `set timeout 150` for `-W 100`).
 
 This is a real qemu-pdes bug under heavy load — out of scope to fix from an expect script, but the script can avoid triggering it.
+
+## sync=false can drop cross-node packets — raise latency to go fast, don't disable sync
+
+The opposite knob from the burst race above. Turning sync off (`syncs_list:
+["false"]`) lets the two nodes' virtual clocks drift apart, so a packet can
+arrive stamped *in the past* relative to the receiver's virtual now and get
+dropped. Symptom: `ping` shows loss (or 100% loss) and your 0-drop check aborts a
+wire that is otherwise fine — even though the same wire works with sync on. So:
+
+- **If a phase must reliably exchange packets** (the ping/nc verification, the
+  workload itself), keep `syncs_list: ["true"]`.
+- **If you want it to run faster** (the `MSG_TYPE_SYNC` exchange every quantum is
+  overhead), don't reach for `sync=false` — instead **raise the per-link
+  `latencyns`**. A larger wire latency gives each sender's timestamp enough
+  headroom to stay ahead of the receiver's virtual now, so packets land in the
+  future (delivered) rather than the past (dropped). Multi-node `boot` uses this
+  exact trick: `latencies_ns_list: [1000000]` (1 ms) so it can run `sync=false`
+  during pure bring-up; simulation phases keep `sync=true` at 100 µs. If you see
+  ping drops under `sync=false`, bump the latency before you suspect the NIC.
 
 ## Both nodes must exit, or the test hangs forever
 
@@ -433,6 +475,94 @@ proc quit_qemu {monitor_port} {
 ```
 
 The bash wrapper that's `wait`-ing on this script should never sit there for extra minutes after the captures are written. If you find yourself adding a `sleep N` before `quit_qemu` to "give siblings time to finish", question whether you're working around a missing short-circuit somewhere else — usually the right fix is to make the cleanup path silently return when the resource is gone, not to globally pad with seconds.
+
+## A "ready" sentinel must mean the resource is ready, not "about to set it up"
+
+A sentinel that one node writes and the other waits on is only correct if it's
+written **after** the thing it announces is genuinely usable. The classic bug:
+writing the flag right before a blocking command that brings the resource up.
+The flag write is an instant host-side `open`; the guest command that actually
+binds/listens/starts runs *later* (and under PDES `sync` the guest is orders of
+magnitude slower than wall-clock), so the peer races ahead and acts before the
+resource exists.
+
+Concrete example (MS multi-node load nc preflight). Master had:
+
+```tcl
+open $nc_ready_flag w        ;# instant — host side
+send "nc -l -p 443\r"        ;# guest binds the socket SECONDS later, under PDES
+expect { -re {hello world} timeout {abort} }
+```
+
+Follower waited on `nc_ready`, then `echo 'hello world' | nc -w 2 192.168.100.1 443`.
+The flag appeared before the listener was bound; the follower's connect (RTT
+~1.3 s on this wire) hit a closed port and the token was lost; master sat 60 s
+and aborted, peer-killing the follower. Looks like a coordination bug — it was a
+*premature-ready* bug.
+
+Fix pattern (the simple, robust one). Binding a listen socket is a **local
+syscall** — it does NOT touch the PDES wire, so it completes in a couple of
+wall-clock seconds even under sync. So: master writes the flag *before* starting
+the listener, and the peer, on seeing the flag, **sleeps a host-clock interval
+(Tcl `sleep`, never a guest `sleep`) before connecting** — long enough to cover
+the bind, short because the bind is fast:
+
+```tcl
+# master
+open $nc_ready_flag w
+send "nc -l -p 443\r"          ;# foreground; expect the token next
+expect { -re {hello world} timeout {abort} }
+send "\003"                     ;# Ctrl-C the listener NOW — see caveat below
+expect { -re {# +} timeout { } }
+
+# follower
+wait_for_file $nc_ready_flag $BUDGET_WORKLOAD_INIT_S
+sleep 10                        ;# HOST wall-clock — bind is a fast local syscall
+send "echo 'hello world' | nc -w 10 192.168.100.1 443\r"
+```
+
+**Don't wait for a foreground listener to exit on its own** after the token
+arrives — `nc -l` only returns once the connection closes, and the peer's
+`nc -w 10` timeout is **guest** seconds (minutes of wall-clock under PDES sync),
+so both nodes stall (master waiting for its prompt, follower waiting for the next
+flag). `\003` kills the listener immediately *and* RSTs the peer's `nc` so it
+returns too. Same class as the `sleep` gotcha at the top: any guest-side timeout
+(`nc -w`, a blocking read, `sleep`) is guest time — kill the waiter explicitly,
+don't time it out.
+
+Don't reach for a tool-based probe (`ss`/`netstat`) to "confirm bound" — the
+images differ per node (see the Alpine/apk section below: the boot *follower*
+installs iproute2 but the *master* doesn't, so `ss` isn't even on node 0). A
+fixed host-clock `sleep` after a truthful "I'm starting it now" flag needs no
+tool and no wire. Give the peer's connect a real window too (`-w 10`, not `-w 2`)
+when the wire RTT is ~1 s. Same rule applies to socat, a server's listen port, a
+tmux pane that must exist, a file the peer reads.
+
+## After wiring any sentinel handshake, trace the whole flow for deadlock / livelock
+
+Writing the `open`/`wait_for_file` pairs is the easy half. Before you run, walk
+the two scripts **side by side, top to bottom**, and for every wait answer three
+questions:
+
+1. **Who writes the flag I'm waiting on, and have they reached that line by the
+   time I block?** A waits for B's flag, B waits for A's flag, and neither writes
+   before waiting ⇒ deadlock. Order it so the awaited write always *precedes* the
+   wait on the writer's side (master writes `wire_master` **then** waits
+   `wire_wait`; follower waits `wire_master` **then** writes `wire_wait`).
+2. **Does the flag mean the resource is actually ready** (see the premature-ready
+   section above), or just "about to be"? A truthful-looking flag that fires
+   early is a livelock/abort waiting to happen — the peer acts, fails silently,
+   and someone times out.
+3. **On every error/abort path, does this leaf still let the peer make progress
+   or die?** If A aborts mid-handshake without `quit_qemu`, B blocks on a flag
+   that will never be written for the full outer timeout. Every `exit 1` needs
+   `quit_qemu` first so the peer-kill can fire.
+
+Short worked example from this repo: the MS load nc bug above was a #2 failure
+(flag written before the listener bound) that *manifested* as a #3 symptom
+(master aborts, peer-killed the follower) — and a quick side-by-side read of
+"who's bound when the flag is written" is exactly what surfaces it before a
+30-minute hung run does. Do this audit every time you add or move a sentinel.
 
 ## Diagnosing a stuck or failed expect run: three logs tell the truth
 

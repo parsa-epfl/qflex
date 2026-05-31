@@ -1,42 +1,20 @@
 #!/usr/bin/env expect
-# MULTI-NODE MASTER (node_number == 0) MS load. Loads from `booted`, brings
-# up the PDES NIC, ping-verifies the wire to the follower (0-drop required),
-# does an nc data-path preflight on port 443 (nginx's real listen port —
-# privileged, so the preflight runs as root), then launches an in-guest
-# detached tmux session with ONE window for the cloudsuite/media-streaming
-# server (nginx in docker, foregrounded by `nginx -g 'daemon off;'`).
-# Signals follower when nginx is up, waits for follower's "tasks created"
-# sentinel, then `savevm loaded` via the monitor and quits.
+# MULTI-NODE MASTER (node_number == 0) MS load. Loads from `booted`, brings up
+# the PDES NIC (eth0 = 192.168.100.1), ping- and nc-verifies the wire to the
+# follower, then runs the cloudsuite media-streaming server (nginx) in a single
+# tmux window, signals the follower to start its client, waits for the client to
+# finish, and `savevm loaded` via the monitor.
 #
-# Pair with conf/MS/expects/load_savevm_loaded_wait.exp on the follower.
-#
-# === IN-IMAGE WORKLOAD SCRIPT REFERENCE ======================================
-# One baked script lives in /home/qflex/ inside the alpine guest on this leaf,
-# and is NOT REWRITTEN. The container's nginx binds 0.0.0.0:443 under
-# --net=host so 192.168.100.1:443 is reachable from the follower's wire IP
-# without any docker-side IP plumbing.
-#
-# ./run_server.sh    — NOT REWRITTEN.
-#   #!/bin/sh
-#   docker run -it --rm \
-#       -v $(pwd)/videos:/videos \
-#       -v $(pwd)/entrypoint.sh:/etc/entrypoint.sh \
-#       --cpuset-cpus=0 \
-#       --entrypoint=bash \
-#       --net host cloudsuite/media-streaming:server
-#
-# ./etc/entrypoint.sh — inside the server container; NOT REWRITTEN.
-#   Generates an SSL cert (last output: `-----` from openssl), patches
-#   nginx.conf worker_connections + access_log, then `nginx -g 'daemon off;'`
-#   (foregrounded; never returns). The `-----` marker is the "ready" gate.
-# =============================================================================
+# Pair with conf/MS/expects/load_savevm_loaded_wait.exp on the follower. PDES
+# `savevm` is a distributed snapshot — only the master issues it; the follower
+# just polls its own Load.log for `savevm log 7`.
 
 set timeout 900
 
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
-set BUDGET_PROMPT_S         60
-set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h: server init + waiting for follower's hammar load (can be many hours under PDES)
+set BUDGET_PROMPT_S          120
+set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h: server init + waiting for follower's client (can be many hours under PDES)
 set BUDGET_CHECKPOINTING_S 10800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
@@ -51,26 +29,20 @@ if {[info exists env(GROUP_EXP_FOLDER)]} {
 } else {
     set group_folder [file dirname $exp_folder]
 }
-set master_docker_cleaned_flag "$group_folder/ms_load_master_docker_cleaned.flag"
-set wait_docker_cleaned_flag   "$group_folder/ms_load_wait_docker_cleaned.flag"
-set master_eth_done_flag       "$group_folder/ms_load_master_eth_done.flag"
-set wait_eth_done_flag         "$group_folder/ms_load_wait_eth_done.flag"
-set wire_master_flag         "$group_folder/ms_load_wire_master.flag"
-set wire_wait_flag           "$group_folder/ms_load_wire_wait.flag"
-set nc_listen_ready_flag     "$group_folder/ms_load_nc_listen_ready.flag"
-set server_ready_flag        "$group_folder/ms_load_server_ready.flag"
-set done_flag                "$group_folder/ms_load_done.flag"
-# TEMP: pooria_*_flag pair — remove with section 8.5 once multi-node load is fully working.
-set pooria_in_container_flag "$group_folder/ms_load_pooria_in_container.flag"
-set pooria_done_flag         "$group_folder/ms_load_pooria_done.flag"
-set loaded_done_flag         "$group_folder/ms_load_loaded_done.flag"
-catch {file delete -force $master_docker_cleaned_flag}
-catch {file delete -force $master_eth_done_flag}
+set docker_master_flag "$group_folder/ms_load_docker_master.flag"
+set docker_wait_flag   "$group_folder/ms_load_docker_wait.flag"
+set wire_master_flag   "$group_folder/ms_load_wire_master.flag"
+set wire_wait_flag     "$group_folder/ms_load_wire_wait.flag"
+set ping_master_flag   "$group_folder/ms_load_ping_master.flag"
+set ping_wait_flag     "$group_folder/ms_load_ping_wait.flag"
+set nc_ready_flag      "$group_folder/ms_load_nc_ready.flag"
+set server_ready_flag  "$group_folder/ms_load_server_ready.flag"
+set client_done_flag   "$group_folder/ms_load_client_done.flag"
+catch {file delete -force $docker_master_flag}
 catch {file delete -force $wire_master_flag}
-catch {file delete -force $nc_listen_ready_flag}
+catch {file delete -force $ping_master_flag}
+catch {file delete -force $nc_ready_flag}
 catch {file delete -force $server_ready_flag}
-catch {file delete -force $pooria_done_flag}
-catch {file delete -force $loaded_done_flag}
 
 proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
@@ -136,6 +108,7 @@ proc wait_for_substring {path needle budget_seconds} {
     error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
 }
 
+# Poll a tmux pane for a literal substring, fail-fast on bash syntax errors.
 proc wait_for_pane_substring {session window needle budget_seconds} {
     global timeout
     set saved_timeout $timeout
@@ -161,7 +134,7 @@ proc wait_for_pane_substring {session window needle budget_seconds} {
     error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
 }
 
-# --- 1. Connect serial + nudge for post-loadvm prompt -----------------------
+# --- 1. Connect serial + nudge for post-loadvm prompt; su to root -----------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
 set spawn_id $serial_sid
@@ -173,37 +146,9 @@ expect {
     -re {[\$#] +}
 }
 
-sleep 10
-
-# --- 1.5 Serialized docker container cleanup (master first, then follower) --
-# Runs as qflex (member of docker group) before anything else: stale containers
-# from previous runs are torn down on master, then on the follower, then both
-# proceed to eth setup. Doing this before eth setup keeps docker daemon I/O
-# off the wire during the ARP/ping sensitive window.
-
-send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
-expect {
-    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
-expect {
-    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-
-if {[catch {set f [open $master_docker_cleaned_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $master_docker_cleaned_flag: $err"; quit_qemu $monitor_port; exit 1
-}
-puts "master: docker containers removed; wrote $master_docker_cleaned_flag; waiting for $wait_docker_cleaned_flag..."
-wait_for_file $wait_docker_cleaned_flag $BUDGET_PROMPT_S
-puts "master: follower docker also cleaned; proceeding to eth setup."
-
-# --- 2. IP bring-up on the PDES NIC (eth0). STAY ROOT for the nc preflight on
-# port 443 (privileged); su qflex happens after section 5.
+sleep 5
 
 send "su\r"
-set timeout $BUDGET_PROMPT_S
 expect {
     timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
     -re {[Aa]uthentication failure|incorrect password} {
@@ -213,7 +158,10 @@ expect {
     -re {[Pp]assword: } { send "\r"; exp_continue }
     -re {# +}
 }
-send "ip link show\r";                               expect -re {# +}
+
+# --- 2. IP bring-up on the PDES NIC (eth0 = 192.168.100.1) ------------------
+# TODO: get the eth0 MAC from the experiment context (commands/config.py derives
+# it per node) instead of hard-coding 52:54:00:aa:bb:00 here.
 send "ip link set eth0 down\r";                      expect -re {# +}
 send "ip link set eth0 address 52:54:00:aa:bb:00\r"; expect -re {# +}
 send "ip link set eth0 up\r";                        expect -re {# +}
@@ -222,36 +170,23 @@ expect {
     timeout { puts "ERROR: ip addr flush timed out"; quit_qemu $monitor_port; exit 1 }
     -re {# +}
 }
-send "ip addr add 192.168.100.1/24 dev eth0\r";      expect -re {# +}
-send "ip addr show eth0\r";                          expect -re {# +}
+send "ip addr add 192.168.100.1/24 dev eth0\r";   expect -re {# +}
+send "ip addr show eth0\r";                        expect -re {# +}
 
-# Pin follower's ARP entry — `arp -s` sets a static (NUD_PERMANENT)
-# entry; the kernel never re-probes or demotes it to FAILED under PDES
-# wire pressure. Use `arp -s` (not `ip neigh add`) because master's
-# alpine still runs BusyBox `ip`, which doesn't implement `ip neigh add`.
-send "arp -s 192.168.100.2 52:54:00:aa:bb:0a\r"; expect -re {# +}
-send "arp -n 192.168.100.2\r";                   expect -re {# +}
-
-# --- 2.6 Eth-setup serialization sentinel -----------------------------------
-# Master eth + ARP ready. Signal follower to start its eth setup, then wait
-# for follower's "eth done" before pinging. Prevents ARP / link-state races
-# that cause random ping drops under PDES wire pressure.
-
-if {[catch {set f [open $master_eth_done_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $master_eth_done_flag: $err"; quit_qemu $monitor_port; exit 1
+if {[catch {set f [open $wire_master_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $wire_master_flag: $err"; quit_qemu $monitor_port; exit 1
 }
-puts "master: eth ready; wrote $master_eth_done_flag; waiting for $wait_eth_done_flag..."
-wait_for_file $wait_eth_done_flag $BUDGET_PROMPT_S
-puts "master: follower eth ready; proceeding to ping."
+puts "master: eth0 up at 192.168.100.1; wrote $wire_master_flag; waiting for $wire_wait_flag..."
+wait_for_file $wire_wait_flag $BUDGET_PROMPT_S
 
-sleep 5
+# --- 3. Ping verify the wire to follower FIRST (0-drop required) ------------
+# Serialised: master pings while the follower waits ($ping_master_flag), then
+# the follower pings while the master waits ($ping_wait_flag) — no overlap.
 
-# --- 3. Ping verify the wire to follower (0-drop required) ------------------
-
-send "ping 192.168.100.2 -i 0.5 -c 10\r"
-set timeout 120
+send "ping 192.168.100.2 -i 0.05 -W 100 -c 10\r"
+set timeout 150
 expect {
-    timeout { puts "ERROR: ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: ping summary didn't arrive within 150s"; quit_qemu $monitor_port; exit 1 }
     -re {(\d+) packets transmitted, (\d+)[ ,]} {
         set tx $expect_out(1,string); set rx $expect_out(2,string)
         puts "master: ping summary -> $tx transmitted, $rx received"
@@ -267,119 +202,108 @@ expect {
     -re {# +}
 }
 
-sleep 5
-
-# --- 4. Wire-ready handshake ------------------------------------------------
-
-if {[catch {set f [open $wire_master_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $wire_master_flag: $err"; quit_qemu $monitor_port; exit 1
+if {[catch {set f [open $ping_master_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $ping_master_flag: $err"; quit_qemu $monitor_port; exit 1
 }
-puts "master: wire verified; wrote $wire_master_flag; waiting for $wire_wait_flag..."
-wait_for_file $wire_wait_flag $BUDGET_PROMPT_S
-puts "master: both wires verified; running nc data-path preflight on :443."
+puts "master: ping OK; wrote $ping_master_flag; waiting for follower's ping ($ping_wait_flag)..."
+wait_for_file $ping_wait_flag $BUDGET_WORKLOAD_INIT_S
+puts "master: follower's ping done; continuing to docker cleanup."
 
-# --- 5. nc data-path preflight on the real benchmark port (443) -------------
-# Hammar connects to nginx over TCP/443. nc -l on 443 is privileged so this
-# runs while we're still root. The follower (still qflex) connects in via its
-# own socat redirector (127.0.0.1:443 -> 192.168.100.1:443), so a successful
-# receive here proves the FULL follower->socat->wire->master path is alive,
-# end to end, without hammar in the loop.
-if {[catch {set f [open $nc_listen_ready_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $nc_listen_ready_flag: $err"; quit_qemu $monitor_port; exit 1
+# --- 4. Clear leftover containers + rendezvous ------------------------------
+
+send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
 }
-puts "master: nc listener coming up on :443 (as root); wrote $nc_listen_ready_flag; waiting for token..."
+send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
+expect {
+    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+
+if {[catch {set f [open $docker_master_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $docker_master_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: docker cleared; wrote $docker_master_flag; waiting for $docker_wait_flag..."
+wait_for_file $docker_wait_flag $BUDGET_WORKLOAD_INIT_S
+
+# --- 5. nc data-path preflight on :443 ---------------------------------------
+# Write nc_ready BEFORE starting the listener; the follower waits on it then
+# sleeps 10s HOST-time (binding is a fast local syscall) before sending, so no race.
+if {[catch {set f [open $nc_ready_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $nc_ready_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: wrote $nc_ready_flag; bringing up nc listener on :443; waiting for token..."
 send "nc -l -p 443\r"
-set timeout $BUDGET_PROMPT_S
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: nc preflight: no token on :443 (TCP path broken)"; quit_qemu $monitor_port; exit 1 }
-    -re {Hello from VM2} { puts "master: nc preflight OK -- received 'Hello from VM2!' over :443" }
+    -re {hello world} { puts "master: nc preflight OK -- received 'hello world' over :443" }
 }
+# Ctrl-C the foreground nc NOW — frees the shell instantly (don't wait for the
+# connection to close; the follower's `-w` is GUEST seconds = minutes under PDES).
 send "\003"
+set timeout $BUDGET_PROMPT_S
+send "\r"
 expect { timeout { } -re {# +} }
-sleep 2
+puts "master: token received; starting media-streaming server."
 
-# --- 6. Drop to qflex (docker cleanup already done in section 1.5) ----------
-
-send "su qflex\r"
-expect {
-    timeout { puts "ERROR: su qflex didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {\$ +}
-}
-
-# --- 7. One-window tmux session for the server ------------------------------
-# nginx is foregrounded by `nginx -g 'daemon off;'`, so we run it in a tmux
-# pane so the main serial stays free for the savevm step.
+# --- 6. Server in a single tmux window (nginx foregrounds) ------------------
+# run_server.sh: docker run --entrypoint=bash --cpuset-cpus=0 ... cloudsuite
+# media-streaming:server -> root shell inside the server container.
+# ./etc/entrypoint.sh: openssl + sed + nginx -g 'daemon off;'. The openssl cert
+# footer '-----' is the last output before nginx execs; after it nginx is up.
 
 send "tmux new-session -d -s ms\r"
 expect {
     timeout { puts "ERROR: tmux new-session timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    -re {# +}
 }
-
 send "tmux send-keys -t ms:0 './run_server.sh' Enter\r"
-expect -re {[\$#] +}
-puts "ms: window 0 (server) launched; waiting for 'root@qflex:/#' inside server container..."
+expect {
+    timeout { puts "ERROR: dispatching run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+puts "ms: window 0 (server) launched; waiting for 'root@qflex:/#'..."
 wait_for_pane_substring ms 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
-puts "ms: server container ready; dispatching ./etc/entrypoint.sh..."
+puts "ms: server container at root shell; dispatching ./etc/entrypoint.sh..."
 
 send "tmux send-keys -t ms:0 './etc/entrypoint.sh' Enter\r"
-expect -re {[\$#] +}
+expect {
+    timeout { puts "ERROR: dispatching entrypoint.sh timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
 puts "ms: entrypoint.sh dispatched; waiting for openssl cert footer '-----'..."
 wait_for_pane_substring ms 0 "-----" $BUDGET_WORKLOAD_INIT_S
 puts "ms: server cert generated; nginx daemon should be up. Settling 5s..."
 sleep 5
 
-# --- 8. Signal follower that nginx is up ------------------------------------
+# --- 7. Signal follower that the server is up -------------------------------
 
 if {[catch {set f [open $server_ready_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $server_ready_flag: $err"; quit_qemu $monitor_port; exit 1
 }
-puts "master: wrote $server_ready_flag; waiting for follower's $pooria_in_container_flag..."
+puts "master: wrote $server_ready_flag; waiting for follower's client to finish..."
 
-# --- 8.5 pooria-load-test checkpoint ----------------------------------------
-# TEMP: remove (along with the follower's section 7.5 and the pooria_*_flag
-# defs at the top of this file) once multi-node MS load is fully working.
-# User-requested delve-point: master snapshots "server up + client container
-# open" so the user can `loadvm pooria-load-test` later. Closes serial (no
-# longer needed) and opens the monitor; the same monitor is reused below.
+# --- 8. Wait for follower's client done -------------------------------------
 
-wait_for_file $pooria_in_container_flag $BUDGET_WORKLOAD_INIT_S
+wait_for_file $client_done_flag $BUDGET_WORKLOAD_INIT_S
+puts "master: follower's client finished; proceeding to savevm loaded."
 
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}
+
+# --- 9. savevm loaded via the monitor ---------------------------------------
 
 set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
 set spawn_id $monitor_sid
 
 set timeout $BUDGET_DEFAULT_S
 expect {
-    timeout { puts "ERROR: monitor prompt timed out for pooria savevm"; exit 1 }
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
     "(qemu) "
 }
-
-set timeout $BUDGET_CHECKPOINTING_S
-send "delvm pooria-load-test\r"
-expect {
-    timeout { puts "WARN: delvm pooria-load-test didn't return; continuing anyway" }
-    "(qemu) "
-}
-send "savevm pooria-load-test\r"
-expect {
-    timeout { puts "ERROR: savevm pooria-load-test didn't return"; exit 1 }
-    "(qemu) "
-}
-
-if {[catch {set f [open $pooria_done_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $pooria_done_flag: $err"; exit 1
-}
-puts "master: pooria-load-test savevm complete; wrote $pooria_done_flag."
-
-# --- 9. Wait for follower's hammar load to report done ----------------------
-
-wait_for_file $done_flag $BUDGET_WORKLOAD_INIT_S
-puts "master: follower finished hammar load; proceeding to savevm loaded."
-
-# --- 10. savevm loaded via the monitor (reuses $monitor_sid from 8.5) -------
 
 set timeout $BUDGET_CHECKPOINTING_S
 send "delvm loaded\r"
@@ -393,10 +317,9 @@ expect {
     "(qemu) "
 }
 
-if {[catch {set f [open $loaded_done_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $loaded_done_flag: $err"; exit 1
-}
-puts "master: savevm loaded returned; wrote $loaded_done_flag. Sleeping 60s..."
+puts "master: savevm returned; polling Load.log for 'savevm log 7'..."
+wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "master: saw 'savevm log 7' — savevm-loaded finalised. Sleeping 60s..."
 sleep 60
 
 send "quit\r"
