@@ -14,7 +14,7 @@ set timeout 900
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S          120
-set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h: server init + waiting for follower's client (can be many hours under PDES)
+set BUDGET_WORKLOAD_INIT_S 86400   ; # 24h: server init + waiting for follower's client (can be many hours under PDES)
 set BUDGET_CHECKPOINTING_S 10800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
@@ -36,12 +36,14 @@ set wire_wait_flag     "$group_folder/ms_load_wire_wait.flag"
 set ping_master_flag   "$group_folder/ms_load_ping_master.flag"
 set ping_wait_flag     "$group_folder/ms_load_ping_wait.flag"
 set nc_ready_flag      "$group_folder/ms_load_nc_ready.flag"
+set nc_ok_flag         "$group_folder/ms_load_nc_ok.flag"
 set server_ready_flag  "$group_folder/ms_load_server_ready.flag"
 set client_done_flag   "$group_folder/ms_load_client_done.flag"
 catch {file delete -force $docker_master_flag}
 catch {file delete -force $wire_master_flag}
 catch {file delete -force $ping_master_flag}
 catch {file delete -force $nc_ready_flag}
+catch {file delete -force $nc_ok_flag}
 catch {file delete -force $server_ready_flag}
 
 proc connect_telnet {host port {budget_seconds 5}} {
@@ -228,28 +230,7 @@ if {[catch {set f [open $docker_master_flag "w"]; close $f} err]} {
 puts "master: docker cleared; wrote $docker_master_flag; waiting for $docker_wait_flag..."
 wait_for_file $docker_wait_flag $BUDGET_WORKLOAD_INIT_S
 
-# --- 5. nc data-path preflight on :443 ---------------------------------------
-# Write nc_ready BEFORE starting the listener; the follower waits on it then
-# sleeps 10s HOST-time (binding is a fast local syscall) before sending, so no race.
-if {[catch {set f [open $nc_ready_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $nc_ready_flag: $err"; quit_qemu $monitor_port; exit 1
-}
-puts "master: wrote $nc_ready_flag; bringing up nc listener on :443; waiting for token..."
-send "nc -l -p 443\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: nc preflight: no token on :443 (TCP path broken)"; quit_qemu $monitor_port; exit 1 }
-    -re {hello world} { puts "master: nc preflight OK -- received 'hello world' over :443" }
-}
-# Ctrl-C the foreground nc NOW — frees the shell instantly (don't wait for the
-# connection to close; the follower's `-w` is GUEST seconds = minutes under PDES).
-send "\003"
-set timeout $BUDGET_PROMPT_S
-send "\r"
-expect { timeout { } -re {# +} }
-puts "master: token received; starting media-streaming server."
-
-# --- 6. Server in a single tmux window (nginx foregrounds) ------------------
+# --- 5. Server in a single tmux window (nginx foregrounds) ------------------
 # run_server.sh: docker run --entrypoint=bash --cpuset-cpus=0 ... cloudsuite
 # media-streaming:server -> root shell inside the server container.
 # ./etc/entrypoint.sh: openssl + sed + nginx -g 'daemon off;'. The openssl cert
@@ -279,12 +260,36 @@ wait_for_pane_substring ms 0 "-----" $BUDGET_WORKLOAD_INIT_S
 puts "ms: server cert generated; nginx daemon should be up. Settling 5s..."
 sleep 5
 
-# --- 7. Signal follower that the server is up -------------------------------
+# --- 6. Signal follower that the server is up -------------------------------
 
 if {[catch {set f [open $server_ready_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $server_ready_flag: $err"; quit_qemu $monitor_port; exit 1
 }
-puts "master: wrote $server_ready_flag; waiting for follower's client to finish..."
+puts "master: wrote $server_ready_flag."
+
+# --- 7. nc data-path on :444 (AFTER server; 443 is the live nginx) ----------
+# Write nc_ready BEFORE listening; the follower, once inside its container with
+# the localhost->master DNAT set up, sends a token to 127.0.0.1:444 (DNATs to us).
+# Ctrl-C frees the shell the instant it lands, then nc_ok tells the follower the
+# data path works so it can start the workload.
+if {[catch {set f [open $nc_ready_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $nc_ready_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: wrote $nc_ready_flag; listening on :444 for the client's token..."
+send "nc -l -p 444\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: nc preflight: no token on :444 (client DNAT path broken)"; quit_qemu $monitor_port; exit 1 }
+    -re {hello world} { puts "master: nc preflight OK -- received 'hello world' over :444" }
+}
+send "\003"
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect { timeout { } -re {# +} }
+if {[catch {set f [open $nc_ok_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $nc_ok_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: wrote $nc_ok_flag; waiting for follower's client to finish..."
 
 # --- 8. Wait for follower's client done -------------------------------------
 

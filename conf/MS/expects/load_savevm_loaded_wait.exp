@@ -1,24 +1,24 @@
 #!/usr/bin/env expect
 # MULTI-NODE FOLLOWER (node_number > 0) MS load. Loads from `booted`, brings up
-# the PDES NIC (eth0 = 192.168.100.2), ping-verifies the wire to master, sends a
-# token to master's nc listener, waits for master's nc-received + server-ready
-# signals, then runs the media-streaming client targeting the server over the
-# wire (SERVER_IP=192.168.100.1), and waits for its OWN per-node `savevm log 7`.
+# the PDES NIC (eth0 = 192.168.100.2), ping-verifies the wire to master, waits
+# for the server, brings up eth1 internet, runs the client container, sets up an
+# iptables DNAT so localhost reroutes to the master, runs the hammar warm+load,
+# and waits for its OWN per-node `savevm log 7`.
 #
 # Pair with conf/MS/expects/load_savevm_loaded_master.exp on node 0. Does NOT
 # issue `savevm` over the monitor — savevm is master-only on multi-node.
 #
-# The client is the single-node hammar flow; the ONLY change vs single-node is
-# passing SERVER_IP=192.168.100.1 to the client docker image (single-node has
-# both tiers in one guest on 127.0.0.1) and pinning to cpu 0 (leaves are -smp 1,
-# so the single-node `taskset -c 1` would reference a non-existent cpu).
+# The client runs the single-node hammar flow UNCHANGED (still localhost-targeting,
+# pinned to cpu 0 since leaves are -smp 1). Instead of passing a server IP, the
+# container DNATs 127.0.0.1 -> 192.168.100.1 (route_localnet + iptables nat), so
+# the unmodified client reaches the master's server transparently over the wire.
 
 set timeout 900
 
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         120
-set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h client budget (hammar warm/load can take minutes-hours wall-clock under PDES)
+set BUDGET_WORKLOAD_INIT_S 86400   ; # 24h client budget (apt + hammar warm/load can take many hours wall-clock under PDES)
 set BUDGET_CHECKPOINTING_S 10800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
@@ -205,45 +205,146 @@ if {[catch {set f [open $docker_wait_flag "w"]; close $f} err]} {
 puts "follower: docker cleared; wrote $docker_wait_flag; waiting for $docker_master_flag..."
 wait_for_file $docker_master_flag $BUDGET_WORKLOAD_INIT_S
 
-# --- 5. nc data-path: send a token, Ctrl-C our nc, then wait for the server -
-# Wait for nc_ready, sleep 10s HOST wall-clock (bind is a fast local syscall) then
-# send. Ctrl-C our own nc right after so our shell is free regardless of when the
-# connection closes (busybox nc would otherwise hold it for -w GUEST seconds).
+# --- 5. Wait for server up, then bring up eth1 internet on the guest --------
+# eth1 = e1000 user-mode NAT; gives the client container internet for apt-get.
+wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
+puts "follower: server is up; bringing up eth1 internet for the client container..."
+send "ip link set eth1 up\r"; expect -re {# +}
+send "udhcpc -i eth1\r"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { puts "ERROR: udhcpc eth1 timed out"; quit_qemu $monitor_port; exit 1 } -re {# +} }
+send "echo 'nameserver 8.8.8.8' > /etc/resolv.conf\r"; expect -re {# +}
+send "ping google.com -i 0.05 -W 100 -c 10\r"
+set timeout 150
+expect {
+    timeout { puts "ERROR: ping google.com timed out (no internet on eth1)"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        if {$expect_out(2,string) < 1} {
+            puts "ERROR: ping google.com got 0 replies (no internet egress)"; quit_qemu $monitor_port; exit 1
+        }
+        puts "follower: internet OK ($expect_out(2,string) replies from google.com)"
+    }
+}
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {# +} }
 
+# --- 6. Client container (bash entrypoint, privileged) + DNS + tools --------
+# entrypoint bash so we can set up iptables inside; --privileged/--cap-add NET_ADMIN
+# for the nat table. Container prompt assumed root@<host># (Debian root bash).
+send "docker run -it --name media-streaming-client --entrypoint bash --network host --privileged --cap-add=NET_ADMIN -v \$(pwd)/videos:/videos xusine/media-streaming:client\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: client container didn't reach a bash prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {root@}
+}
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {# +} }
+puts "follower: in client container; setting DNS + installing tools..."
+send "echo 'nameserver 8.8.8.8' > /etc/resolv.conf\r"; expect -re {# +}
+# Marker-gate apt: its progress bars contain '# ' and would false-match a bare prompt
+# regex. The PID marker can't appear in apt output or the typed echo (literal `$$`).
+send "apt-get update; printf 'APTDONE%s\\n' \"\$\$\"\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: apt-get update timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {APTDONE[0-9]+}
+}
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {# +} }
+send "apt-get install -y iptables iputils-ping netcat-openbsd; printf 'APTDONE%s\\n' \"\$\$\"\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: apt-get install timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {APTDONE[0-9]+}
+}
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {# +} }
+
+# --- 7. DNAT localhost -> master (192.168.100.1) inside the container -------
+send "cat > fix.sh << 'EOF'\r"
+send "#!/bin/sh\r"
+send "sysctl -w net.ipv4.conf.all.route_localnet=1\r"
+send "iptables -t nat -A OUTPUT -d 127.0.0.1 -j DNAT --to-destination 192.168.100.1\r"
+send "iptables -t nat -A POSTROUTING -d 192.168.100.1 -j MASQUERADE\r"
+send "EOF\r"
+expect { timeout { puts "ERROR: writing fix.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {# +} }
+send "chmod +x fix.sh\r"; expect -re {# +}
+send "./fix.sh\r"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {# +} }
+# Re-add in the nft backend (the default 'iptables'); clear legacy-backend dupes first.
+send "iptables-legacy -t nat -F OUTPUT\r";      expect { timeout { } -re {# +} }
+send "iptables-legacy -t nat -F POSTROUTING\r"; expect { timeout { } -re {# +} }
+send "sysctl -w net.ipv4.conf.all.route_localnet=1\r"; expect -re {# +}
+send "iptables -t nat -A OUTPUT -d 127.0.0.1 -j DNAT --to-destination 192.168.100.1\r"; expect -re {# +}
+send "iptables -t nat -A POSTROUTING -d 192.168.100.1 -j MASQUERADE\r"; expect -re {# +}
+send "iptables -t nat -L OUTPUT -v -n\r";      expect -re {# +}
+send "iptables -t nat -L POSTROUTING -v -n\r"; expect -re {# +}
+
+# --- 8. Verify the remap: localhost must now traverse the wire (non-0 latency)
+# ping 127.0.0.1 -> DNAT -> master. A ~0.0ms result means it stayed on loopback
+# (DNAT not applied); require min latency above a small threshold.
+send "ping 127.0.0.1 -i 0.05 -W 100 -c 10\r"
+set timeout 150
+expect {
+    timeout { puts "ERROR: ping 127.0.0.1 timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        if {$expect_out(1,string) != $expect_out(2,string)} {
+            puts "ERROR: ping 127.0.0.1 drops (DNAT path broken)"; quit_qemu $monitor_port; exit 1
+        }
+    }
+}
+expect {
+    timeout { puts "ERROR: ping 127.0.0.1 no rtt line"; quit_qemu $monitor_port; exit 1 }
+    -re {min/avg/max[^=]*= ([0-9.]+)/} {
+        if {$expect_out(1,string) <= 0.1} {
+            puts "ERROR: ping 127.0.0.1 min=$expect_out(1,string)ms ~0 => still loopback, DNAT not applied"; quit_qemu $monitor_port; exit 1
+        }
+        puts "follower: 127.0.0.1 remapped over wire (min=$expect_out(1,string)ms)"
+    }
+}
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {# +} }
+send "ping 192.168.100.1 -i 0.05 -W 100 -c 10\r"
+set timeout 150
+expect {
+    timeout { puts "ERROR: ping 192.168.100.1 timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        if {$expect_out(1,string) != $expect_out(2,string)} {
+            puts "ERROR: ping 192.168.100.1 drops"; quit_qemu $monitor_port; exit 1
+        }
+    }
+}
+expect {
+    timeout { puts "ERROR: ping 192.168.100.1 no rtt line"; quit_qemu $monitor_port; exit 1 }
+    -re {min/avg/max[^=]*= ([0-9.]+)/} {
+        if {$expect_out(1,string) <= 0.1} {
+            puts "ERROR: ping 192.168.100.1 min=$expect_out(1,string)ms ~0 (invalid)"; quit_qemu $monitor_port; exit 1
+        }
+        puts "follower: wire to master OK (min=$expect_out(1,string)ms)"
+    }
+}
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {# +} }
+
+# --- 9. nc data-path on :444 (127.0.0.1 -> DNAT -> master) ------------------
 wait_for_file $nc_ready_flag $BUDGET_WORKLOAD_INIT_S
-sleep 10
-send "echo 'hello world' | nc -w 10 192.168.100.1 443\r"
-sleep 5
+send "echo 'hello world' | nc -w 10 127.0.0.1 444\r"
+puts "follower: sent 'hello world' to 127.0.0.1:444 (DNAT->master); waiting for nc_ok..."
+wait_for_file $nc_ok_flag $BUDGET_WORKLOAD_INIT_S
 send "\003"
 set timeout $BUDGET_PROMPT_S
 expect { timeout { } -re {# +} }
-puts "follower: sent 'hello world' and freed nc; waiting for server-ready..."
+puts "follower: master confirmed nc (nc_ok); starting warm/load."
 
-# --- 6. Wait for master to bring the server up ------------------------------
-
-wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
-puts "follower: server is up; launching client (SERVER_IP=192.168.100.1)."
-
-# --- 7. Client (no tmux, on serial). Same as single-node hammar flow, but the
-# docker image is given SERVER_IP=192.168.100.1 and hammar is pinned to cpu 0.
-
-send "docker run -it --name media-streaming-client --network host -v \$(pwd)/videos:/videos xusine/media-streaming:client 192.168.100.1\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: client container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-puts "follower: client container at root shell; sanity 'ls' for hammar..."
-
+# --- 10. Warm + load (hammar; localhost -> DNAT -> master), pinned to cpu 0 -
 send "ls\r"
 set timeout $BUDGET_PROMPT_S
 expect {
     timeout { puts "ERROR: ls didn't show hammar"; quit_qemu $monitor_port; exit 1 }
     -re {hammar}
 }
-expect { timeout { } -re {root@qflex:/#} }
-puts "follower: hammar present; dispatching warm..."
-
+expect { timeout { } -re {# +} }
 send "taskset -c 0 ./hammar/target/release/warm ./videos 1\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
@@ -253,8 +354,7 @@ expect {
 puts "follower: warm done; settling 5s before load..."
 sleep 5
 set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {root@qflex:/#} }
-
+expect { timeout { } -re {# +} }
 send "taskset -c 0 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
@@ -268,7 +368,7 @@ if {[catch {set f [open $client_done_flag "w"]; close $f} err]} {
 }
 puts "follower: wrote $client_done_flag; waiting for own 'savevm log 7' in Load.log..."
 
-# --- 8. Wait for own per-node savevm log 7 + 60s settle --------------------
+# --- 11. Wait for own per-node savevm log 7 + 60s settle -------------------
 
 wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
 puts "follower: saw 'savevm log 7' — per-node savevm finalised. Sleeping 60s..."

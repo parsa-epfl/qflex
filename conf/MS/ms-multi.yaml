@@ -70,7 +70,7 @@ boot:
 load:
   components:
     experiment_context_node_0:
-      # loadvm_name: pooria-load-test
+      # loadvm_name: pooria-load-test-2
       # interactive_tmux: true
       latencies_ns_list: [1000000]
       quantum_size: 100000
@@ -78,7 +78,7 @@ load:
       loadvm_name: booted
       interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_master.exp
     experiment_context_node_1:
-      # loadvm_name: pooria-load-test
+      # loadvm_name: pooria-load-test-2
       # interactive_tmux: true
       latencies_ns_list: [1000000]
       quantum_size: 100000
