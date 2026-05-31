@@ -40,6 +40,7 @@ set wire_wait_flag     "$group_folder/ms_load_wire_wait.flag"
 set ping_master_flag   "$group_folder/ms_load_ping_master.flag"
 set ping_wait_flag     "$group_folder/ms_load_ping_wait.flag"
 set nc_ready_flag      "$group_folder/ms_load_nc_ready.flag"
+set nc_ok_flag         "$group_folder/ms_load_nc_ok.flag"
 set server_ready_flag  "$group_folder/ms_load_server_ready.flag"
 set client_done_flag   "$group_folder/ms_load_client_done.flag"
 catch {file delete -force $docker_wait_flag}
