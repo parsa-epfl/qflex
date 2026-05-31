@@ -249,6 +249,34 @@ def get_miscreg_output(miscreg_ref_path, reg_map, verbose=False):
 
 
 # ---------------------------------------------------------------------------
+# TLB checkpoint loading
+# ---------------------------------------------------------------------------
+
+def load_tlb_entries(gem_dir, num_cores):
+    """Read mmu-cpuN.cpt files and return their contents as a single string.
+
+    For single-core, renames ``cpus0.mmu`` → ``cpus.mmu`` to match the
+    single-core checkpoint section naming convention.
+    """
+    parts = []
+    for cpu_idx in range(num_cores):
+        mmu_cpt = gem_dir / f"mmu-cpu{cpu_idx}.cpt"
+        if mmu_cpt.exists():
+            content = mmu_cpt.read_text()
+            if num_cores == 1:
+                content = content.replace(
+                    f"system.cpu_cluster.cpus{cpu_idx}.mmu",
+                    "system.cpu_cluster.cpus.mmu",
+                )
+            parts.append(content.strip())
+            _eprint(f"[gem5_chkpt] CPU {cpu_idx}: loaded TLB data from {mmu_cpt.name}")
+        else:
+            _eprint(f"[gem5_chkpt] CPU {cpu_idx}: {mmu_cpt.name} not found, TLB sections will be empty")
+    return '\n\n'.join(parts)
+
+
+
+# ---------------------------------------------------------------------------
 # Checkpoint generation
 # ---------------------------------------------------------------------------
 
@@ -286,6 +314,8 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None, verbose=False):
 
     template_path = templates_dir / template_name
 
+    # Load TLB data from mmu-cpuN.cpt files if present
+    tlb_entries = load_tlb_entries(gem_dir, num_cores)
     all_missing_regs = []  # Track missing regs across all cores
 
     if num_cores == 1:
@@ -313,6 +343,7 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None, verbose=False):
                 fpreg_string=fpreg_str,
                 ccreg_string=ccreg_str,
                 reg_map=reg_map,
+                tlb_entries=tlb_entries,
             )
         )
     else:
@@ -350,6 +381,7 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None, verbose=False):
                 ccreg_string=ccreg_str,
                 reg_map=reg_map,
                 num_cores=num_cores,
+                tlb_entries=tlb_entries,
             )
         )
 

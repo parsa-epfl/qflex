@@ -1,8 +1,9 @@
 import math
+from pathlib import Path
 
 from commands import Executor
 from .config import ExperimentContext
-from commands.qemu import QemuCommonArgParser   
+from commands.qemu import QemuCommonArgParser
 
 class FunctionalWarming(Executor):
     """
@@ -29,30 +30,15 @@ class FunctionalWarming(Executor):
     def cmd(self) -> str:
 
         plugin_args = f"mode=warm,init_threshold={self.sampling_interval},interval={self.sampling_interval},count={self.sample_size}"
-        create_gem5_ckp_cmd = []
 
         if self.gen_gem5_ckp:
             plugin_args += ",generate_gem5_chkpt=true"
-            base_image_address = self.qemu_common_parser.image_address
-            for i in range(self.sample_size):
-                create_gem5_ckp_cmd.append(
-                    f"python3 ../create_gem5_checkpoint.py snapshot_{i}.gem --num-cores {self.simulation_context.core_count}"
-                )
-                # Then convert qcow2 to raw
-                image_name = f"snapshot_{i}.img"
-                create_gem5_ckp_cmd.append(
-                    f"./qemu-img convert -f qcow2 -O raw -l snapshot_{i} {base_image_address} snapshot_{i}.gem/{image_name}"
-                )
-                create_gem5_ckp_cmd.append(
-                    f"cp ./system.physmem.store0.pmem snapshot_{i}.gem/"
-                )
-
 
         fw_cmd = f"""
             ./qemu-system-aarch64 \
             {self.qemu_common_parser.get_qemu_base_args()} \
             {self.qemu_common_parser.quantum_args()} \
-            -plugin ../lib/libworm_cache.so,{plugin_args} \
+            -plugin ../lib/libworm_cache.so,{plugin_args}
         """
         print("fw command:")
         print(fw_cmd)
@@ -66,5 +52,4 @@ class FunctionalWarming(Executor):
             # "mv *.log ./fp_gen_speed",
         ]
 
-        commands.extend(create_gem5_ckp_cmd)
         return commands
