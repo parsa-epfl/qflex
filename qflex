@@ -167,6 +167,9 @@ def fw(
     sample_size: Annotated[int, typer.Option(
         help="Sample size for the workload."
     )]=30,
+    collect_gem5_bbl_btb: Annotated[bool, typer.Option(
+        help="Whether to collect the export-only gem5 BBL-BTB view alongside the live PC-indexed BTB during functional warming."
+    )]=False,
 ):
     """
     This command performs functional warming of the simulator.
@@ -175,6 +178,7 @@ def fw(
     functional_warm_executor = FunctionalWarming(
         experiment_context=experiment_context,
         sample_size=sample_size,
+        collect_gem5_bbl_btb=collect_gem5_bbl_btb,
     )
     functional_warm_executor.execute(to_stdio=True, run_in_background=False)
 
