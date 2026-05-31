@@ -26,6 +26,18 @@ app = typer.Typer(
 qpoints_app = typer.Typer(help="QPoints utilities.")
 app.add_typer(qpoints_app, name="qpoints")
 
+SUPPORTED_RUBY_PROTOCOLS = ("mesi_two_level", "moesi_cmp_directory")
+
+
+def _validate_qpoints_ruby_protocol(ruby_protocol: str) -> str:
+    if ruby_protocol not in SUPPORTED_RUBY_PROTOCOLS:
+        raise typer.BadParameter(
+            "Unsupported --ruby-protocol value "
+            f"{ruby_protocol!r}. Expected one of: "
+            + ", ".join(SUPPORTED_RUBY_PROTOCOLS)
+        )
+    return ruby_protocol
+
 @app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
 def create_base_image(
     image_folder: Annotated[str, typer.Option(
@@ -248,6 +260,7 @@ def qpoints_convert_single_cmd(
     """
     Convert a single QPoints snapshot by running the QEMU emulation and gem5 checkpoint generation.
     """
+    ruby_protocol = _validate_qpoints_ruby_protocol(ruby_protocol)
     qpoints_convert_single(
         qflex_ckp_dir=qflex_ckp_dir,
         gem5_ckp_dir=gem5_ckp_dir,
@@ -286,6 +299,7 @@ def qpoints_convert_multi_cmd(
     """
     Convert a range of QPoints snapshots.
     """
+    ruby_protocol = _validate_qpoints_ruby_protocol(ruby_protocol)
     qpoints_convert_multi(
         first=first,
         last=last,

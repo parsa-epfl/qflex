@@ -112,6 +112,36 @@ def test_qpoints_run_gem5_rejects_cache_dump_without_ruby():
         )
 
 
+def test_qpoints_convert_single_rejects_invalid_ruby_protocol():
+    module = _load_qflex_module()
+    with pytest.raises(module.typer.BadParameter, match="Unsupported --ruby-protocol value"):
+        module.qpoints_convert_single_cmd(
+            qflex_ckp_dir="/tmp/qflex_ckp",
+            gem5_ckp_dir="/tmp/gem5_ckp",
+            core_count=8,
+            memory_gb=32,
+            base="/tmp/base.qcow2",
+            snapshot="snapshot_0",
+            ruby_protocol="bad_protocol",
+        )
+
+
+def test_qpoints_convert_multi_rejects_invalid_ruby_protocol():
+    module = _load_qflex_module()
+    with pytest.raises(module.typer.BadParameter, match="Unsupported --ruby-protocol value"):
+        module.qpoints_convert_multi_cmd(
+            first="snapshot_0",
+            last="snapshot_1",
+            parallel=2,
+            qflex_ckp_dir="/tmp/qflex_ckp",
+            gem5_ckp_dir="/tmp/gem5_ckp",
+            core_count=8,
+            memory_gb=32,
+            base="/tmp/base.qcow2",
+            ruby_protocol="bad_protocol",
+        )
+
+
 def test_qpoints_convert_multi_forwards_ruby_protocol():
     module = _load_qflex_module()
     with mock.patch.object(module, "qpoints_convert_multi") as forwarded:
