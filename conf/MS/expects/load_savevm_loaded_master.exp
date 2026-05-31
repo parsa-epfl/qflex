@@ -280,7 +280,10 @@ puts "master: both wires verified; running nc data-path preflight on :443."
 
 # --- 5. nc data-path preflight on the real benchmark port (443) -------------
 # Hammar connects to nginx over TCP/443. nc -l on 443 is privileged so this
-# runs while we're still root. The follower (still qflex) connects in.
+# runs while we're still root. The follower (still qflex) connects in via its
+# own socat redirector (127.0.0.1:443 -> 192.168.100.1:443), so a successful
+# receive here proves the FULL follower->socat->wire->master path is alive,
+# end to end, without hammar in the loop.
 if {[catch {set f [open $nc_listen_ready_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $nc_listen_ready_flag: $err"; quit_qemu $monitor_port; exit 1
 }

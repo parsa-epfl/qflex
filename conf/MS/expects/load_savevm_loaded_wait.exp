@@ -209,15 +209,6 @@ send "ip addr show eth0\r";                          expect -re {# +}
 send "arp -s 192.168.100.1 52:54:00:aa:bb:00\r"; expect -re {# +}
 send "arp -n 192.168.100.1\r";                   expect -re {# +}
 
-# --- 2.6 Eth-setup serialization sentinel -----------------------------------
-# Follower eth + ARP ready. Tell master, so master can start its ping.
-# socat (section 2.5) runs in parallel with master's ping — it touches only
-# loopback, not the PDES wire, so it doesn't compete for ARP/eth0.
-if {[catch {set f [open $wait_eth_done_flag "w"]; close $f} err]} {
-    puts "ERROR: could not write $wait_eth_done_flag: $err"; quit_qemu $monitor_port; exit 1
-}
-puts "follower: eth ready; wrote $wait_eth_done_flag."
-
 # --- 2.5 Defensive iptables flush + socat 127.0.0.1:443 -> master:443 -------
 # Hammar's URLs are hardcoded to 127.0.0.1 (warm.rs:66). Boot baked a socat
 # forwarder into the snapshot, but loadvm-resumed state under PDES isn't
@@ -238,6 +229,13 @@ expect {
 expect -re {# +}
 sleep 5
 
+# --- 2.6 Eth-setup serialization sentinel -----------------------------------
+# Follower eth + socat ready. Tell master, so master can run its ping.
+if {[catch {set f [open $wait_eth_done_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $wait_eth_done_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "follower: eth + socat ready; wrote $wait_eth_done_flag."
+
 send "su qflex\r";                                   expect -re {\$ +}
 
 # Wait for master's ping to finish before we start ours — serializes the two
@@ -248,26 +246,46 @@ puts "follower: master ping done; proceeding to our ping."
 
 sleep 5
 
-# --- 3. Ping verify the wire to master (0-drop required) -------------------
+# --- 3a. Direct wire ping (192.168.100.1, traverses eth0 -> PDES -> master) -
 
 send "ping $SERVER_IP -i 0.5 -c 10\r"
 set timeout 120
 expect {
-    timeout { puts "ERROR: ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: direct ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
     -re {(\d+) packets transmitted, (\d+)[ ,]} {
         set tx $expect_out(1,string); set rx $expect_out(2,string)
-        puts "follower: ping summary -> $tx transmitted, $rx received"
+        puts "follower: direct wire ping -> $tx transmitted, $rx received"
         if {$tx != $rx} {
-            puts "ERROR: ping drops detected (tx=$tx rx=$rx); aborting"
+            puts "ERROR: direct ping drops detected (tx=$tx rx=$rx); aborting"
             quit_qemu $monitor_port; exit 1
         }
     }
 }
 set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
+
+sleep 2
+
+# --- 3b. Localhost ping (loopback sanity — ICMP can't traverse socat) -------
+# Note: socat only forwards TCP, so this is loopback only — it can't actually
+# exercise the redirector. Kept for parity with the hello world test below
+# (both "via localhost") and as a baseline sanity check on the local lo path.
+
+send "ping 127.0.0.1 -i 0.5 -c 5\r"
+set timeout 60
 expect {
-    timeout { puts "WARN: prompt didn't return after ping summary; continuing" }
-    -re {[\$#] +}
+    timeout { puts "ERROR: localhost ping summary didn't arrive"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        set tx $expect_out(1,string); set rx $expect_out(2,string)
+        puts "follower: localhost ping -> $tx transmitted, $rx received"
+        if {$tx != $rx} {
+            puts "ERROR: localhost ping drops (tx=$tx rx=$rx) — loopback broken"
+            quit_qemu $monitor_port; exit 1
+        }
+    }
 }
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 
 sleep 5
 
@@ -279,57 +297,29 @@ if {[catch {set f [open $wire_wait_flag "w"]; close $f} err]} {
 puts "follower: wire verified; wrote $wire_wait_flag; waiting for $wire_master_flag..."
 wait_for_file $wire_master_flag $BUDGET_PROMPT_S
 
-# --- 5. nc data-path preflight: connect to master:443 and send a token ------
+# --- 5. nc data-path preflight via socat redirect ---------------------------
+# Hello world goes to 127.0.0.1:443 (NOT $SERVER_IP) so socat actually has to
+# forward the bytes through the PDES wire to master. Master's nc -l -p 443
+# (section 5 of load_savevm_loaded_master.exp) receives the bytes — same
+# data, but now travelling the full follower -> socat -> wire -> master
+# path, i.e. exactly what hammar will do later.
 puts "follower: waiting for master's nc listener ($nc_listen_ready_flag)..."
 wait_for_file $nc_listen_ready_flag $BUDGET_PROMPT_S
-# -w 2 => nc closes 2s after sending instead of hanging for the server to close.
-send "echo 'Hello from VM2!' | nc -w 2 $SERVER_IP 443\r"
+# -w 5 = nc closes 5s after last byte; needs budget for redirected SYN/SYN-ACK
+# + data + master FIN under PDES virtual time.
+send "echo 'Hello from VM2!' | nc -w 5 127.0.0.1 443\r"
 set timeout $BUDGET_PROMPT_S
 expect {
     timeout { puts "ERROR: nc send timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}
 }
-puts "follower: sent 'Hello from VM2!' to $SERVER_IP:443."
+puts "follower: sent 'Hello from VM2!' to 127.0.0.1:443 (via socat -> $SERVER_IP:443)."
 
 # --- 6. Wait for master's nginx to be ready --------------------------------
 
 puts "follower: waiting for $server_ready_flag..."
 wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
 puts "follower: master's server-ready signal received; launching client container."
-
-# --- 6.5 socat-redirect smoke check (TCP only — ICMP can't see the redirect) -
-# socat redirects TCP only: `ping 127.0.0.1` is ICMP and the kernel always
-# routes 127.0.0.0/8 through loopback, so it would show 0 ms latency and
-# tell us nothing about whether socat is actually forwarding to the wire.
-# The only meaningful pre-hammar test is a TCP connect to 127.0.0.1:443
-# (where socat listens) — that triggers socat to open a real TCP socket
-# to 192.168.100.1:443, traversing eth0 / PDES wire / master nginx.
-#
-# Wrap in `time` so the wall-clock RTT is visible in the log: if the wire
-# is alive, expect ~hundreds of ms (matching the real ping RTT to master).
-# A near-zero `real` time means the socket finished without going to the
-# wire (e.g. socat replied with FIN locally, or the listener is broken).
-
-send "time nc -zvw 5 127.0.0.1 443\r"
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: nc to 127.0.0.1:443 (socat) timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {refused} {
-        puts "ERROR: nc to 127.0.0.1:443 refused — socat listener died"
-        quit_qemu $monitor_port; exit 1
-    }
-    -re {Operation timed out|Network is unreachable} {
-        puts "ERROR: nc to 127.0.0.1:443 wire-level failure (socat -> master:443 broken)"
-        quit_qemu $monitor_port; exit 1
-    }
-    -re {open|succeeded} {
-        puts "follower: nc 127.0.0.1:443 OK -- socat -> master:443 path alive (check `real` time above for wire RTT)"
-    }
-}
-expect {
-    timeout { }
-    -re {[\$#] +}
-}
 
 # Docker cleanup already done in section 1.5 (before eth setup).
 
