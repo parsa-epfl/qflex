@@ -28,7 +28,7 @@ set timeout 900
 
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
-set BUDGET_PROMPT_S         60
+set BUDGET_PROMPT_S         120
 set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h client budget (hammar warm/load can take minutes-hours wall-clock under emulation)
 set BUDGET_CHECKPOINTING_S 1800
 

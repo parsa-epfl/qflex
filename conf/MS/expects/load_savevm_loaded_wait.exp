@@ -362,6 +362,7 @@ puts "follower: warm done; settling 5s before load..."
 sleep 5
 set timeout $BUDGET_PROMPT_S
 send "\r"; expect { timeout { } -re {# +} }
+# TODO this needs to be transferred to correctly use the load script instead of hardcoding the hammar command here. there is a current bug for 1 core in that script I think
 send "taskset -c 0 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
