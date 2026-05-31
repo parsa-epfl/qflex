@@ -65,6 +65,7 @@ def _prepare_snapshot_gem5_uarch(
     qflex_ckp_dir: str,
     gem5_ckp_dir: str,
     snapshot: str,
+    ruby_protocol: str = "mesi_two_level",
 ) -> None:
     qflex_uarch_dir = Path(qflex_ckp_dir) / "run" / f"{snapshot}.uarch"
     if not qflex_uarch_dir.is_dir():
@@ -105,6 +106,8 @@ def _prepare_snapshot_gem5_uarch(
                 gem5_ckp_dir,
                 "--snapshot",
                 snapshot,
+                "--ruby-protocol",
+                ruby_protocol,
                 "--overwrite",
             ],
             text=True,
@@ -151,6 +154,7 @@ def convert_single(
     ssh_base: int = 2222,
     overwrite: bool = False,
     cancel_event: Optional[threading.Event] = None,
+    ruby_protocol: str = "mesi_two_level",
 ) -> None:
     start_time = time.time()
 
@@ -384,7 +388,7 @@ def convert_single(
             )
         _check_cancelled()
         _prepare_snapshot_gem5_uarch(
-            qpoints_root, qflex_ckp_dir, gem5_ckp_dir, snapshot
+            qpoints_root, qflex_ckp_dir, gem5_ckp_dir, snapshot, ruby_protocol
         )
     except KeyboardInterrupt:
         _terminate_qemu()
@@ -415,6 +419,7 @@ def convert_multi(
     qmp_base: int = 4444,
     ssh_base: int = 2222,
     overwrite: bool = False,
+    ruby_protocol: str = "mesi_two_level",
 ) -> None:
     first_match = re.fullmatch(r"snapshot_(\d+)", first)
     last_match = re.fullmatch(r"snapshot_(\d+)", last)
@@ -447,6 +452,7 @@ def convert_multi(
             ssh_base=ssh_base,
             overwrite=overwrite,
             cancel_event=cancel_event,
+            ruby_protocol=ruby_protocol,
         )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
@@ -481,8 +487,13 @@ def run_gem5(
     data_trace: bool = False,
     dump_cache_state: bool = False,
     timing_ruby: bool = False,
+    timing_ruby_moesi: bool = False,
     sim_config: Optional[str] = None,
 ) -> None:
+    if timing_ruby and timing_ruby_moesi:
+        raise RuntimeError(
+            "Choose only one timing Ruby protocol flag: --timing-ruby or --timing-ruby-moesi."
+        )
     if dump_cache_state and not timing_ruby:
         raise RuntimeError("--dump-cache-state requires --timing-ruby.")
 
@@ -514,6 +525,8 @@ def run_gem5(
         args.append("--dump-cache-state")
     if timing_ruby:
         args.append("--timing-ruby")
+    if timing_ruby_moesi:
+        args.append("--timing-ruby-moesi")
     if sim_config:
         args.extend(["--sim-config", sim_config])
     subprocess.run(

@@ -59,6 +59,7 @@ def test_qflex_qpoints_run_gem5_help_exposes_tracing_options():
     assert "--data-trace" in result.stdout
     assert "--dump-cache-state" in result.stdout
     assert "--timing-ruby" in result.stdout
+    assert "MOESI_CMP_directory" in result.stdout
     assert "--sim-config" in result.stdout
 
 
@@ -76,6 +77,7 @@ def test_qpoints_run_gem5_forwards_tracing_options():
             data_trace=True,
             dump_cache_state=True,
             timing_ruby=True,
+            timing_ruby_moesi=False,
             sim_config="/tmp/override.args",
         )
 
@@ -90,6 +92,7 @@ def test_qpoints_run_gem5_forwards_tracing_options():
         data_trace=True,
         dump_cache_state=True,
         timing_ruby=True,
+        timing_ruby_moesi=False,
         sim_config="/tmp/override.args",
     )
 
@@ -105,6 +108,114 @@ def test_qpoints_run_gem5_rejects_cache_dump_without_ruby():
             core_count=1,
             dump_cache_state=True,
             timing_ruby=False,
+            timing_ruby_moesi=False,
+        )
+
+
+def test_qpoints_convert_single_rejects_invalid_ruby_protocol():
+    module = _load_qflex_module()
+    with pytest.raises(module.typer.BadParameter, match="Unsupported --ruby-protocol value"):
+        module.qpoints_convert_single_cmd(
+            qflex_ckp_dir="/tmp/qflex_ckp",
+            gem5_ckp_dir="/tmp/gem5_ckp",
+            core_count=8,
+            memory_gb=32,
+            base="/tmp/base.qcow2",
+            snapshot="snapshot_0",
+            ruby_protocol="bad_protocol",
+        )
+
+
+def test_qpoints_convert_multi_rejects_invalid_ruby_protocol():
+    module = _load_qflex_module()
+    with pytest.raises(module.typer.BadParameter, match="Unsupported --ruby-protocol value"):
+        module.qpoints_convert_multi_cmd(
+            first="snapshot_0",
+            last="snapshot_1",
+            parallel=2,
+            qflex_ckp_dir="/tmp/qflex_ckp",
+            gem5_ckp_dir="/tmp/gem5_ckp",
+            core_count=8,
+            memory_gb=32,
+            base="/tmp/base.qcow2",
+            ruby_protocol="bad_protocol",
+        )
+
+
+def test_qpoints_convert_multi_forwards_ruby_protocol():
+    module = _load_qflex_module()
+    with mock.patch.object(module, "qpoints_convert_multi") as forwarded:
+        module.qpoints_convert_multi_cmd(
+            first="snapshot_0",
+            last="snapshot_1",
+            parallel=2,
+            qflex_ckp_dir="/tmp/qflex_ckp",
+            gem5_ckp_dir="/tmp/gem5_ckp",
+            core_count=8,
+            memory_gb=32,
+            base="/tmp/base.qcow2",
+            ruby_protocol="moesi_cmp_directory",
+        )
+
+    forwarded.assert_called_once_with(
+        first="snapshot_0",
+        last="snapshot_1",
+        parallel=2,
+        qflex_ckp_dir="/tmp/qflex_ckp",
+        gem5_ckp_dir="/tmp/gem5_ckp",
+        core_count=8,
+        memory_gb=32,
+        base="/tmp/base.qcow2",
+        ssh_host="127.0.0.1",
+        ssh_user="qflex",
+        monitor_base=45454,
+        qmp_base=4444,
+        ssh_base=2222,
+        overwrite=False,
+        ruby_protocol="moesi_cmp_directory",
+    )
+
+
+def test_qpoints_run_gem5_forwards_moesi_timing_mode():
+    module = _load_qflex_module()
+    with mock.patch.object(module, "qpoints_run_gem5") as forwarded:
+        module.qpoints_run_gem5_cmd(
+            gem5_ckp_dir="/tmp/gem5_ckp",
+            experiment="exp",
+            snapshot="snapshot_0",
+            inst=1000,
+            core_count=1,
+            timing_ruby=False,
+            timing_ruby_moesi=True,
+        )
+
+    forwarded.assert_called_once_with(
+        gem5_ckp_dir="/tmp/gem5_ckp",
+        experiment="exp",
+        snapshot="snapshot_0",
+        inst=1000,
+        core_count=1,
+        branch_trace=False,
+        tage_decision_trace=False,
+        data_trace=False,
+        dump_cache_state=False,
+        timing_ruby=False,
+        timing_ruby_moesi=True,
+        sim_config=None,
+    )
+
+
+def test_qpoints_run_gem5_rejects_multiple_timing_protocol_flags():
+    module = _load_qflex_module()
+    with pytest.raises(module.typer.BadParameter, match="Choose only one timing Ruby protocol flag"):
+        module.qpoints_run_gem5_cmd(
+            gem5_ckp_dir="/tmp/gem5_ckp",
+            experiment="exp",
+            snapshot="snapshot_0",
+            inst=1000,
+            core_count=1,
+            timing_ruby=True,
+            timing_ruby_moesi=True,
         )
 
 
@@ -142,6 +253,7 @@ def test_prepare_snapshot_gem5_uarch_invokes_qpoints_postprocessor(tmp_path: Pat
             qflex_ckp_dir=str(qflex_ckp_dir),
             gem5_ckp_dir=str(gem5_ckp_dir),
             snapshot="snapshot_0",
+            ruby_protocol="moesi_cmp_directory",
         )
 
     run_mock.assert_called_once_with(
@@ -154,6 +266,8 @@ def test_prepare_snapshot_gem5_uarch_invokes_qpoints_postprocessor(tmp_path: Pat
             str(gem5_ckp_dir),
             "--snapshot",
             "snapshot_0",
+            "--ruby-protocol",
+            "moesi_cmp_directory",
             "--overwrite",
         ],
         text=True,

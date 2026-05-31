@@ -26,6 +26,18 @@ app = typer.Typer(
 qpoints_app = typer.Typer(help="QPoints utilities.")
 app.add_typer(qpoints_app, name="qpoints")
 
+SUPPORTED_RUBY_PROTOCOLS = ("mesi_two_level", "moesi_cmp_directory")
+
+
+def _validate_qpoints_ruby_protocol(ruby_protocol: str) -> str:
+    if ruby_protocol not in SUPPORTED_RUBY_PROTOCOLS:
+        raise typer.BadParameter(
+            "Unsupported --ruby-protocol value "
+            f"{ruby_protocol!r}. Expected one of: "
+            + ", ".join(SUPPORTED_RUBY_PROTOCOLS)
+        )
+    return ruby_protocol
+
 @app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
 def create_base_image(
     image_folder: Annotated[str, typer.Option(
@@ -243,10 +255,12 @@ def qpoints_convert_single_cmd(
     qmp_base: Annotated[int, typer.Option(help="Base port for QMP.")] = 4444,
     ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
     overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directory.")] = False,
+    ruby_protocol: Annotated[str, typer.Option(help="Target Ruby protocol for gem5 uarch restore preparation (e.g. mesi_two_level or moesi_cmp_directory).")] = "mesi_two_level",
 ):
     """
     Convert a single QPoints snapshot by running the QEMU emulation and gem5 checkpoint generation.
     """
+    ruby_protocol = _validate_qpoints_ruby_protocol(ruby_protocol)
     qpoints_convert_single(
         qflex_ckp_dir=qflex_ckp_dir,
         gem5_ckp_dir=gem5_ckp_dir,
@@ -260,6 +274,7 @@ def qpoints_convert_single_cmd(
         qmp_base=qmp_base,
         ssh_base=ssh_base,
         overwrite=overwrite,
+        ruby_protocol=ruby_protocol,
     )
 
 
@@ -279,10 +294,12 @@ def qpoints_convert_multi_cmd(
     qmp_base: Annotated[int, typer.Option(help="Base port for QMP.")] = 4444,
     ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
     overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directories.")] = False,
+    ruby_protocol: Annotated[str, typer.Option(help="Target Ruby protocol for gem5 uarch restore preparation (e.g. mesi_two_level or moesi_cmp_directory).")] = "mesi_two_level",
 ):
     """
     Convert a range of QPoints snapshots.
     """
+    ruby_protocol = _validate_qpoints_ruby_protocol(ruby_protocol)
     qpoints_convert_multi(
         first=first,
         last=last,
@@ -298,6 +315,7 @@ def qpoints_convert_multi_cmd(
         qmp_base=qmp_base,
         ssh_base=ssh_base,
         overwrite=overwrite,
+        ruby_protocol=ruby_protocol,
     )
 
 
@@ -317,6 +335,9 @@ def qpoints_run_gem5_cmd(
     timing_ruby: Annotated[
         bool, typer.Option(help="Run gem5 in O3 Ruby MESI_Two_Level mode.")
     ] = False,
+    timing_ruby_moesi: Annotated[
+        bool, typer.Option(help="Run gem5 in O3 Ruby MOESI_CMP_directory mode.")
+    ] = False,
     sim_config: Annotated[
         str | None,
         typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
@@ -325,6 +346,10 @@ def qpoints_run_gem5_cmd(
     """
     Run gem5 for a single snapshot using QPoints run_gem5.sh.
     """
+    if timing_ruby and timing_ruby_moesi:
+        raise typer.BadParameter(
+            "Choose only one timing Ruby protocol flag: --timing-ruby or --timing-ruby-moesi."
+        )
     if dump_cache_state and not timing_ruby:
         raise typer.BadParameter(
             "--dump-cache-state requires --timing-ruby."
@@ -340,6 +365,7 @@ def qpoints_run_gem5_cmd(
         data_trace=data_trace,
         dump_cache_state=dump_cache_state,
         timing_ruby=timing_ruby,
+        timing_ruby_moesi=timing_ruby_moesi,
         sim_config=sim_config,
     )
 
