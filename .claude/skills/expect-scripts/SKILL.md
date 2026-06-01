@@ -261,6 +261,51 @@ After every `Write` of a new expect script, `chmod +x` it. Confirm with `ls -la`
 
 Alpine's busybox shell renders the prompt with a trailing `\e[6n` (cursor-position report request). The prompt regex therefore must NOT anchor to end-of-buffer — `\$ $` never matches. Use `[\$#] +` (no end anchor) instead. The `[6n` bytes still leak into `expect_out(buffer)` and end up in your captured `ls` output; that's expected, not a bug.
 
+### `[6n` also makes the script feel SLOW — fix with a `\r` nudge, NOT by answering the DSR
+
+`\e[6n` is a Device Status Report: busybox's line editor sends it and then **blocks
+reading for the terminal's cursor-position reply** (`\e[…R`), which expect/telnet never
+sends. busybox unblocks only when its short read times out or **any input byte arrives**.
+That stall is why a run "hangs" at a prompt until you type — the command already ran (its
+output streamed); the line-editor is just parked waiting on the reply. Symptom in the logs:
+a prompt line ending in `[6n` with no progress until input.
+
+**The fix that works: a `\r` nudge before each wait-for-prompt.** After a command whose
+result you await as the next prompt line, `send "\r"` *then* `expect -re {[\$#] +}`. The
+`\r` is the input byte that releases busybox's blocked read, so the prompt flushes
+immediately. Critically it's a `send`, so it never consumes buffered output. Apply it to
+the one-liner drains (`send "cmd\r"; send "\r"; expect -re {# +}`) and the block drains
+(`send "\r"` on the line before the `expect {…}`). Skip it on `su`/login auth blocks (they
+already answer `Login:`/`Password:` with their own `\r` via `exp_continue`) and on
+output-waits that match a specific string rather than the bare prompt.
+
+**Do NOT try to auto-answer the `[6n` with a global `expect_before`.** It looks right
+(`expect_before -re "\033\\\[6n" { send "\033\[1;1R"; exp_continue }`) but it cannot work
+here, and the failures are instructive (all hit while building the MS load scripts):
+
+1. **`error writing "stdout": bad file number`.** `expect_before` (no `-i`) binds to the
+   spawn_id that exists *when it is called*. Placed at the top of the script before any
+   `spawn`, it binds to the default user channel, and its `send` writes to stdout —
+   corrupting it, so the next plain `puts` dies. (Even fixing this by binding `-i
+   $serial_sid` after the spawn doesn't save the approach — see #3.)
+2. **`can't read "serial_sid": no such variable`.** The before-body runs in whatever scope
+   the triggering `expect` is in. When the DSR fires inside a proc (e.g.
+   `wait_for_pane_substring`), a body referencing a top-level var like `$serial_sid` throws,
+   because Tcl proc scope doesn't fall back to globals for an explicit `$var`. (A bare
+   `send` dodges this — but still see #3.)
+3. **The fatal, unfixable one — it eats the prompt.** busybox emits the prompt and the DSR
+   glued together: `/home/qflex # \e[6n`. When the `expect_before` pattern matches the
+   `\e[6n`, expect consumes the buffer **from the start through the match**, which includes
+   the `# ` prompt sitting just before it. So your `-re {# +}` arm never sees the prompt,
+   `exp_continue` re-enters on an empty buffer, no more bytes arrive, and the wait times out
+   (observed: `ERROR: never reached root prompt after su`). Any expect_before that matches a
+   DSR trailing a prompt will swallow that prompt. There is no clean way around it.
+
+So: nudge with `\r` (a non-consuming `send`), don't match-and-answer the DSR. If you ever
+truly need to stop busybox emitting `[6n` at all, the only safe lever is guest-side
+(`export TERM=dumb` after login) — and it's build-dependent, so verify it actually silences
+the query before relying on it.
+
 ## Who the user is at the prompt
 
 The guest's hostname is `qflex` (set during base-image creation), not `alpine`. The shell prompt is `qflex:~$ ` for the unprivileged `qflex` user and `qflex:~#` for `root`. **Don't anchor on `alpine:`** — that string never appears at the prompt. Match `[\$#] +` for "any prompt regardless of user", or `qflex:[^\r\n]*[\$#] +` if you specifically want to confirm you're at this guest's shell (and not in some other tool that also prints a `$`).

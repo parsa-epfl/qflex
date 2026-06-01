@@ -15,14 +15,13 @@ components:
 boot:
   components:
     experiment_context:
-      interactive_tmux: true
-      # interaction_script: /home/dev/qflex/conf/DS/expects/boot_savevm_booted_single.exp
+      interaction_script: /home/dev/qflex/conf/DS/expects/boot_savevm_booted_single.exp
 
 load:
   components:
     experiment_context:
-      interactive_tmux: true
-      # interaction_script: /home/dev/qflex/conf/DS/expects/load_savevm_loaded_single.exp
+      quantum_size: 100000
+      interaction_script: /home/dev/qflex/conf/DS/expects/load_savevm_loaded_single.exp
       loadvm_name: booted
 
 initialize:

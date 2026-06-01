@@ -365,11 +365,15 @@ send "\r"; expect { timeout { } -re {# +} }
 # TODO this needs to be transferred to correctly use the load script instead of hardcoding the hammar command here. there is a current bug for 1 core in that script I think
 send "taskset -c 0 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
+set tasks_created 0
 expect {
-    timeout { puts "ERROR: hammar load didn't print 'All tasks are created.'"; quit_qemu $monitor_port; exit 1 }
-    -re {All tasks are created\.}
+    timeout { puts "ERROR: hammar load printed 'All tasks are created.' only $tasks_created/4 times"; quit_qemu $monitor_port; exit 1 }
+    -re {All tasks are created\.} {
+        incr tasks_created
+        if {$tasks_created < 4} { exp_continue }
+    }
 }
-puts "follower: tasks created; client load done."
+puts "follower: all 4 tasks created; client load done."
 
 if {[catch {set f [open $client_done_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $client_done_flag: $err"; quit_qemu $monitor_port; exit 1
