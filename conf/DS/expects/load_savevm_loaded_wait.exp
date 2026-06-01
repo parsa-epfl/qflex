@@ -1,0 +1,269 @@
+#!/usr/bin/env expect
+# MULTI-NODE FOLLOWER (node_number > 0) DS load. Loads from `booted`, brings up
+# the PDES NIC (eth0 = 192.168.100.2), ping-verifies the wire to master, waits
+# for the server, then runs the YCSB client on the SERIAL spawn (no tmux) so its
+# output streams live: run_client.sh, swap YCSB workloada->workloadc in
+# warmup.sh + load.sh, `./warmup.sh 192.168.100.1 10000000 16`, then
+# `./load.sh 192.168.100.1 10000000 5000 16`. Once the load is emitting
+# throughput lines it signals master (which then issues savevm), and waits for
+# its OWN per-node `savevm log 7`.
+#
+# Pair with conf/DS/expects/load_savevm_loaded_master.exp on node 0. Does NOT
+# issue `savevm` over the monitor — savevm is master-only on multi-node. The
+# client reaches the server directly at 192.168.100.1 (DS scripts take the server
+# IP as an arg), so no iptables DNAT is needed.
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         120
+set BUDGET_WORKLOAD_INIT_S 86400   ; # 24h client budget (cqlsh + YCSB warmup of 10M records can take many hours wall-clock under PDES)
+set BUDGET_CHECKPOINTING_S 10800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+if {[info exists env(GROUP_EXP_FOLDER)]} {
+    set group_folder $env(GROUP_EXP_FOLDER)
+} else {
+    set group_folder [file dirname $exp_folder]
+}
+set wire_master_flag    "$group_folder/ds_load_wire_master.flag"
+set wire_wait_flag      "$group_folder/ds_load_wire_wait.flag"
+set ping_master_flag    "$group_folder/ds_load_ping_master.flag"
+set ping_wait_flag      "$group_folder/ds_load_ping_wait.flag"
+set server_ready_flag   "$group_folder/ds_load_server_ready.flag"
+set client_running_flag "$group_folder/ds_load_client_running.flag"
+catch {file delete -force $wire_wait_flag}
+catch {file delete -force $ping_wait_flag}
+catch {file delete -force $client_running_flag}
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]; set content [read $fh]; close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
+# --- 1. Connect serial + nudge for post-loadvm prompt; su to root -----------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "ERROR: shell prompt timed out after loadvm"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
+sleep 5
+
+send "su\r"
+expect {
+    timeout { puts "ERROR: never reached root prompt after su"; quit_qemu $monitor_port; exit 1 }
+    -re {[Aa]uthentication failure|incorrect password} {
+        puts "ERROR: su rejected empty creds"; quit_qemu $monitor_port; exit 1
+    }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
+}
+
+# --- 2. IP bring-up on the PDES NIC (eth0 = 192.168.100.2), after master's --
+
+wait_for_file $wire_master_flag $BUDGET_WORKLOAD_INIT_S
+send "ip link set eth0 down\r";                      send "\r"; expect -re {# +}
+send "ip link set eth0 address 52:54:00:aa:bb:0a\r"; send "\r"; expect -re {# +}
+send "ip link set eth0 up\r";                        send "\r"; expect -re {# +}
+send "ip addr flush dev eth0\r"
+send "\r"
+expect {
+    timeout { puts "ERROR: ip addr flush timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "ip addr add 192.168.100.2/24 dev eth0\r";   send "\r"; expect -re {# +}
+send "ip addr show eth0\r";                        send "\r"; expect -re {# +}
+
+if {[catch {set f [open $wire_wait_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $wire_wait_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "follower: eth0 up at 192.168.100.2; wrote $wire_wait_flag."
+
+# --- 3. Ping verify the wire to master, AFTER master's ping (0-drop) --------
+
+wait_for_file $ping_master_flag $BUDGET_WORKLOAD_INIT_S
+send "ping 192.168.100.1 -i 0.5 -W 100 -c 10\r"
+set timeout 150
+expect {
+    timeout { puts "ERROR: ping summary didn't arrive within 150s"; quit_qemu $monitor_port; exit 1 }
+    -re {(\d+) packets transmitted, (\d+)[ ,]} {
+        set tx $expect_out(1,string); set rx $expect_out(2,string)
+        puts "follower: ping summary -> $tx transmitted, $rx received"
+        if {$tx != $rx} {
+            puts "ERROR: ping drops detected (tx=$tx rx=$rx); aborting"
+            quit_qemu $monitor_port; exit 1
+        }
+    }
+}
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { puts "WARN: prompt didn't return after ping summary; continuing" }
+    -re {# +}
+}
+
+if {[catch {set f [open $ping_wait_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $ping_wait_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "follower: ping OK; wrote $ping_wait_flag; clearing stale containers."
+
+# --- 4. Clear leftover containers -------------------------------------------
+
+send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
+send "\r"
+expect {
+    timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
+send "\r"
+expect {
+    timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {# +}
+}
+
+# --- 5. Wait for the server to be up ----------------------------------------
+
+puts "follower: waiting for $server_ready_flag..."
+wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
+puts "follower: server is up; launching YCSB client (live on serial)."
+
+# --- 6. Client container on the serial spawn (live output) ------------------
+# run_client.sh drops into the client container's root shell (root@qflex:/#).
+
+send "./run_client.sh\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: client container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {root@qflex:/#}
+}
+puts "follower: in client container; swapping YCSB workloada->workloadc in warmup.sh + load.sh..."
+
+# Swap the YCSB workload a->c in place (workloada appears exactly once per file).
+send "sed -i 's#workloads/workloada#workloads/workloadc#' warmup.sh\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: sed warmup.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {root@qflex:/#}
+}
+send "sed -i 's#workloads/workloada#workloads/workloadc#' load.sh\r"
+expect {
+    timeout { puts "ERROR: sed load.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {root@qflex:/#}
+}
+
+# --- 7. Warmup against the server over the wire (192.168.100.1) -------------
+# Fills Cassandra with 10M records, 16 threads. warmup.sh retries cqlsh until
+# the seed server accepts, then runs YCSB load. Finishes with 'Warm up is done.'
+
+send "./warmup.sh 192.168.100.1 10000000 16\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: warmup didn't print 'Warm up is done.'"; quit_qemu $monitor_port; exit 1 }
+    -re {Warm up is done\.}
+}
+puts "follower: warmup done; waiting for the prompt before loading..."
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: warmup didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {root@qflex:/#}
+}
+
+# --- 8. Load against the server over the wire (192.168.100.1) ---------------
+# Starts emitting throughput lines ('... current ops/sec; est completion in ...')
+# ~10s in. Snapshot the guest with the load actively running.
+
+send "./load.sh 192.168.100.1 10000000 5000 16\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: load didn't emit a throughput line"; quit_qemu $monitor_port; exit 1 }
+    -re {current ops/sec; est completion in}
+}
+puts "follower: load running (first throughput line seen); signalling master to savevm."
+
+if {[catch {set f [open $client_running_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $client_running_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+
+# --- 9. Wait for own per-node savevm log 7 + 60s settle --------------------
+
+puts "follower: wrote $client_running_flag; waiting for own 'savevm log 7' in Load.log..."
+wait_for_substring "$exp_folder/Load.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
+puts "follower: saw 'savevm log 7' — per-node savevm finalised. Sleeping 60s..."
+sleep 60
+
+quit_qemu $monitor_port
+exit 0
