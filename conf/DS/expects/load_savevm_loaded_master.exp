@@ -20,7 +20,7 @@ set timeout 900
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S          120
-set BUDGET_WORKLOAD_INIT_S 86400   ; # 24h: server init + waiting for follower's warmup of 10M records (can be many hours under PDES)
+set BUDGET_WORKLOAD_INIT_S 129600   ; # 36h: server init + waiting for follower's warmup of 10M records (can be many hours under PDES)
 set BUDGET_CHECKPOINTING_S 10800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
