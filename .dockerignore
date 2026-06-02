@@ -18,6 +18,7 @@ Dockerfile
 images/
 .github/
 __pycache__/
+.venv/
 cfg/
 experiments/
 *.qcow2

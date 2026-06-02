@@ -1,5 +1,6 @@
 cfg/
 *.pyc
+.venv/
 checkpoint
 *.log
 build/
