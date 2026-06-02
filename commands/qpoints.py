@@ -10,6 +10,9 @@ import threading
 import concurrent.futures
 from typing import Optional
 
+DEFAULT_ITB_SIZE = 64
+DEFAULT_DTB_SIZE = 64
+
 
 def _ensure_executable(path: Path) -> None:
     mode = path.stat().st_mode
@@ -173,6 +176,9 @@ def _apply_snapshot_gem5_uarch(
     if not tlb_source_files:
         return
 
+    gem5_uarch_dir = checkpoint_dir / "gem5_uarch"
+    gem5_uarch_dir.mkdir(parents=True, exist_ok=True)
+
     gem5_bin = qpoints_root / "gem5" / "build" / "ARM" / "gem5.opt"
     gem5_cfg = qpoints_root / "gem5" / "configs" / "example" / "arm" / "starter_fs.py"
     kernel = qpoints_root / "bin" / "m5" / "binaries" / "vmlinux.arm64"
@@ -188,7 +194,7 @@ def _apply_snapshot_gem5_uarch(
             tlb_source = tlb_source_files.get(str(cpu))
             if not tlb_source:
                 continue
-            mmu_cpt = checkpoint_dir / f"mmu-cpu{cpu}.cpt"
+            mmu_cpt = gem5_uarch_dir / f"mmu-cpu{cpu}.cpt"
             if mmu_cpt.exists():
                 mmu_cpt.unlink()
             subprocess.run(
@@ -212,10 +218,14 @@ def _apply_snapshot_gem5_uarch(
                     str(core_count),
                     "--mem-size",
                     "16384MiB",
+                    "--itb-size",
+                    str(DEFAULT_ITB_SIZE),
+                    "--dtb-size",
+                    str(DEFAULT_DTB_SIZE),
                     "--va-file",
                     tlb_source,
                     "--tlb-output-dir",
-                    str(checkpoint_dir),
+                    str(gem5_uarch_dir),
                     "--kernel",
                     str(kernel),
                 ],
@@ -444,8 +454,6 @@ def convert_single(
             core_count,
             uarch_manifest,
         )
-        print(f"[{snapshot}] finalizing gem5 checkpoint")
-        _finalize_snapshot_checkpoint(repo_root, img_dest_dir, core_count)
     except KeyboardInterrupt:
         raise
     finally:
