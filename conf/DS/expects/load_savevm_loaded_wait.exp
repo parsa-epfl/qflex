@@ -213,6 +213,14 @@ expect {
 # --- 6. Client container on the serial spawn (live output) ------------------
 # run_client.sh drops into the client container's root shell (root@qflex:/#).
 
+# This leaf is -smp 1 (only CPU 0); run_client.sh pins the container to CPU 1
+# (--cpuset-cpus=1), which docker refuses here. Repin it to CPU 0.
+send "sed -i 's/--cpuset-cpus=1/--cpuset-cpus=0/' run_client.sh\r"
+expect {
+    timeout { puts "ERROR: sed run_client.sh cpuset didn't return prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {[\$#] +}
+}
+
 send "./run_client.sh\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
