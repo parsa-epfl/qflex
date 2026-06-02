@@ -246,7 +246,7 @@ expect {
 # Fills Cassandra with 10M records, 16 threads. warmup.sh retries cqlsh until
 # the seed server accepts, then runs YCSB load. Finishes with 'Warm up is done.'
 
-send "./warmup.sh 192.168.100.1 1000 16\r"
+send "./warmup.sh 192.168.100.1 10000000 16\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: warmup didn't print 'Warm up is done.'"; quit_qemu $monitor_port; exit 1 }
@@ -263,7 +263,7 @@ expect {
 # Starts emitting throughput lines ('... current ops/sec; est completion in ...')
 # ~10s in. Snapshot the guest with the load actively running.
 
-send "./load.sh 192.168.100.1 1000 5000 16\r"
+send "./load.sh 192.168.100.1 10000000 5000 16\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: load didn't emit a throughput line"; quit_qemu $monitor_port; exit 1 }
