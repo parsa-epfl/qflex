@@ -3,9 +3,9 @@ import re
 import shutil
 import subprocess
 import time
+import json
 from pathlib import Path
 import sys
-import signal
 import threading
 import concurrent.futures
 from typing import Optional
@@ -98,21 +98,21 @@ def _prepare_snapshot_gem5_uarch(
     gem5_ckp_dir: str,
     snapshot: str,
     ruby_protocol: str = "mesi_two_level",
-) -> None:
+) -> Optional[dict]:
     qflex_uarch_dir = Path(qflex_ckp_dir) / "run" / f"{snapshot}.uarch"
     if not qflex_uarch_dir.is_dir():
         print(
             f"[{snapshot}] no qflex uarch directory found at {qflex_uarch_dir}; "
             "skipping gem5 uarch preparation"
         )
-        return
+        return None
     if shutil.which("zstd") is None:
         print(
             f"[{snapshot}] zstd not found; skipping gem5 uarch preparation "
             f"for {qflex_uarch_dir}",
             file=sys.stderr,
         )
-        return
+        return None
 
     try:
         prepare_script = _require_qpoints_file(
@@ -124,7 +124,7 @@ def _prepare_snapshot_gem5_uarch(
             f"uarch preparation for {qflex_uarch_dir}",
             file=sys.stderr,
         )
-        return
+        return None
 
     print(f"[{snapshot}] preparing gem5 uarch artifacts")
     try:
@@ -145,12 +145,107 @@ def _prepare_snapshot_gem5_uarch(
             text=True,
             check=True,
         )
+        manifest_file = Path(gem5_ckp_dir) / snapshot / "gem5_uarch" / "manifest.json"
+        if manifest_file.is_file():
+            return json.loads(manifest_file.read_text(encoding="utf-8"))
     except subprocess.CalledProcessError:
         print(
             f"[{snapshot}] gem5 uarch preparation failed for "
             f"{qflex_uarch_dir}; continuing without gem5 uarch artifacts",
             file=sys.stderr,
         )
+    return None
+
+
+def _apply_snapshot_gem5_uarch(
+    repo_root: Path,
+    qpoints_root: Path,
+    checkpoint_dir: Path,
+    snapshot: str,
+    core_count: int,
+    uarch_manifest: Optional[dict],
+) -> None:
+    if not uarch_manifest:
+        return
+
+    tlb_manifest = uarch_manifest.get("components", {}).get("tlb", {})
+    tlb_source_files = tlb_manifest.get("source_files", {})
+    if not tlb_source_files:
+        return
+
+    gem5_bin = qpoints_root / "gem5" / "build" / "ARM" / "gem5.opt"
+    gem5_cfg = qpoints_root / "gem5" / "configs" / "example" / "arm" / "starter_fs.py"
+    kernel = qpoints_root / "bin" / "m5" / "binaries" / "vmlinux.arm64"
+    bootloader = qpoints_root / "bin" / "m5" / "binaries" / "boot_v2_qemu_virt.arm64"
+    disk_image = checkpoint_dir / f"{snapshot}.img"
+    outdir = checkpoint_dir / ".tlb_apply_out"
+    if outdir.exists():
+        shutil.rmtree(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        for cpu in range(core_count):
+            tlb_source = tlb_source_files.get(str(cpu))
+            if not tlb_source:
+                continue
+            mmu_cpt = checkpoint_dir / f"mmu-cpu{cpu}.cpt"
+            if mmu_cpt.exists():
+                mmu_cpt.unlink()
+            subprocess.run(
+                [
+                    str(gem5_bin),
+                    f"--outdir={outdir}",
+                    str(gem5_cfg),
+                    "-I",
+                    "10000",
+                    f"--disk-image={disk_image}",
+                    f"--bootloader={bootloader}",
+                    "--caches",
+                    "--cpu-type",
+                    "AtomicSimpleCPU",
+                    "--fdip",
+                    "--bp-type",
+                    "TAGE",
+                    "--restore",
+                    str(checkpoint_dir),
+                    "--num-cores",
+                    str(core_count),
+                    "--mem-size",
+                    "16384MiB",
+                    "--va-file",
+                    tlb_source,
+                    "--tlb-output-dir",
+                    str(checkpoint_dir),
+                    "--kernel",
+                    str(kernel),
+                ],
+                cwd=str(qpoints_root / "gem5"),
+                text=True,
+                check=True,
+            )
+    finally:
+        if outdir.exists():
+            shutil.rmtree(outdir)
+
+
+def _finalize_snapshot_checkpoint(
+    repo_root: Path,
+    checkpoint_dir: Path,
+    core_count: int,
+) -> None:
+    create_gem5_checkpoint = repo_root / "create_gem5_checkpoint.py"
+    subprocess.run(
+        [
+            sys.executable,
+            str(create_gem5_checkpoint),
+            str(checkpoint_dir),
+            "--num-cores",
+            str(core_count),
+        ],
+        cwd=str(repo_root),
+        text=True,
+        check=True,
+    )
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -327,27 +422,30 @@ def convert_single(
             )
 
         store0 = run_dir / "system.physmem.store0.pmem"
-        if store0.is_file():
-            shutil.copy2(store0, img_dest_dir / store0.name)
+        if not store0.is_file():
+            store0 = _require_qpoints_file(
+                qpoints_root, "scripts/base_files/system.physmem.store0.pmem"
+            )
+        shutil.copy2(store0, img_dest_dir / "system.physmem.store0.pmem")
 
         print(f"[{snapshot}] composing base m5.cpt")
-        subprocess.run(
-            [
-                sys.executable,
-                str(create_gem5_checkpoint),
-                str(img_dest_dir),
-                "--num-cores",
-                str(core_count),
-            ],
-            cwd=str(repo_root),
-            text=True,
-            check=True,
-        )
+        _finalize_snapshot_checkpoint(repo_root, img_dest_dir, core_count)
 
         _check_cancelled()
-        _prepare_snapshot_gem5_uarch(
+        uarch_manifest = _prepare_snapshot_gem5_uarch(
             qpoints_root, qflex_ckp_dir, gem5_ckp_dir, snapshot, ruby_protocol
         )
+        print(f"[{snapshot}] applying gem5 uarch artifacts")
+        _apply_snapshot_gem5_uarch(
+            repo_root,
+            qpoints_root,
+            img_dest_dir,
+            snapshot,
+            core_count,
+            uarch_manifest,
+        )
+        print(f"[{snapshot}] finalizing gem5 checkpoint")
+        _finalize_snapshot_checkpoint(repo_root, img_dest_dir, core_count)
     except KeyboardInterrupt:
         raise
     finally:
