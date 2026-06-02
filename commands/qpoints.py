@@ -84,6 +84,14 @@ def _remove_path(path: Path) -> None:
     shutil.rmtree(path)
 
 
+def _symlink_file(target: Path, source: Path) -> None:
+    if not source.is_file():
+        raise RuntimeError(f"Required producer artifact not found: {source}")
+    if target.exists() or target.is_symlink():
+        target.unlink()
+    target.symlink_to(source)
+
+
 def _prepare_snapshot_gem5_uarch(
     qpoints_root: Path,
     qflex_ckp_dir: str,
@@ -272,9 +280,15 @@ def convert_single(
                 f"{qemu_gem5_dump_dir}.{_tail_file(qemu_log)}"
             )
 
-        print(f"[{snapshot}] linking canonical checkpoint root to .gem bundle")
+        print(f"[{snapshot}] materializing canonical checkpoint directory")
         img_dest_dir.parent.mkdir(parents=True, exist_ok=True)
-        img_dest_dir.symlink_to(qemu_gem5_dump_dir)
+        img_dest_dir.mkdir(parents=True, exist_ok=True)
+        _symlink_file(img_dest_dir / "register-info.json", register_info)
+        _symlink_file(img_dest_dir / "dev.info", dev_info)
+        _symlink_file(
+            img_dest_dir / "system.physmem.store1.pmem",
+            physmem,
+        )
 
         print(f"[{snapshot}] converting disk image")
         _check_cancelled()
