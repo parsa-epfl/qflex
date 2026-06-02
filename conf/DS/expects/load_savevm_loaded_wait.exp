@@ -155,7 +155,7 @@ puts "follower: eth0 up at 192.168.100.2; wrote $wire_wait_flag."
 # --- 3. Ping verify the wire to master, AFTER master's ping (0-drop) --------
 
 wait_for_file $ping_master_flag $BUDGET_WORKLOAD_INIT_S
-send "ping 192.168.100.1 -i 0.5 -W 100 -c 10\r"
+send "ping 192.168.100.1 -i 0.05 -W 100 -c 10\r"
 set timeout 150
 expect {
     timeout { puts "ERROR: ping summary didn't arrive within 150s"; quit_qemu $monitor_port; exit 1 }
@@ -199,7 +199,16 @@ expect {
 
 puts "follower: waiting for $server_ready_flag..."
 wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
-puts "follower: server is up; launching YCSB client (live on serial)."
+puts "follower: server is up; dropping back to qflex for the client."
+
+# Drop from root (used for eth0) back to qflex so the client runs exactly as
+# single-node does. From here the client bring-up is VERBATIM single-node.
+send "su qflex\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: su qflex failed"; quit_qemu $monitor_port; exit 1 }
+    -re {\$ +}
+}
 
 # --- 6. Client container on the serial spawn (live output) ------------------
 # run_client.sh drops into the client container's root shell (root@qflex:/#).
@@ -229,7 +238,7 @@ expect {
 # Fills Cassandra with 10M records, 16 threads. warmup.sh retries cqlsh until
 # the seed server accepts, then runs YCSB load. Finishes with 'Warm up is done.'
 
-send "./warmup.sh 192.168.100.1 10000000 16\r"
+send "./warmup.sh 192.168.100.1 1000 16\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: warmup didn't print 'Warm up is done.'"; quit_qemu $monitor_port; exit 1 }
@@ -246,7 +255,7 @@ expect {
 # Starts emitting throughput lines ('... current ops/sec; est completion in ...')
 # ~10s in. Snapshot the guest with the load actively running.
 
-send "./load.sh 192.168.100.1 10000000 5000 16\r"
+send "./load.sh 192.168.100.1 1000 5000 16\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: load didn't emit a throughput line"; quit_qemu $monitor_port; exit 1 }

@@ -1,11 +1,15 @@
 #!/usr/bin/env expect
 # MULTI-NODE MASTER (node_number == 0) DS load. Loads from `booted`, brings up
 # the PDES NIC (eth0 = 192.168.100.1), ping-verifies the wire to the follower,
-# then runs the Cassandra server in a detached tmux window via
-# `./docker-entrypoint.py -a 192.168.100.1` — the `-a` advertises the wire IP as
-# Cassandra's broadcast_rpc_address so the follower's cqlsh/YCSB driver is
-# steered to 192.168.100.1 (not back to 127.0.0.1). Signals the follower, waits
-# for the follower's YCSB load to start running, then `savevm loaded`.
+# then runs the Cassandra server foreground on the serial (live output, no tmux)
+# via the stock ./run_server.sh + ./docker-entrypoint.py (plain). Signals the
+# follower, waits for the follower's YCSB load to start running, then
+# `savevm loaded`.
+#
+# The server is NOT special-cased: docker-entrypoint.py runs plain, so it
+# gossips on loopback (get_ip fallback) and reaches `Startup complete` fast.
+# Only the client side differs from single-node — the follower's warmup/load
+# target 192.168.100.1 (the master's wire IP) instead of 127.0.0.1.
 #
 # Pair with conf/DS/expects/load_savevm_loaded_wait.exp on the follower. PDES
 # `savevm` is a distributed snapshot — only the master issues it; the follower
@@ -105,32 +109,6 @@ proc wait_for_substring {path needle budget_seconds} {
     error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
 }
 
-# Poll a tmux pane for a literal substring, fail-fast on bash syntax errors.
-proc wait_for_pane_substring {session window needle budget_seconds} {
-    global timeout
-    set saved_timeout $timeout
-    set deadline [expr {[clock seconds] + $budget_seconds}]
-    while {[clock seconds] < $deadline} {
-        send "tmux capture-pane -t ${session}:${window} -p\r"
-        set buf ""
-        set timeout 5
-        expect {
-            -re {.+} { append buf $expect_out(buffer); exp_continue }
-            timeout { }
-        }
-        if {[string first $needle $buf] >= 0} { set timeout $saved_timeout; return }
-        foreach err {"bash: syntax error" "syntax error near unexpected"} {
-            if {[string first $err $buf] >= 0} {
-                set timeout $saved_timeout
-                error "wait_for_pane_substring: bash error in $session:$window: '$err' (waiting for '$needle')"
-            }
-        }
-        sleep 2
-    }
-    set timeout $saved_timeout
-    error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
-}
-
 # --- 1. Connect serial + nudge for post-loadvm prompt; su to root -----------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
@@ -181,7 +159,7 @@ wait_for_file $wire_wait_flag $BUDGET_PROMPT_S
 # the follower pings while the master waits ($ping_wait_flag) — no overlap.
 # Slow interval + generous -W: avoid the WWT burst race, tolerate slow sim RTTs.
 
-send "ping 192.168.100.2 -i 0.5 -W 100 -c 10\r"
+send "ping 192.168.100.2 -i 0.05 -W 100 -c 10\r"
 set timeout 150
 expect {
     timeout { puts "ERROR: ping summary didn't arrive within 150s"; quit_qemu $monitor_port; exit 1 }
@@ -206,53 +184,55 @@ if {[catch {set f [open $ping_master_flag "w"]; close $f} err]} {
 }
 puts "master: ping OK; wrote $ping_master_flag; waiting for follower's ping ($ping_wait_flag)..."
 wait_for_file $ping_wait_flag $BUDGET_WORKLOAD_INIT_S
-puts "master: follower's ping done; clearing stale containers."
+puts "master: follower's ping done; dropping back to qflex for the workload."
 
-# --- 4. Clear leftover containers (server uses --name cassandra) ------------
+# --- 4. Drop from root (used for eth0) back to qflex ------------------------
+# From here the server bring-up is VERBATIM single-node: qflex user, no nudges.
+
+send "su qflex\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: su qflex failed"; quit_qemu $monitor_port; exit 1 }
+    -re {\$ +}
+}
+
+# --- 5. Clear leftover containers from a prior run --------------------------
+# The server runs with `--name cassandra`, so a stale container would break
+# `docker run --name` on this run.
 
 send "docker stop \$(docker ps -a -q) 2>/dev/null\r"
-send "\r"
 expect {
     timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
+    -re {[\$#] +}
 }
 send "docker rm \$(docker ps -a -q) 2>/dev/null\r"
-send "\r"
 expect {
     timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
+    -re {[\$#] +}
 }
 
-# --- 5. Server in a single detached tmux window -----------------------------
+# --- 6. Server on the serial spawn (live output, no tmux/polling) -----------
 # run_server.sh: docker run -it --cpuset-cpus=0 --net host --name cassandra
 #   --entrypoint bash abdu1998a/dataserving:server -> root shell in container.
-# docker-entrypoint.py -a 192.168.100.1: configures cassandra.yaml then execs
-# `cassandra -R -f` (foreground), prints 'Startup complete' once CQL is up.
+# docker-entrypoint.py rewrites cassandra.yaml then execvp's `cassandra -R -f`
+# (foreground). Its log streams live to the serial; we wait for 'Startup
+# complete' on that stream. The server stays foreground on the serial through
+# savevm (we never close the serial), so the snapshot captures it running.
 
-send "tmux new-session -d -s ds\r"
-send "\r"
+send "./run_server.sh\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: tmux new-session timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
+    timeout { puts "ERROR: server container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
+    -re {root@qflex:/#}
 }
-send "tmux send-keys -t ds:0 './run_server.sh' Enter\r"
-send "\r"
-expect {
-    timeout { puts "ERROR: dispatching run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
-}
-puts "ds: window 0 (server) launched; waiting for 'root@qflex:/#'..."
-wait_for_pane_substring ds 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
-puts "ds: server container at root shell; dispatching docker-entrypoint.py -a 192.168.100.1..."
+puts "ds: server container at root shell; dispatching ./docker-entrypoint.py..."
 
-send "tmux send-keys -t ds:0 './docker-entrypoint.py -a 192.168.100.1' Enter\r"
-send "\r"
+send "./docker-entrypoint.py\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: dispatching docker-entrypoint.py timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {# +}
+    timeout { puts "ERROR: Cassandra didn't print 'Startup complete'"; quit_qemu $monitor_port; exit 1 }
+    -re {Startup complete}
 }
-puts "ds: docker-entrypoint.py dispatched; waiting for 'Startup complete'..."
-wait_for_pane_substring ds 0 "Startup complete" $BUDGET_WORKLOAD_INIT_S
 puts "ds: Cassandra startup complete. Settling 5s..."
 sleep 5
 
@@ -268,8 +248,9 @@ puts "master: wrote $server_ready_flag; waiting for follower's YCSB load to star
 wait_for_file $client_running_flag $BUDGET_WORKLOAD_INIT_S
 puts "master: follower's load is running; proceeding to savevm loaded."
 
-catch {close -i $serial_sid}
-catch {wait -i $serial_sid}
+# Keep the serial spawn open — cassandra runs foreground on it; closing it
+# could tear down the server before savevm captures it. savevm goes over the
+# separate monitor port.
 
 # --- 8. savevm loaded via the monitor ---------------------------------------
 
