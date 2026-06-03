@@ -162,7 +162,6 @@ def _prepare_snapshot_gem5_uarch(
 
 
 def _apply_snapshot_gem5_uarch(
-    repo_root: Path,
     qpoints_root: Path,
     checkpoint_dir: Path,
     snapshot: str,
@@ -452,7 +451,6 @@ def convert_single(
         )
         print(f"[{snapshot}] applying gem5 uarch artifacts")
         _apply_snapshot_gem5_uarch(
-            repo_root,
             qpoints_root,
             img_dest_dir,
             snapshot,
