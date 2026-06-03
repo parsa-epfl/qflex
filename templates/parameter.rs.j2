@@ -87,7 +87,7 @@ static_assertions::const_assert!(!(DTLB_SET != 1 && USE_HIGHLY_ASSOCIATIVE_L1TLB
 static_assertions::const_assert!(DTLB_SET.is_power_of_two());
 
 // A debugging flag to see whether we should warm the L1 TLB.
-pub const L1TLB_ENABLED: bool = false;
+pub const L1TLB_ENABLED: bool = true;
 
 pub const STLB_ENABLED: bool = true;
 static_assertions::const_assert!(!(STLB_ENABLED != true && USE_HIGHLY_ASSOCIATIVE_L1TLB));
@@ -327,4 +327,3 @@ pub const ENABLE_EXCLUSIVE_CACHE_STATE: bool = true;
  * This is used to record the cache line coherence history so that you can debug the cache coherence protocol.
  */
 pub const ENABLE_CACHE_LINE_HISTORY: bool = false;
-

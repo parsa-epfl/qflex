@@ -37,7 +37,7 @@ do
     ../vanilla-qemu-system-aarch64 \
         -smp {{ (CORE_COUNT * 2) if DOUBLED_VCPU else CORE_COUNT }} \
         -M virt,gic-version=max,virtualization=off,secure=off \
-        -cpu max,pauth=off \
+        -cpu max,pauth=off,sme=off \
         -m {{ MEMORY }} \
         -boot menu=on \
         -bios ./QEMU_EFI.fd \

@@ -45,7 +45,7 @@ class QemuCommonArgParser:
 
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores} \
-        -cpu max,pauth=off -m {self.memory_size_mb} \
+        -cpu max,pauth=off,sme=off -m {self.memory_size_mb} \
         -boot order=d,menu=on \
         -bios ./QEMU_EFI.fd \
         {drive_arg} \
