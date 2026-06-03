@@ -225,6 +225,8 @@ def _apply_snapshot_gem5_uarch(
                     "--have-large-asid-64",
                     "--va-file",
                     tlb_source,
+                    "--va-cpu-id",
+                    str(cpu),
                     "--tlb-output-dir",
                     str(gem5_uarch_dir),
                     "--kernel",
