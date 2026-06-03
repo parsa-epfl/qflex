@@ -1,5 +1,6 @@
 import os
 from commands.config import ExperimentContext
+from commands.qemu_cpu import resolve_qemu_cpu
 
 class QemuCommonArgParser:
     def __init__(self, experiment_context: ExperimentContext):
@@ -42,10 +43,11 @@ class QemuCommonArgParser:
         
     def get_qemu_base_args(self, monitor_port: int | None = None) -> str:
         drive_arg = f"-drive if=virtio,file={self.image_address},format=qcow2"
+        qemu_cpu = resolve_qemu_cpu()
 
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores} \
-        -cpu max,pauth=off -m {self.memory_size_mb} \
+        -cpu {qemu_cpu} -m {self.memory_size_mb} \
         -boot order=d,menu=on \
         -bios ./QEMU_EFI.fd \
         {drive_arg} \

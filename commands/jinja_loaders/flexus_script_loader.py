@@ -1,6 +1,7 @@
 import os
 from .parameterloader import ParameterLoader
 from ..config import ExperimentContext
+from ..qemu_cpu import resolve_qemu_cpu
 
 
 class FlexusScriptLoader(ParameterLoader):
@@ -26,4 +27,5 @@ class FlexusScriptLoader(ParameterLoader):
             "DOUBLED_VCPU": self.experiment_context.simulation_context.doubled_vcpu,
             "MEMORY": self.experiment_context.simulation_context.memory_gb * 1024,  # in MB
             "QEMU_NIC": self.experiment_context.simulation_context.qemu_nic.strip().lower(),
+            "QEMU_CPU": resolve_qemu_cpu(),
         }
