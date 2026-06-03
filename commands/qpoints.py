@@ -9,6 +9,7 @@ import sys
 import threading
 import concurrent.futures
 from typing import Optional
+from commands.qemu_cpu import resolve_qemu_cpu
 
 DEFAULT_ITB_SIZE = 64
 DEFAULT_DTB_SIZE = 64
@@ -358,13 +359,14 @@ def convert_single(
 
         if not checkpoint_files_exist:
             print(f"[{snapshot}] generating .gem checkpoint bundle")
+            qemu_cpu = resolve_qemu_cpu()
             with qemu_log.open("w") as log_file:
                 subprocess.run(
                     [
                         str(qemu_bin),
                         "-M", "virt,gic-version=max,virtualization=off,secure=off",
                         "-smp", str(core_count),
-                        "-cpu", "max,pauth=off,sme=off",
+                        "-cpu", qemu_cpu,
                         "-m", f"{memory_gb}G",
                         "-boot", "order=d,menu=on",
                         "-bios", str(qemu_efi_fd),
