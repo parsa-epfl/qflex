@@ -15,6 +15,7 @@ from commands.result import RunResultCommand
 from commands.qpoints import convert_single as qpoints_convert_single
 from commands.qpoints import convert_multi as qpoints_convert_multi
 from commands.qpoints import run_gem5 as qpoints_run_gem5
+from commands.qpoints import run_sample as qpoints_run_sample
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -245,6 +246,64 @@ def result(
 
 
 
+@app.command("run_sample")
+def run_sample(
+    timing_engine: Annotated[str, typer.Option(help="Timing engine (currently only gem5 is supported).")] = "gem5",
+    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")] = "",
+    experiment: Annotated[str, typer.Option(help="Experiment name.")] = "",
+    first: Annotated[str, typer.Option(help="First snapshot name, e.g. snapshot_0.")] = "",
+    last: Annotated[str, typer.Option(help="Last snapshot name, e.g. snapshot_99.")] = "",
+    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")] = 1,
+    warmup_cycles: Annotated[int, typer.Option(help="Detailed warmup window in CPU cycles.")] = 0,
+    measurement_cycles: Annotated[int, typer.Option(help="Measurement window in CPU cycles.")] = 0,
+    timing_ruby: Annotated[
+        bool, typer.Option(help="Run gem5 in O3 Ruby MESI_Two_Level mode.")
+    ] = False,
+    timing_ruby_moesi: Annotated[
+        bool, typer.Option(help="Run gem5 in O3 Ruby MOESI_CMP_directory mode.")
+    ] = False,
+    sim_config: Annotated[
+        str | None,
+        typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
+    ] = None,
+):
+    """
+    Run all selected sampling units serially and emit a canonical uIPC report.
+    """
+    if timing_engine != "gem5":
+        raise typer.BadParameter(
+            "Only --timing-engine gem5 is supported at the moment."
+        )
+    if timing_ruby and timing_ruby_moesi:
+        raise typer.BadParameter(
+            "Choose only one timing Ruby protocol flag: --timing-ruby or --timing-ruby-moesi."
+        )
+    if not (timing_ruby or timing_ruby_moesi):
+        raise typer.BadParameter(
+            "run_sample currently requires --timing-ruby or --timing-ruby-moesi."
+        )
+    if measurement_cycles <= 0:
+        raise typer.BadParameter(
+            "--measurement-cycles must be a positive integer."
+        )
+    if warmup_cycles < 0:
+        raise typer.BadParameter(
+            "--warmup-cycles must be non-negative."
+        )
+    qpoints_run_sample(
+        gem5_ckp_dir=gem5_ckp_dir,
+        experiment=experiment,
+        first=first,
+        last=last,
+        core_count=core_count,
+        warmup_cycles=warmup_cycles,
+        measurement_cycles=measurement_cycles,
+        timing_ruby=timing_ruby,
+        timing_ruby_moesi=timing_ruby_moesi,
+        sim_config=sim_config,
+    )
+
+
 @qpoints_app.command("convert-single")
 def qpoints_convert_single_cmd(
     qflex_ckp_dir: Annotated[str, typer.Option(help="QFlex checkpoint directory.")],
@@ -328,8 +387,10 @@ def qpoints_run_gem5_cmd(
     gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")],
     experiment: Annotated[str, typer.Option(help="Experiment name.")],
     snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")],
-    inst: Annotated[int, typer.Option(help="Instruction count.")],
     core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
+    inst: Annotated[int | None, typer.Option(help="Instruction count for legacy instruction-bounded runs.")] = None,
+    warmup_cycles: Annotated[int | None, typer.Option(help="Detailed warmup window in CPU cycles (timing Ruby only).")] = None,
+    measurement_cycles: Annotated[int | None, typer.Option(help="Measurement window in CPU cycles (timing Ruby only).")] = None,
     branch_trace: Annotated[bool, typer.Option(help="Enable branch trace logging in CSV format.")] = False,
     tage_decision_trace: Annotated[bool, typer.Option(help="Enable compact TAGE decision logging.")] = False,
     data_trace: Annotated[bool, typer.Option(help="Enable data access trace logging.")] = False,
@@ -358,11 +419,30 @@ def qpoints_run_gem5_cmd(
         raise typer.BadParameter(
             "--dump-cache-state requires --timing-ruby."
         )
+    if measurement_cycles is not None or warmup_cycles is not None:
+        if not (timing_ruby or timing_ruby_moesi):
+            raise typer.BadParameter(
+                "Cycle-window timing requires --timing-ruby or --timing-ruby-moesi."
+            )
+        if inst is not None:
+            raise typer.BadParameter(
+                "Do not mix --inst with --warmup-cycles/--measurement-cycles."
+            )
+        if measurement_cycles is None:
+            raise typer.BadParameter(
+                "--warmup-cycles requires --measurement-cycles."
+            )
+    elif inst is None:
+        raise typer.BadParameter(
+            "Either --inst or --measurement-cycles must be provided."
+        )
     qpoints_run_gem5(
         gem5_ckp_dir=gem5_ckp_dir,
         experiment=experiment,
         snapshot=snapshot,
         inst=inst,
+        warmup_cycles=warmup_cycles,
+        measurement_cycles=measurement_cycles,
         core_count=core_count,
         branch_trace=branch_trace,
         tage_decision_trace=tage_decision_trace,
