@@ -270,6 +270,84 @@ def _positive_int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _snapshot_names(first: str, last: str) -> list[str]:
+    first_match = re.fullmatch(r"snapshot_(\d+)", first)
+    last_match = re.fullmatch(r"snapshot_(\d+)", last)
+    if not first_match or not last_match:
+        raise RuntimeError("First/last must be in the form snapshot_N.")
+    first_idx = int(first_match.group(1))
+    last_idx = int(last_match.group(1))
+    if first_idx > last_idx:
+        raise RuntimeError("First snapshot index must be <= last snapshot index.")
+    return [f"snapshot_{i}" for i in range(first_idx, last_idx + 1)]
+
+
+def _load_uipc_summary(path: Path) -> dict:
+    if not path.is_file():
+        raise RuntimeError(f"Expected per-snapshot uIPC summary not found: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_uipc_report(qpoints_root: Path, experiment: str, summaries: list[dict]) -> Path:
+    if not summaries:
+        raise RuntimeError("No per-snapshot uIPC summaries were produced.")
+
+    first_cores = summaries[0].get("cores", [])
+    core_ids = [int(item["core"]) for item in first_cores]
+    per_core_ipc_totals = {core: 0.0 for core in core_ids}
+    per_core_uipc_totals = {core: 0.0 for core in core_ids}
+    aggregate_ipc_total = 0.0
+    aggregate_uipc_total = 0.0
+
+    for summary in summaries:
+        summary_cores = summary.get("cores", [])
+        summary_core_ids = [int(item["core"]) for item in summary_cores]
+        if summary_core_ids != core_ids:
+            raise RuntimeError(
+                "Inconsistent per-core uIPC summaries across snapshots; cannot aggregate."
+            )
+        for item in summary_cores:
+            core = int(item["core"])
+            per_core_ipc_totals[core] += float(item.get("ipc", 0.0))
+            per_core_uipc_totals[core] += float(item.get("uipc", 0.0))
+        aggregate_ipc_total += float(summary.get("aggregate", {}).get("ipc", 0.0))
+        aggregate_uipc_total += float(summary.get("aggregate", {}).get("uipc", 0.0))
+
+    snapshot_count = len(summaries)
+    report_cores = [
+        {
+            "core": core,
+            "ipc": per_core_ipc_totals[core] / snapshot_count,
+            "uipc": per_core_uipc_totals[core] / snapshot_count,
+        }
+        for core in core_ids
+    ]
+    aggregate_ipc = aggregate_ipc_total / snapshot_count
+    aggregate_uipc = aggregate_uipc_total / snapshot_count
+    average_ipc = (
+        sum(item["ipc"] for item in report_cores) / len(report_cores)
+        if report_cores else 0.0
+    )
+    average_uipc = (
+        sum(item["uipc"] for item in report_cores) / len(report_cores)
+        if report_cores else 0.0
+    )
+
+    report = {
+        "engine": "gem5",
+        "experiment": experiment,
+        "snapshot_count": snapshot_count,
+        "cores": report_cores,
+        "aggregate": {"ipc": aggregate_ipc, "uipc": aggregate_uipc},
+        "average": {"ipc": average_ipc, "uipc": average_uipc},
+    }
+
+    report_path = qpoints_root / "sim_outs" / experiment / "uipc_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report_path
+
+
 def _tail_file(path: Path, max_lines: int = 20) -> str:
     if not path.is_file():
         return ""
@@ -483,18 +561,10 @@ def convert_multi(
     overwrite: bool = False,
     ruby_protocol: str = "mesi_two_level",
 ) -> None:
-    first_match = re.fullmatch(r"snapshot_(\d+)", first)
-    last_match = re.fullmatch(r"snapshot_(\d+)", last)
-    if not first_match or not last_match:
-        raise RuntimeError("First/last must be in the form snapshot_N.")
-    first_idx = int(first_match.group(1))
-    last_idx = int(last_match.group(1))
-    if first_idx > last_idx:
-        raise RuntimeError("First snapshot index must be <= last snapshot index.")
     if parallel < 1:
         raise RuntimeError("Parallel must be >= 1.")
 
-    snapshots = [f"snapshot_{i}" for i in range(first_idx, last_idx + 1)]
+    snapshots = _snapshot_names(first, last)
     start_time = time.time()
     errors = []
     cancel_event = threading.Event()
@@ -538,12 +608,65 @@ def convert_multi(
     print(f"convert-multi completed in {elapsed}s")
 
 
+def run_sample(
+    gem5_ckp_dir: str,
+    experiment: str,
+    first: str,
+    last: str,
+    core_count: int,
+    warmup_cycles: int,
+    measurement_cycles: int,
+    timing_ruby: bool = False,
+    timing_ruby_moesi: bool = False,
+    sim_config: Optional[str] = None,
+) -> Path:
+    if timing_ruby and timing_ruby_moesi:
+        raise RuntimeError(
+            "Choose only one timing Ruby protocol flag: --timing-ruby or --timing-ruby-moesi."
+        )
+    if not (timing_ruby or timing_ruby_moesi):
+        raise RuntimeError(
+            "run_sample currently requires --timing-ruby or --timing-ruby-moesi."
+        )
+    if measurement_cycles <= 0:
+        raise RuntimeError("measurement_cycles must be > 0")
+    if warmup_cycles < 0:
+        raise RuntimeError("warmup_cycles must be >= 0")
+
+    repo_root = Path(__file__).resolve().parents[1]
+    qpoints_root = repo_root / "QPoints"
+    snapshots = _snapshot_names(first, last)
+    summaries = []
+
+    for snapshot in snapshots:
+        run_gem5(
+            gem5_ckp_dir=gem5_ckp_dir,
+            experiment=experiment,
+            snapshot=snapshot,
+            inst=None,
+            warmup_cycles=warmup_cycles,
+            measurement_cycles=measurement_cycles,
+            core_count=core_count,
+            timing_ruby=timing_ruby,
+            timing_ruby_moesi=timing_ruby_moesi,
+            sim_config=sim_config,
+        )
+        summary_path = qpoints_root / "sim_outs" / experiment / snapshot / "uipc_summary.json"
+        summaries.append(_load_uipc_summary(summary_path))
+
+    report_path = _write_uipc_report(qpoints_root, experiment, summaries)
+    print(f"uIPC report written to {report_path}")
+    return report_path
+
+
 def run_gem5(
     gem5_ckp_dir: str,
     experiment: str,
     snapshot: str,
-    inst: int,
-    core_count: int,
+    inst: Optional[int] = None,
+    warmup_cycles: Optional[int] = None,
+    measurement_cycles: Optional[int] = None,
+    core_count: int = 1,
     branch_trace: bool = False,
     tage_decision_trace: bool = False,
     data_trace: bool = False,
@@ -558,6 +681,19 @@ def run_gem5(
         )
     if dump_cache_state and not timing_ruby:
         raise RuntimeError("--dump-cache-state requires --timing-ruby.")
+    if measurement_cycles is not None or warmup_cycles is not None:
+        if not (timing_ruby or timing_ruby_moesi):
+            raise RuntimeError(
+                "Cycle-window timing requires --timing-ruby or --timing-ruby-moesi."
+            )
+        if inst is not None:
+            raise RuntimeError(
+                "Do not mix --inst with --warmup-cycles/--measurement-cycles."
+            )
+        if measurement_cycles is None:
+            raise RuntimeError("--warmup-cycles requires --measurement-cycles.")
+    elif inst is None:
+        raise RuntimeError("Either inst or measurement_cycles must be provided.")
 
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
@@ -572,11 +708,15 @@ def run_gem5(
         experiment,
         "--snapshot",
         snapshot,
-        "--inst",
-        str(inst),
         "--cores",
         str(core_count),
     ]
+    if inst is not None:
+        args.extend(["--inst", str(inst)])
+    if warmup_cycles is not None:
+        args.extend(["--warmup-cycles", str(warmup_cycles)])
+    if measurement_cycles is not None:
+        args.extend(["--measurement-cycles", str(measurement_cycles)])
     if branch_trace:
         args.append("--branch-trace")
     if tage_decision_trace:
