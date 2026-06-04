@@ -294,8 +294,10 @@ def _write_uipc_report(qpoints_root: Path, experiment: str, summaries: list[dict
 
     first_cores = summaries[0].get("cores", [])
     core_ids = [int(item["core"]) for item in first_cores]
-    per_core_totals = {core: 0.0 for core in core_ids}
-    aggregate_total = 0.0
+    per_core_ipc_totals = {core: 0.0 for core in core_ids}
+    per_core_uipc_totals = {core: 0.0 for core in core_ids}
+    aggregate_ipc_total = 0.0
+    aggregate_uipc_total = 0.0
 
     for summary in summaries:
         summary_cores = summary.get("cores", [])
@@ -305,19 +307,39 @@ def _write_uipc_report(qpoints_root: Path, experiment: str, summaries: list[dict
                 "Inconsistent per-core uIPC summaries across snapshots; cannot aggregate."
             )
         for item in summary_cores:
-            per_core_totals[int(item["core"])] += float(item["uipc"])
-        aggregate_total += float(summary.get("aggregate", {}).get("uipc", 0.0))
+            core = int(item["core"])
+            per_core_ipc_totals[core] += float(item.get("ipc", 0.0))
+            per_core_uipc_totals[core] += float(item.get("uipc", 0.0))
+        aggregate_ipc_total += float(summary.get("aggregate", {}).get("ipc", 0.0))
+        aggregate_uipc_total += float(summary.get("aggregate", {}).get("uipc", 0.0))
 
     snapshot_count = len(summaries)
+    report_cores = [
+        {
+            "core": core,
+            "ipc": per_core_ipc_totals[core] / snapshot_count,
+            "uipc": per_core_uipc_totals[core] / snapshot_count,
+        }
+        for core in core_ids
+    ]
+    aggregate_ipc = aggregate_ipc_total / snapshot_count
+    aggregate_uipc = aggregate_uipc_total / snapshot_count
+    average_ipc = (
+        sum(item["ipc"] for item in report_cores) / len(report_cores)
+        if report_cores else 0.0
+    )
+    average_uipc = (
+        sum(item["uipc"] for item in report_cores) / len(report_cores)
+        if report_cores else 0.0
+    )
+
     report = {
         "engine": "gem5",
         "experiment": experiment,
         "snapshot_count": snapshot_count,
-        "cores": [
-            {"core": core, "uipc": per_core_totals[core] / snapshot_count}
-            for core in core_ids
-        ],
-        "aggregate": {"uipc": aggregate_total / snapshot_count},
+        "cores": report_cores,
+        "aggregate": {"ipc": aggregate_ipc, "uipc": aggregate_uipc},
+        "average": {"ipc": average_ipc, "uipc": average_uipc},
     }
 
     report_path = qpoints_root / "sim_outs" / experiment / "uipc_report.json"
