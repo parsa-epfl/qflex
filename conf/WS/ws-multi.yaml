@@ -1,11 +1,5 @@
 extends: WS_base
 
-# Optional per-leaf hooks for boot/load only (other phases ignore these):
-#   experiment_context_node_0:
-#     interaction_script: ./scripts/setup_node_0.exp   # Path A: drive QEMU automatically.
-#     # OR
-#     interactive_tmux: true                            # Path B: open a tmux window per leaf.
-
 components:
   experiment_context:
     _base_: _leaf_defaults
