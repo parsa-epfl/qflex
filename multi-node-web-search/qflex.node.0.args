@@ -1,6 +1,0 @@
---quantum-size-ns 10000
---core-count 1
---no-double-cores
---node-number 0 
---experiment-name multi_web_full_experiment_15_0
---neighbor-nodes "1" 

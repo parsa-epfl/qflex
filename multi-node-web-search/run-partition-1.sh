@@ -1,9 +1,0 @@
-pushd .. 
- 
-COMMON_ARGS=$(cat ./multi-node-web-search/qflex.multinode-web.args)
-
-NODE_ARGS=$(cat ./multi-node-web-search/qflex.node.1.args)
-
-echo ${COMMON_ARGS} ${NODE_ARGS} | xargs -o ./qflex run-partition --warming-ratio 2 --measurement-ratio 1 --syncs "true" --latancies-ns "10000"
-
-popd

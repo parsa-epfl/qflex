@@ -1,6 +1,0 @@
---core-count 1
---no-double-cores
---node-number 1 
---phantom-cpu-ipc 4
---experiment-name two_node_1_core_12_1
---neighbor-nodes "0" 
