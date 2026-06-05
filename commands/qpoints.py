@@ -131,25 +131,37 @@ def _prepare_snapshot_gem5_uarch(
         return None
 
     print(f"[{snapshot}] preparing gem5 uarch artifacts")
+    protocol_order = [ruby_protocol] + [
+        protocol
+        for protocol in ("mesi_two_level", "moesi_cmp_directory")
+        if protocol != ruby_protocol
+    ]
     try:
-        subprocess.run(
-            [
-                sys.executable,
-                str(prepare_script),
-                "--qflex-run-dir",
-                str(Path(qflex_ckp_dir) / "run"),
-                "--gem5-workload-root",
-                gem5_ckp_dir,
-                "--snapshot",
-                snapshot,
-                "--ruby-protocol",
-                ruby_protocol,
-                "--overwrite",
-            ],
-            text=True,
-            check=True,
+        for protocol in protocol_order:
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(prepare_script),
+                    "--qflex-run-dir",
+                    str(Path(qflex_ckp_dir) / "run"),
+                    "--gem5-workload-root",
+                    gem5_ckp_dir,
+                    "--snapshot",
+                    snapshot,
+                    "--ruby-protocol",
+                    protocol,
+                    "--overwrite",
+                ],
+                text=True,
+                check=True,
+            )
+        manifest_file = (
+            Path(gem5_ckp_dir)
+            / snapshot
+            / "gem5_uarch"
+            / ruby_protocol
+            / "manifest.json"
         )
-        manifest_file = Path(gem5_ckp_dir) / snapshot / "gem5_uarch" / "manifest.json"
         if manifest_file.is_file():
             return json.loads(manifest_file.read_text(encoding="utf-8"))
     except subprocess.CalledProcessError:
