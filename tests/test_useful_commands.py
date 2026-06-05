@@ -3,7 +3,7 @@
 Each script is a thin wrapper over `python ./qflex <subcmd> -c $1`. Per-phase
 invariants that the scripts USED to encode inline (--interactive-tmux on
 boot/load, --syncs-list false on boot, --syncs-list true on init) now live in
-the phase overlays of conf/DC/dc-multi.yaml — they apply uniformly whether
+the phase overlays of tests/realrun/multi.yaml — they apply uniformly whether
 the user runs through a script, calls ./qflex directly, or builds a context
 in python. The sweep scripts (run-partition-p, run-partition-p-idx) still
 take $2/$3 for partition_number/idx so per-call overrides work without
@@ -68,11 +68,11 @@ def test_script_invokes_expected_qflex_command(script, expected_substrings):
     }),
 ])
 def test_dc_multi_yaml_phase_overlays(cmd_name, component, expected_fields):
-    """conf/DC/dc-multi.yaml is the production YAML the convenience scripts
+    """tests/realrun/multi.yaml is the full-fidelity YAML the convenience scripts
     pass through. Per-phase invariants must land on the resolved leaf for the
     right cmd_name — verify via the same loader the production code uses."""
     from dep_injection.config_loader import load_config
-    cfg = load_config(f"{REPO_ROOT}/conf/DC/dc-multi.yaml", cmd_name=cmd_name)
+    cfg = load_config(f"{REPO_ROOT}/tests/realrun/multi.yaml", cmd_name=cmd_name)
     leaf = cfg["components"][component]
     for field, expected in expected_fields.items():
         actual = leaf.get(field)

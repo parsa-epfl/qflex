@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import typer
-from typing import Annotated
+from typing import Annotated, Optional
 from commands.docker import DockerStarter, DockerBuild, DockerExec, DockerStop, DEFAULT_CONTAINER_NAME
 
 app = typer.Typer(
@@ -28,7 +28,8 @@ def build_docker(
 
 @app.command()
 def start_docker(
-    mounting_folder: Annotated[str, typer.Option(help="Folder to mount for files.")],
+    mounting_folder: Annotated[Optional[str], typer.Option(help="Folder to mount for files. If omitted, read from --config's resolved mounting_folder.")] = None,
+    config: Annotated[Optional[str], typer.Option("--config", "-c", help="YAML experiment config; its resolved mounting_folder is mounted when --mounting-folder is not given.")] = None,
     debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False,
     worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
     start_directory: Annotated[str, typer.Option(help="Directory to start in inside the container.")] = None,
@@ -38,12 +39,21 @@ def start_docker(
     """
     Start a Docker container with the QFlex environment.
 
+    The folder to mount comes from --mounting-folder, or — when that's omitted —
+    from the resolved mounting_folder of the --config YAML (same loader the
+    pipeline uses), so the mount stays a single source of truth in the YAML.
+
     Default mode: interactive (`-it /bin/bash`) — drops you into a shell.
 
     With --background: detached + named so `./dep exec` can `docker exec` into it
     later. Useful for tests / CI / agent-driven runs where the same container
     handles many commands without paying per-call container-start cost.
     """
+    if mounting_folder is None:
+        if config is None:
+            raise typer.BadParameter("provide --mounting-folder or --config/-c")
+        from dep_injection.builder import build_experiment_context
+        mounting_folder = build_experiment_context(config).mounting_folder
     docker_executor = DockerStarter(
         mounting_folder=mounting_folder,
         debug=debug,
@@ -70,9 +80,9 @@ def exec_in_docker(
     spinning up a fresh container per call.
 
     Example:
-        ./dep start-docker --mounting-folder /mnt/sdc/data-caching-1c/ --worm --background
+        ./dep start-docker -c tests/realrun/single.yaml --worm --background
         ./dep exec --command "./qflex --help"
-        ./dep exec --command "./qflex boot -c conf/DC/dc.yaml"
+        ./dep exec --command "./qflex boot -c tests/realrun/single.yaml"
         ./dep stop-docker
     """
     ok = DockerExec(

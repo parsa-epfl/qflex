@@ -86,7 +86,7 @@ blocks = parse_dry_run_blocks(buf.getvalue())
 
 `mock_mounting_folder` (per-test `tmp_path`-rooted): pre-populates the per-node experiment folders (`run/`, `cfg/`, `scripts/`, `partition.py`, `result.py`, `run_partitions.sh`) plus 2 partitions × 2 snapshot files. Phases that have init-time precondition asserts will be happy without anyone needing to run a real boot/fw/partition first.
 
-`multi_context`: builds [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml) via `dep_injection.builder.build_experiment_context`, passing `component_overrides` so all three components (the unnamed group + the two named subs) point their `mounting_folder` and `image_folder` at the temp dir.
+`multi_context`: builds [tests/realrun/multi.yaml](../../../tests/realrun/multi.yaml) via `dep_injection.builder.build_experiment_context`, passing `component_overrides` so all three components (the unnamed group + the two named subs) point their `mounting_folder` and `image_folder` at the temp dir.
 
 For tests that need to override leaf fields (e.g. set `partition_number=5, idx=3` for a `RunIdxCommand` test, or set `interaction_script="./drive.exp"` for a Path A test), use the `pin_per_sub` helper in [tests/conftest.py](../../../tests/conftest.py) which clones each sub via `model_copy(update=...)` and rebuilds the top group. Used by `test_boot.py`, `test_load.py`, `test_functional_warming.py`, etc.
 
@@ -191,7 +191,7 @@ tests/realrun/
 └── loaded_test_verify_and_swap_workload.exp
 ```
 
-Each YAML `extends: ../../conf/DC/<base>` so production defaults flow through — change `conf/DC/dc-multi.yaml` and every multi-node test follows. The relative path resolves cleanly through [`load_config`](../../../dep_injection/config_loader.py) (it does `path.parent / parent_name.yaml`, which handles `..` segments).
+Each YAML `extends: <base>` (the full-fidelity bases `base.yaml` / `single.yaml` / `multi.yaml`, colocated under `tests/realrun/`) so defaults flow through — change `tests/realrun/multi.yaml` and every multi-node test follows. Sibling lookup resolves cleanly through [`load_config`](../../../dep_injection/config_loader.py) (it does `path.parent / parent_name.yaml`).
 
 The python test reduces to one line of qflex invocation plus the assertions:
 
@@ -235,7 +235,7 @@ Without `QFLEX_RECOMPILE`, `make test` keeps its existing fast hermetic dry-run-
 
 ## Load-stage ping pre-flight (`loaded_test_verify_and_swap_workload.exp`)
 
-The load-side script runs in the load phase (sync-on PDES — `syncs_list=["true"]` per [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml); `boot:` overrides to `false`, but no override exists in `load:`). Before capturing the post-loadvm `ls`, it asserts the sync-on PDES wire is healthy with a bounded foreground ping:
+The load-side script runs in the load phase (sync-on PDES — `syncs_list=["true"]` per [tests/realrun/multi.yaml](../../../tests/realrun/multi.yaml); `boot:` overrides to `false`, but no override exists in `load:`). Before capturing the post-loadvm `ls`, it asserts the sync-on PDES wire is healthy with a bounded foreground ping:
 
 1. Each leaf reads `NODE_NUMBER` from the executor-injected env and computes the peer IP (node 0 → `192.168.100.2`, node 1 → `192.168.100.1`). The IPs themselves were baked into `loaded-test` by the boot-phase savevm-create scripts.
 2. Each leaf touches `<group_folder>/node<N>_ping_ready.flag` and waits for the peer's. This gate is what makes the `-c 100 -i 0.001` burst meaningful — without it, whichever side finishes its loadvm replay first races the peer's serial settling and the timing-sensitive sync-on wire drops early packets.

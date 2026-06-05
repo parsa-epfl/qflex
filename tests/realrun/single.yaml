@@ -1,4 +1,4 @@
-extends: DC_base
+extends: base
 
 components:
   experiment_context:

@@ -26,17 +26,17 @@ To clean up the container manually:
 
 Override env vars:
   QFLEX_ITERATE_MODE     -- debug (default) or release
-  QFLEX_MOUNTING_FOLDER  -- defaults to /mnt/sdc/data-caching-1c/
+  QFLEX_MOUNTING_FOLDER  -- defaults to the mount resolved from REAL_RUN_CONFIG's YAML
 """
 
 import os
 import subprocess
 import sys
 
-from tests.conftest import TEST_CONTAINER_NAME, _container_running
+from tests.conftest import TEST_CONTAINER_NAME, _container_running, real_run_mounting
 
 
-MOUNTING_FOLDER = os.environ.get("QFLEX_MOUNTING_FOLDER", "/mnt/sdc/data-caching-1c/")
+MOUNTING_FOLDER = os.environ.get("QFLEX_MOUNTING_FOLDER") or real_run_mounting()
 MODE = os.environ.get("QFLEX_ITERATE_MODE", "debug")
 
 

@@ -14,8 +14,8 @@ _leaf_defaults:
   is_consolidated: false
   primary_ipc: 2.0
   primary_core_start: 0
-  image_folder: /mnt/sdc/data-caching-1c/
-  mounting_folder: /mnt/sdc/data-caching-1c/
+  image_folder: /mnt/sdc/testing/
+  mounting_folder: /mnt/sdc/testing/
   image_name: root-single-node.qcow2
   keep_experiment_unique: false
   use_image_directly: true

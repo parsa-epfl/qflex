@@ -26,7 +26,7 @@ This is much cheaper than the previous `docker run --rm` per command — you pay
 
 ## Default mounting folder
 
-Default to **`/mnt/sdc/data-caching-1c/`** — the user's usual scratch directory. That's what shows up in `conf/DC/dc.yaml` and is the path their existing experiment tree lives under.
+Default to **`/mnt/sdc/data-caching-1c/`** — the user's usual scratch directory. That's what shows up in `tests/realrun/single.yaml` and is the path their existing experiment tree lives under.
 
 Override per-session via the `--mounting-folder` flag on `start-docker` (NOT on `exec` — exec runs against a container that already has its mounts).
 
@@ -40,7 +40,7 @@ Always wrap real-run work in a "start → exec... → stop" session. If you want
 
 # Run as many commands as needed
 ./dep exec --command "./qflex --help"
-./dep exec --command "./qflex boot -c conf/DC/dc.yaml"
+./dep exec --command "./qflex boot -c tests/realrun/single.yaml"
 ./dep exec --command "make test"
 
 # Tear down when done
@@ -58,13 +58,13 @@ If a previous session crashed and left `qflex-dev` running, `./dep start-docker 
 ./dep exec --command "./qflex --help"
 
 # Actual single-node boot from YAML
-./dep exec --command "./qflex boot -c conf/DC/dc.yaml"
+./dep exec --command "./qflex boot -c tests/realrun/single.yaml"
 
 # Multi-node group dispatch — one process per leaf, mp.Process under the hood
-./dep exec --command "./qflex boot -c conf/DC/dc-multi.yaml"
+./dep exec --command "./qflex boot -c tests/realrun/multi.yaml"
 
 # Path A interaction script (auto-flips telnet) — see the boot-load-interactive skill
-./dep exec --command "./qflex boot -c conf/DC/dc-multi.yaml \\
+./dep exec --command "./qflex boot -c tests/realrun/multi.yaml \\
                        --interaction-script ./sample_scripts/login_and_ls.exp"
 
 # Run the pytest suite inside the container (same image, same Python env qflex uses)
@@ -92,7 +92,7 @@ If any of these fail, surface the failure to the user before going further.
 When output is large (full QEMU log, gdb backtraces), prefer redirecting inside the bash to a host-visible file — the mounting folder is bind-mounted, so paths under it are durable:
 
 ```bash
-./dep exec --command "./qflex boot -c conf/DC/dc.yaml > /mnt/sdc/data-caching-1c/boot.log 2>&1"
+./dep exec --command "./qflex boot -c tests/realrun/single.yaml > /mnt/sdc/data-caching-1c/boot.log 2>&1"
 ```
 
 Then `tail` the log from the host afterwards to summarize for the user.

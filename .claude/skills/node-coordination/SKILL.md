@@ -23,7 +23,7 @@ This is the load-bearing layer. **The other two layers exist to plug specific ga
 
 ### Field
 
-`ExperimentContext.wait_for_nodes: list[int]` — the `node_number`s of upstream peers this leaf must observe as *started* before it begins its own bash. Master typically has `[]`; node 1 has `[0]`; longer chains can specify `[0, 2]`, etc. Set per-leaf in YAML (see [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml)). Empty list = no waiting.
+`ExperimentContext.wait_for_nodes: list[int]` — the `node_number`s of upstream peers this leaf must observe as *started* before it begins its own bash. Master typically has `[]`; node 1 has `[0]`; longer chains can specify `[0, 2]`, etc. Set per-leaf in YAML (see [tests/realrun/multi.yaml](../../../tests/realrun/multi.yaml)). Empty list = no waiting.
 
 ### Files
 
@@ -137,7 +137,7 @@ If you find yourself reaching for a new sentinel:
 
 * [commands/executer.py](../../../commands/executer.py) — `_sentinel_basename`, `_wait_for_sentinels`, `_touch_sentinel`, `_kill_peer_qemus`, `_post_exit_grace`, `KILLED_BY_PEER_SUFFIX`.
 * [commands/config.py](../../../commands/config.py) — `wait_for_nodes` field on `ExperimentContext`; `is_master_node()` / `is_multi_node()`.
-* [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml) — canonical wiring: master sets `wait_for_nodes: []` (omitted = `[]`), node 1 sets `wait_for_nodes: [0]`.
+* [tests/realrun/multi.yaml](../../../tests/realrun/multi.yaml) — canonical wiring: master sets `wait_for_nodes: []` (omitted = `[]`), node 1 sets `wait_for_nodes: [0]`.
 * [tests/realrun/boot_login_savevm.exp](../../../tests/realrun/boot_login_savevm.exp) / [boot_login_wait.exp](../../../tests/realrun/boot_login_wait.exp) — Layer 2 reference scripts (init).
 * [tests/realrun/boot_create_and_savevm_master.exp](../../../tests/realrun/boot_create_and_savevm_master.exp) / [boot_create_and_wait.exp](../../../tests/realrun/boot_create_and_wait.exp) — Layer 2 reference scripts (savevm-create test).
 * [tests/conftest.py](../../../tests/conftest.py) — `assert_two_node_master_first` helper that asserts the Layer-1 wait/touch invariants on dry-run output.

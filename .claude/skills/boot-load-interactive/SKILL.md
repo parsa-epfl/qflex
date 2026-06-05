@@ -106,7 +106,7 @@ expect "(qemu) "         ; send "quit\r"
 - **The standard cross-node handshake is a sentinel file** in the shared parent of `EXP_FOLDER`: master writes `<dirname $EXP_FOLDER>/savevm_done.flag` after `savevm` returns; every non-master script polls for that file before quitting.
 - The same applies to other monitor-issued, drain-coordinated commands — anything that walks the PDES wire is master-only by convention.
 
-YAML wiring follows: each leaf points at the script that fits its role, not a single shared script. The canonical example is [conf/DC/dc-multi-savevm-create.yaml](../../../conf/DC/dc-multi-savevm-create.yaml):
+YAML wiring follows: each leaf points at the script that fits its role, not a single shared script. The canonical example is [tests/realrun/dc-multi-savevm-create.yaml](../../../tests/realrun/dc-multi-savevm-create.yaml):
 
 ```yaml
 components:
@@ -171,7 +171,7 @@ Path B adds a `[tmux] would open new window 'Phase-nodeN' …` line and replaces
 | [commands/load.py](../../../commands/load.py) | Symmetric to boot. |
 | [commands/executer.py](../../../commands/executer.py) | `_execute_in_tmux`, `SUPPORTS_INTERACTIVE` flag on `Executor`, dry-run printer extension for `[tmux]` / `[py-poll]`. |
 | [requirements.txt](../../../requirements.txt) | `libtmux` dep. |
-| [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml) | Top-of-file commented example showing per-leaf field usage. |
+| [tests/realrun/multi.yaml](../../../tests/realrun/multi.yaml) | Top-of-file commented example showing per-leaf field usage. |
 | [tests/test_boot.py](../../../tests/test_boot.py) | `test_boot_with_interaction_script_dry_run`, `test_boot_with_login_ls_script_single_node`, `test_boot_with_login_ls_script_two_nodes`, `test_boot_interactive_tmux_dry_run`. |
 | [tests/test_load.py](../../../tests/test_load.py) | `test_load_with_interaction_script_dry_run`. |
 | [tests/test_functional_warming.py](../../../tests/test_functional_warming.py) | `test_interactive_tmux_only_on_boot_and_load` — the SUPPORTS_INTERACTIVE gate. |

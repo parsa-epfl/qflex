@@ -35,7 +35,7 @@ components:
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
 
-# Override the conf/DC/dc-multi.yaml boot overlay (interactive_tmux: true for
+# Override the multi.yaml boot overlay (interactive_tmux: true for
 # boot.sh users) — tests drive QEMU via the expect interaction_scripts above,
 # not via a tmux window, and the test container has no tmux server.
 boot:

@@ -1,7 +1,7 @@
-# Test base for multi-node real-run YAMLs. Same shape as conf/DC/dc-multi.yaml
+# Test base for multi-node real-run YAMLs. Same shape as multi.yaml
 # but with `_leaf_defaults.memory_gb` shrunk to 4 GB on every leaf. See
 # test-base-single.yaml for the rationale.
-extends: ../../conf/DC/dc-multi
+extends: multi
 
 _leaf_defaults:
   memory_gb: 4
@@ -13,5 +13,5 @@ _leaf_defaults:
   is_parallel: false
   # Test-only override: 2 cores so we exercise both RR (one host thread
   # alternating between 2 vCPUs) and MTTCG (2 host threads, one per vCPU).
-  # Production base (conf/DC/DC_base.yaml) stays at core_count: 1.
+  # Full-fidelity base (base.yaml) stays at core_count: 1.
   core_count: 2

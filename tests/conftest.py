@@ -25,8 +25,23 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 # Constants shared by every real-run test file.
-DEFAULT_MOUNTING = "/mnt/sdc/data-caching-1c/"
 TEST_CONTAINER_NAME = "qflex_test"            # never collides with the user's qflex-dev
+
+# Canonical real-run config. Every real-run test YAML extends tests/realrun/base.yaml,
+# so the host mount is read FROM the YAML (single source) rather than hardcoded.
+# QFLEX_REAL_RUN_CONFIG points at a different config; QFLEX_REAL_RUN_MOUNTING
+# overrides the resolved value entirely.
+REAL_RUN_CONFIG = os.environ.get("QFLEX_REAL_RUN_CONFIG", "tests/realrun/dc-single.yaml")
+
+
+def real_run_mounting() -> str:
+    """Host mounting folder for real-run tests, resolved from REAL_RUN_CONFIG via
+    the same loader the pipeline uses. QFLEX_REAL_RUN_MOUNTING overrides."""
+    override = os.environ.get("QFLEX_REAL_RUN_MOUNTING")
+    if override:
+        return override
+    from dep_injection.builder import build_experiment_context
+    return build_experiment_context(os.path.join(REPO_ROOT, REAL_RUN_CONFIG)).mounting_folder
 
 
 @dataclass
@@ -259,9 +274,9 @@ def _multi_context_overrides(mock_mounting_folder):
 
 @pytest.fixture
 def multi_context(mock_mounting_folder):
-    """Build the dc-multi.yaml ExperimentContext rooted at the temp mounting folder."""
+    """Build the multi.yaml ExperimentContext rooted at the temp mounting folder."""
     from dep_injection.builder import build_experiment_context
-    return build_experiment_context("conf/DC/dc-multi.yaml",
+    return build_experiment_context("tests/realrun/multi.yaml",
                                     component_overrides=_multi_context_overrides(mock_mounting_folder))
 
 
@@ -275,7 +290,7 @@ def multi_context_for_phase(mock_mounting_folder):
     overrides = _multi_context_overrides(mock_mounting_folder)
 
     def _build(cmd_name: str):
-        return build_experiment_context("conf/DC/dc-multi.yaml",
+        return build_experiment_context("tests/realrun/multi.yaml",
                                         cmd_name=cmd_name,
                                         component_overrides=overrides)
     return _build
@@ -286,7 +301,11 @@ def multi_context_for_phase(mock_mounting_folder):
 #
 # Real-run tests are ENABLED by default (the qcow2 snapshot bootstrapped by
 # tests/test_boot_login_bootstrap.py keeps them fast — minutes instead of dozens of
-# minutes). Set QFLEX_SKIP_REAL_RUN=1 to disable them.
+# minutes). Set QFLEX_SKIP_REAL_RUN=1 to disable them — that is the ONLY clean
+# skip. Once they're enabled, anything that stops a real run from happening
+# (no docker, no image, missing mount, container won't start, missing snapshot)
+# FAILS red rather than skipping green: a resource/setup problem must never
+# masquerade as a pass.
 #
 # The init tests under tests/test_boot_login_bootstrap.py are gated separately by
 # QFLEX_INIT_TEST=1 because they DO take a full Alpine boot — they only need
@@ -323,12 +342,13 @@ def _qcow2_has_snapshot(qcow2_path: str, snapshot_name: str) -> bool:
 
 def require_snapshot(qcow2_paths: list[str], snapshot_name: str,
                      bootstrap_hint: str) -> None:
-    """pytest.skip if any of `qcow2_paths` is missing the named snapshot.
-    Tests call this from the body (after the dev_container fixture) so the skip
-    message can name the missing files concretely."""
+    """pytest.fail if any of `qcow2_paths` is missing the named snapshot. A
+    missing prerequisite is a real failure of a real run we were asked to do, so
+    it goes red — not a green skip. Tests call this from the body (after the
+    dev_container fixture) so the message can name the missing files concretely."""
     missing = [p for p in qcow2_paths if not _qcow2_has_snapshot(p, snapshot_name)]
     if missing:
-        pytest.skip(
+        pytest.fail(
             f"missing {snapshot_name!r} snapshot in: "
             + ", ".join(missing)
             + f" — {bootstrap_hint}"
@@ -358,7 +378,7 @@ def require_boot_login_zstd(experiment_run_dirs: list[str]) -> None:
         if not os.path.exists(f"{d}/boot-login.zstd")
     ]
     if missing:
-        pytest.skip(
+        pytest.fail(
             "missing boot-login.zstd in: "
             + ", ".join(missing)
             + " — bootstrap with `QFLEX_INIT_TEST=1 make test-real-one "
@@ -421,24 +441,30 @@ def dev_container():
     a user running `./dep start-docker --background` in another terminal isn't
     disturbed by the test suite.
 
-    Mounting folder defaults to /mnt/sdc/data-caching-1c/; override via the
-    QFLEX_REAL_RUN_MOUNTING env var. Image variant defaults to --worm --debug
+    Mounting folder is read from REAL_RUN_CONFIG's resolved mounting_folder;
+    override via QFLEX_REAL_RUN_MOUNTING. Image variant defaults to --worm --debug
     (the user's standard); override via QFLEX_REAL_RUN_WORM / QFLEX_REAL_RUN_DEBUG.
 
     Always `./dep stop-docker` first to clear any leftover container from a
     prior crashed run.
     """
+    # The ONLY clean skip is the explicit opt-out. Every other "can't run" below
+    # is a real failure of the environment we were asked to run against, so it
+    # FAILS (red) instead of silently skipping (green) — a resource problem must
+    # never masquerade as a pass.
     if _real_run_disabled():
         pytest.skip("QFLEX_SKIP_REAL_RUN is set")
     if not _docker_available():
-        pytest.skip("docker daemon not reachable")
+        pytest.fail("docker daemon not reachable (set QFLEX_SKIP_REAL_RUN=1 to skip real-run tests)")
     if not _qflex_image_present():
-        pytest.skip("ghcr.io/parsa-epfl/qflex image not present locally; "
-                    "run `./dep build-docker` or pull it first")
+        pytest.fail("ghcr.io/parsa-epfl/qflex image not present locally; "
+                    "run `./dep build-docker` or pull it first "
+                    "(set QFLEX_SKIP_REAL_RUN=1 to skip real-run tests)")
 
-    mounting = os.environ.get("QFLEX_REAL_RUN_MOUNTING", DEFAULT_MOUNTING)
+    mounting = real_run_mounting()
     if not os.path.isdir(mounting):
-        pytest.skip(f"mounting folder does not exist: {mounting}")
+        pytest.fail(f"mounting folder does not exist: {mounting} "
+                    "(set QFLEX_SKIP_REAL_RUN=1 to skip real-run tests)")
 
     def _envflag(name: str, default: str) -> bool:
         return os.environ.get(name, default).lower() not in ("0", "false", "no", "")
@@ -459,9 +485,15 @@ def dev_container():
         )
 
         start_cmd = [
-            "./dep", "start-docker", "--mounting-folder", mounting,
+            "./dep", "start-docker",
             "--background", "--container-name", TEST_CONTAINER_NAME,
         ]
+        # Default path: let ./dep read the mount from the YAML (single source).
+        # When the mount was overridden via env, pass it explicitly instead.
+        if os.environ.get("QFLEX_REAL_RUN_MOUNTING"):
+            start_cmd += ["--mounting-folder", mounting]
+        else:
+            start_cmd += ["--config", REAL_RUN_CONFIG]
         if use_worm:
             start_cmd.append("--worm")
         if use_debug:
@@ -471,7 +503,7 @@ def dev_container():
             cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
         )
         if start.returncode != 0:
-            pytest.skip(
+            pytest.fail(
                 f"./dep start-docker --background failed (rc={start.returncode}):\n"
                 f"stdout:\n{start.stdout}\nstderr:\n{start.stderr}"
             )

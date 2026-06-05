@@ -62,14 +62,14 @@ def test_boot_with_interaction_script_dry_run(multi_context):
 
 
 def test_boot_with_login_ls_script_single_node(mock_mounting_folder, login_ls_script):
-    """Path A using sample_scripts/login_and_ls.exp on a SINGLE-NODE config (dc.yaml).
+    """Path A using sample_scripts/login_and_ls.exp on a SINGLE-NODE config (single.yaml).
 
     No multi-node neighbors means is_multi_node() is False, so the auto-port
     machinery doesn't add node_number — telnet ports stay at the bases (55600 / 55558).
     The leaf is the only block in the dry-run output, with no [py-wait] (master
     semantics in the absence of any peer)."""
     from dep_injection.builder import build_experiment_context as b
-    e = b("conf/DC/dc.yaml", component_overrides={
+    e = b("tests/realrun/single.yaml", component_overrides={
         "experiment_context": {
             "mounting_folder": mock_mounting_folder,
             "image_folder": mock_mounting_folder,

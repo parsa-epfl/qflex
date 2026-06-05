@@ -30,9 +30,9 @@ components:
 
 # Boot: relaxed wire (Alpine freezes under sync=true / 100us), loadvm boot-login,
 # per-node interaction scripts (master/follower differ). latencies_ns_list and
-# syncs_list are hardcoded per-leaf in conf/DC/dc-multi.yaml so the override
+# syncs_list are hardcoded per-leaf in multi.yaml so the override
 # has to land on the component, not on _leaf_defaults. interactive_tmux:false
-# explicitly opts back to Path A (interaction_script) — conf/DC/dc-multi.yaml's
+# explicitly opts back to Path A (interaction_script) — multi.yaml's
 # boot overlay sets it true for the convenience-script (boot.sh) users, but
 # tests drive QEMU via expect, not via a tmux window.
 boot:

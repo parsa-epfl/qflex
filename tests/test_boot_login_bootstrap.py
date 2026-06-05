@@ -30,7 +30,6 @@ import os
 import pytest
 
 from .conftest import (
-    DEFAULT_MOUNTING,
     _docker_available,
     _exec_in_container,
     _qcow2_has_snapshot,
@@ -46,7 +45,7 @@ from .conftest import (
 #
 # Names are prefixed `qflex_test_` / `qflex_real_run_test` so they're unique
 # to the test world and don't collide with a user's real-experiment runs
-# (which typically use `data-caching-comparison*` from conf/DC/dc{,-multi}.yaml).
+# (which typically use `data-caching-comparison*` from tests/realrun/{single,multi}.yaml).
 SINGLE_EXPERIMENT_NAME = "qflex_real_run_test"
 MULTI_GROUP_NAME = "qflex_test_multi"
 MULTI_NODE_SUB_NAMES = (

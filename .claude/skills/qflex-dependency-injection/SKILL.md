@@ -33,7 +33,7 @@ A config file is one OmegaConf document with three categories of recognized top-
 - **Top-level base blocks** like `_leaf_defaults: { ... }` (or any other identifier; convention is leading underscore). Referenced by components via `_base_: <key>`. Resolved at the outermost `load_config` call so child YAMLs / phase overlays can mutate them before they get baked in.
 - **Phase overlay blocks** `<func_name>: { ... }` — one per pipeline command (`boot`, `load`, `fw`, `run_idx`, …). Only applied when that command runs; the block mirrors the main YAML's shape (see "Phase overlays" below).
 
-Real examples: [conf/DC/DC_base.yaml](../../../conf/DC/DC_base.yaml) (only `_leaf_defaults`, no components — used as a parent), [conf/DC/dc.yaml](../../../conf/DC/dc.yaml) (single-node, extends `DC_base`), [conf/DC/dc-multi.yaml](../../../conf/DC/dc-multi.yaml) (multi-node fan-out via `_deps_.sub_experiments`), [tests/realrun/dc-multi.yaml](../../../tests/realrun/dc-multi.yaml) (drives every phase from one doc via phase overlays).
+Real examples: [tests/realrun/base.yaml](../../../tests/realrun/base.yaml) (only `_leaf_defaults`, no components — used as a parent), [tests/realrun/single.yaml](../../../tests/realrun/single.yaml) (single-node, extends `base`), [tests/realrun/multi.yaml](../../../tests/realrun/multi.yaml) (multi-node fan-out via `_deps_.sub_experiments`), [tests/realrun/dc-multi.yaml](../../../tests/realrun/dc-multi.yaml) (drives every phase from one doc via phase overlays).
 
 ### Reserved keys inside a component
 

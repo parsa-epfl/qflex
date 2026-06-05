@@ -1,10 +1,10 @@
-# Test base for single-node real-run YAMLs. Same shape as conf/DC/dc.yaml but
+# Test base for single-node real-run YAMLs. Same shape as single.yaml but
 # with `_leaf_defaults.memory_gb` shrunk to 4 GB so the EXTERNAL_INCREMENTAL_BASE
 # savevm dump (which writes the full guest RAM uncompressed as
 # `<name>.mem/base`) is ~3 GB instead of ~49 GB. Every single-node test YAML
 # under tests/realrun/ should `extends: test-base-single` instead of the
-# production `../../conf/DC/dc`.
-extends: ../../conf/DC/dc
+# full-fidelity `single`.
+extends: single
 
 _leaf_defaults:
   memory_gb: 4

@@ -172,7 +172,7 @@ def test_03b_load_verifies_files_and_swaps_workload(dev_container):
     # died too early to write any) can't false-pass on a previous run's stale
     # captures. Done via the container because the artifacts are root-owned.
     rm_paths = " ".join(
-        f"/mnt/sdc/data-caching-1c/experiments/{sub}/{f}"
+        f"{mounting}/experiments/{sub}/{f}"
         for sub in NODE_SUB_NAMES
         for f in ("ls_after_load.txt", "ping_summary_after_loadvm.txt",
                   "workload_state.txt", "corruption_log_pre_savevm.txt",

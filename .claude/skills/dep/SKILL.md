@@ -40,7 +40,7 @@ The user's typical interactive workflow:
 ```sh
 python3 dep start-docker --worm --debug --mounting-folder /mnt/sdc/data-caching-1c/
 # then inside the container:
-./qflex boot -c conf/DC/dc.yaml
+./qflex boot -c tests/realrun/single.yaml
 ```
 
 The non-interactive (test / agent) workflow:
@@ -48,7 +48,7 @@ The non-interactive (test / agent) workflow:
 ```sh
 ./dep start-docker --mounting-folder /mnt/sdc/data-caching-1c/ --worm --background
 ./dep exec --command "./qflex --help"
-./dep exec --command "./qflex boot -c conf/DC/dc.yaml"
+./dep exec --command "./qflex boot -c tests/realrun/single.yaml"
 ./dep exec --command "make test"
 ./dep stop-docker
 ```
