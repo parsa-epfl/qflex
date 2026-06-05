@@ -2,8 +2,8 @@
 # MULTI-NODE FOLLOWER (node_number > 0) DS load. Loads from `booted`, brings up
 # the PDES NIC (eth0 = 192.168.100.2), ping-verifies the wire to master, waits
 # for the server, then runs the YCSB client on the SERIAL spawn (no tmux) so its
-# output streams live: run_client.sh, swap YCSB workloada->workloadc in
-# warmup.sh + load.sh, `./warmup.sh 192.168.100.1 10000000 16`, then
+# output streams live: run_client.sh, `./warmup.sh 192.168.100.1 10000000 16`
+# (stock workloada), swap YCSB workloada->workloadc in load.sh, then
 # `./load.sh 192.168.100.1 10000000 5000 16`. Once the load is emitting
 # throughput lines it signals master (which then issues savevm), and waits for
 # its OWN per-node `savevm log 7`.
@@ -227,16 +227,11 @@ expect {
     timeout { puts "ERROR: client container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
     -re {root@qflex:/#}
 }
-puts "follower: in client container; swapping YCSB workloada->workloadc in warmup.sh + load.sh..."
+puts "follower: in client container; swapping YCSB workloada->workloadc in load.sh..."
 
-# Swap the YCSB workload a->c in place (workloada appears exactly once per file).
-send "sed -i 's#workloads/workloada#workloads/workloadc#' warmup.sh\r"
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: sed warmup.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
+# Measure workloadc (100% read); warmup stays stock workloada — ycsb load inserts the same records either way.
 send "sed -i 's#workloads/workloada#workloads/workloadc#' load.sh\r"
+set timeout $BUDGET_PROMPT_S
 expect {
     timeout { puts "ERROR: sed load.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
     -re {root@qflex:/#}

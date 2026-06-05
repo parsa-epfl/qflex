@@ -190,15 +190,7 @@ expect {
     timeout { puts "ERROR: client container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
     -re {root@qflex:/#}
 }
-puts "ds: window 1 at root shell inside client container; swapping YCSB workloada->workloadc in warmup.sh..."
-
-# Swap the YCSB workload a->c in place (workloada appears exactly once).
-send "sed -i 's#workloads/workloada#workloads/workloadc#' warmup.sh\r"
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: sed warmup.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
+puts "ds: window 1 at root shell inside client container; running warmup..."
 
 # Warmup: fills Cassandra with 10M records (1KB each ~= 10GB), 16 threads.
 # Retries internally until the seed server accepts. Finishes with
@@ -216,6 +208,7 @@ expect {
     -re {root@qflex:/#}
 }
 
+# Measure workloadc (100% read); warmup stays stock workloada — ycsb load inserts the same records either way.
 send "sed -i 's#workloads/workloada#workloads/workloadc#' load.sh\r"
 expect {
     timeout { puts "ERROR: sed load.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
