@@ -512,11 +512,7 @@ class ExperimentContext(BaseModel):
             print(f"============== core_info.csv already exists at {target}, not overwriting it. ==============")
         # Create a sym link to the core info in cfg folder
         sym_target = f'{self.get_experiment_folder_address()}/run/core_info.csv'
-        try:
-            os.system(f"rm {sym_target}")
-        except FileNotFoundError:
-            # As faulty symlink won't show
-            pass
+        os.system(f"rm -f {sym_target}")
         # Copy file and override if you need to
         os.system(f"cp -u {target} {sym_target}")
 
@@ -599,10 +595,7 @@ def create_experiment_context(
         assert len(neighbor_node_list) == len(latencies_ns_list) == len(syncs_list) == len(pdes_net_devs)
         assert node_number != -1, "node_number must be set when neighbor nodes are specified."
         assert neighbers_length > 0, "neighbor_node_list, latencies_ns_list, and syncs_list must have at least one entry when node_number is set."
-        print(f"Node {node_number} has neighbors: {neighbor_node_list} with latencies {latencies_ns_list} and syncs {syncs_list}")
-        pdes_net_devs_set = set(pdes_net_devs)
-        for net_devs in pdes_net_devs_set:
-            print(f"Net {net_devs} is being used for neighbors.")
+        for net_devs in set(pdes_net_devs):
             assert net_devs in ['e1000', 'virtio-net-pci'], "pdes_net_devs values must be either 'e1000' or 'virtio-net-pci'"
     
     # TODO check this to make sure it doesn't have edge cases

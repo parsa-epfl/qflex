@@ -10,3 +10,4 @@ injector>=0.21
 pytest
 libtmux
 plotille
+tqdm

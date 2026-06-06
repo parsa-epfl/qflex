@@ -1,6 +1,9 @@
+import contextlib
+
 from commands import SimulationCommand
 from .config import ExperimentContext
 from commands.qemu import VanillaQemuArgParser
+from .executer import _is_dry_run
 
 
 class RunIdxCommand(SimulationCommand):
@@ -11,6 +14,22 @@ class RunIdxCommand(SimulationCommand):
                  use_stdio: bool = True):
         self.experiment_context = experiment_context
         self.use_stdio = use_stdio
+
+    def execute(self, to_stdio: bool = True, run_in_background: bool = False,
+                dry_run: bool = False, *, sentinel_dir: str = None,
+                log_path: str = None, err_path: str = None, log_append: bool = False) -> bool:
+        # Send this idx's Python prep noise (set_up_folders copies, shm cleanup, the qemu-args dump from
+        # cmd()) into the shared partition log/err — the same file the qemu output is appended to —
+        # rather than the console. Interactive/dry runs keep the console (no redirect).
+        with contextlib.ExitStack() as stack:
+            if not to_stdio and not _is_dry_run(dry_run):
+                lf = stack.enter_context(open(self.get_log_file_address(), "a", buffering=1))
+                ef = stack.enter_context(open(self.get_err_file_address(), "a", buffering=1))
+                stack.enter_context(contextlib.redirect_stdout(lf))
+                stack.enter_context(contextlib.redirect_stderr(ef))
+            return super().execute(to_stdio=to_stdio, run_in_background=run_in_background,
+                                   dry_run=dry_run, sentinel_dir=sentinel_dir,
+                                   log_path=log_path, err_path=err_path, log_append=log_append)
 
     def get_err_file_address(self):
         return f"{self.experiment_context.get_partition_folder()}/err"

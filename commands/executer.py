@@ -45,8 +45,24 @@ class Executor(abc.ABC):
     # True for parallel-qemu phases (boot/load/init/fw) whose PDES exit path hangs the peer; False for vanilla-qemu run-* (proper exit handshake).
     NEEDS_PDES_PEER_KILL: bool = True
 
+    # Optional progress channel (a multiprocessing.Queue). Set on the top-level command; forked child
+    # processes inherit it. A leaf reports `(node_number, partition_number, done, total)` via
+    # _emit_progress; the top drains the queue to render progress. None = no reporting (default).
+    _progress_queue = None
+
     @abc.abstractmethod
     def cmd(self) -> str:
+        pass
+
+    def _emit_progress(self, done: int, total: int) -> None:
+        """Report this leaf's progress up to whoever owns the progress channel (no-op if unset)."""
+        if self._progress_queue is None:
+            return
+        exp = self.get_experiment()
+        self._progress_queue.put((exp.node_number, exp.partition_number, done, total))
+
+    def _on_child_completed(self, child: "Executor") -> None:
+        """Hook called by SequentialGroupExecutor after each child finishes. No-op by default."""
         pass
 
     def get_experiment(self) -> ExperimentContext:
@@ -587,6 +603,7 @@ class SequentialGroupExecutor(Executor):
                     with open(log_f, "r") as f:
                         log = f.read()
                 raise RuntimeError(f"{child.__class__.__name__} failed \nstdout:\n{log}\nstderr:\n{err}")
+            self._on_child_completed(child)
         self.clean_up()
         return True
 

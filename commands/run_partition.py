@@ -3,6 +3,7 @@ import glob
 from .executer import SimulationCommand, _is_dry_run
 from .config import ExperimentContext, clone_experiment_context
 from .run_single_partition import RunSinglePartitionCommand
+from .run_progress import progress_channel, node_spec
 
 
 class RunPartitionCommand(SimulationCommand):
@@ -30,12 +31,18 @@ class RunPartitionCommand(SimulationCommand):
         self._assert_syncs_true()
         exp = self.experiment_context
 
-        # Already a multi-node group from the YAML — let the base dispatch fan out.
+        # Already a multi-node group from the YAML — let the base dispatch fan out. As the parent, own the
+        # progress channel: a live tty bar per sub-experiment + TOTAL, and each node's RunPartition.log.
+        # The queue is inherited by every forked child, so their leaves report straight up to us.
         if exp.has_sub_experiments():
-            return self._execute_group(to_stdio=to_stdio,
-                                       run_in_background=run_in_background,
-                                       dry_run=dry_run,
-                                       outer_sentinel_dir=sentinel_dir)
+            if _is_dry_run(dry_run):
+                return self._execute_group(to_stdio=to_stdio, run_in_background=run_in_background,
+                                           dry_run=dry_run, outer_sentinel_dir=sentinel_dir)
+            with progress_channel(self, [node_spec(s) for s in exp.sub_experiments]):
+                return self._execute_group(to_stdio=to_stdio,
+                                           run_in_background=run_in_background,
+                                           dry_run=dry_run,
+                                           outer_sentinel_dir=sentinel_dir)
 
         # Node-level context (no partition set yet): dynamically generate per-partition
         # sub_experiments from the on-disk partition_* folders, then dispatch.
@@ -60,20 +67,30 @@ class RunPartitionCommand(SimulationCommand):
                 clone_experiment_context(exp, partition_number=p) for p in partition_idxs
             ]
             self.experiment_context = exp.model_copy(update={"sub_experiments": sub_experiments})
-            return self._execute_group(
+            run = lambda: self._execute_group(
                 to_stdio=to_stdio, run_in_background=run_in_background, dry_run=dry_run,
                 outer_sentinel_dir=sentinel_dir,
                 per_child_kwargs_fn=self._partition_child_kwargs,
                 sub_label_fn=lambda s: f"part_{s.partition_number}",
             )
+            # Single-node run: no group above us, so we own the progress channel for ourselves. In a
+            # multi-node run the group arm already owns it and self._progress_queue is inherited via fork.
+            if not _is_dry_run(dry_run) and exp.node_number < 0:
+                with progress_channel(self, [node_spec(exp)]):
+                    return run()
+            return run()
 
         # Partition-level leaf context: run RunSinglePartitionCommand inline. Its own
         # children (RunIdxCommand instances) carry the per-(partition,idx) sentinel
         # coordination via the sentinel_dir we forward.
+        # owns_progress=False: the top command already owns the channel; we just hand down its queue so
+        # this partition's idx completions report up to it.
         inner = RunSinglePartitionCommand(
             exp,
             use_stdio=self.use_stdio,
+            owns_progress=False,
         )
+        inner._progress_queue = self._progress_queue
         return inner.execute(to_stdio=to_stdio,
                              run_in_background=run_in_background,
                              dry_run=dry_run,
