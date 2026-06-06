@@ -73,7 +73,6 @@ load:
       # loadvm_name: booted
       # interactive_tmux: true
       latencies_ns_list: [1000000]
-      quantum_size: 100000
       syncs_list: ["true"]
       loadvm_name: booted
       interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_master.exp
@@ -81,7 +80,6 @@ load:
       # loadvm_name: booted
       # interactive_tmux: true
       latencies_ns_list: [1000000]
-      quantum_size: 100000
       syncs_list: ["true"]
       loadvm_name: booted
       interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_wait.exp

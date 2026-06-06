@@ -1,11 +1,11 @@
 _leaf_defaults:
   _target_: commands.config.create_experiment_context
-  quantum_size: 10000
+  quantum_size: 1000
   check_period_quantum_coeff: 10
   core_count: 1
   doubled_vcpu: false
   llc_size_per_tile_mb: 2
-  is_parallel: true
+  is_parallel: false
   network: none
   population_seconds: 10
   is_consolidated: false
