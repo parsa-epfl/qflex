@@ -6,12 +6,18 @@ A leaf reports `(node_number, partition_number, done, total)` up a `multiprocess
 shows, per sub-experiment, a live tqdm bar on the tty plus that experiment's own `RunPartition.log`.
 """
 import contextlib
+import glob
 import multiprocessing as mp
 import os
 import sys
 import threading
 
 from tqdm import tqdm
+
+
+def _node_partitions(folder):
+    return sorted(int(f.removeprefix("partition_"))
+                  for f in glob.glob("partition_*", root_dir=f"{folder}/run"))
 
 
 def node_spec(exp):
@@ -28,9 +34,16 @@ def _start_render(queue, nodes, tty):
                  for n in nodes}
     tty_bars = {}
     if tty:
-        for i, n in enumerate(nodes):
-            tty_bars[n["key"]] = tqdm(desc=n["desc"], unit="idx", position=i, dynamic_ncols=True)
-        tty_bars["_total"] = tqdm(desc="TOTAL", unit="idx", position=len(nodes), dynamic_ncols=True)
+        pos = 0
+        for n in nodes:
+            tty_bars[n["key"]] = tqdm(desc=n["desc"], unit="idx", position=pos, dynamic_ncols=True)
+            pos += 1
+            for p in _node_partitions(n["folder"]):  # each partition's bar, indented under its node
+                # 4 spaces, not a literal tab: tqdm counts the desc width to size the bar, and a tab
+                # (1 char to tqdm, many columns on screen) makes the line overflow and wrap.
+                tty_bars[(n["key"], p)] = tqdm(desc=f"    part_{p}", unit="idx", position=pos, dynamic_ncols=True)
+                pos += 1
+        tty_bars["_total"] = tqdm(desc="TOTAL", unit="idx", position=pos, dynamic_ncols=True)
 
     def refresh():
         gdone = gtot = 0
@@ -42,6 +55,11 @@ def _start_render(queue, nodes, tty):
                     done += d
                     tot += t
                     parts.append((p, d, t))
+                    pbar = tty_bars.get((k, p))
+                    if pbar is not None:
+                        pbar.total = max(t, 1)
+                        pbar.n = min(d, pbar.total)
+                        pbar.refresh()
             gdone += done
             gtot += tot
             postfix = " ".join(f"p{p}:{d}/{t}" for p, d, t in sorted(parts))
