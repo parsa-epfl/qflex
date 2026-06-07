@@ -48,6 +48,7 @@ set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
 set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h client budget (ramp-up=120 guest-sec can be many hours wall-clock)
 set BUDGET_CHECKPOINTING_S 1800
+set BUDGET_SERVER_SETTLE_S    30   ; # host-time settle after 8443 is listening, before launching the faban client
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
@@ -143,6 +144,17 @@ expect {
 
 sleep 5
 
+# --- 1b. Clear leftover containers so every run starts from scratch ----------
+# A stopped/aborted run (or a snapshot baked with a running container) can leave
+# named containers behind; the per-service `docker run --name=…` then collides
+# and the server never binds 8443. Stop+rm everything first. All run_*.sh use
+# --net=host already, so each comes back up on the guest's host netns.
+send "docker stop \$(docker ps -a -q) 2>/dev/null\r"; send "\r"
+expect { timeout { puts "ERROR: docker stop didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "docker rm \$(docker ps -a -q) 2>/dev/null\r"; send "\r"
+expect { timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "wsv: cleared leftover containers; starting services fresh."
+
 # --- 2. Create detached tmux session with 4 windows -------------------------
 
 send "tmux new-session -d -s wsv\r"
@@ -203,46 +215,63 @@ puts "wsv: window 1 (memcached) dispatched; settling 1s host time..."
 sleep 1
 
 # --- 5. Window 2: web_server (detached docker) ------------------------------
+# Same readiness shape as DS (poll the server pane for a real marker) and the WSV
+# master: `&& echo WSV_SERVER_OK` gives a pane marker for container-start, then we
+# wait until Elgg has finished bootstrapping (it writes settings.php with the
+# baked 127.0.0.1:8443) — the actual "server is serving" signal. Both polls also
+# stream the server-side output into the log, so it shows the real thing.
 
-send "tmux send-keys -t wsv:2 './run_server.sh' Enter\r"
+send "tmux send-keys -t wsv:2 './run_server.sh && echo WSV_SERVER_OK' Enter\r"
 expect {
     timeout { puts "ERROR: dispatching run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}
 }
-puts "wsv: window 2 (web_server) dispatched; settling 1s host time..."
-sleep 1
-
-# --- 6. Window 3: faban client + benchmark ----------------------------------
-# run_client.sh enters the faban container with --entrypoint=bash; prompt
-# becomes `root@qflex:/web20_benchmark#`. Then we dispatch entrypoint.sh and
-# wait for "Ramp up completed" — that's faban's ramp-up→steady-state signal.
-
-send "tmux send-keys -t wsv:3 './run_client.sh' Enter\r"
+puts "wsv: window 2 (web_server) launched; waiting for container-start (WSV_SERVER_OK)..."
+wait_for_pane_substring wsv 2 "WSV_SERVER_OK" $BUDGET_WORKLOAD_INIT_S
+puts "wsv: web_server container started; waiting for Elgg to bootstrap (settings.php written)..."
+# PID marker so we match the loop's real output, not the typed command echo.
+send "until docker exec web_server grep -q '127.0.0.1:8443' /usr/share/nginx/html/elgg/elgg-config/settings.php 2>/dev/null; do sleep 5; done; printf 'ELGGUP%s\\n' \"\$\$\"\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: dispatching run_client.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    timeout { puts "ERROR: Elgg never wrote settings.php (web_server not serving)"; quit_qemu $monitor_port; exit 1 }
+    -re {ELGGUP[0-9]+}
 }
-puts "wsv: window 3 (faban) launched; waiting for 'root@qflex:/web20_benchmark#'..."
-wait_for_pane_substring wsv 3 "root@qflex:/web20_benchmark#" $BUDGET_WORKLOAD_INIT_S
+puts "wsv: Elgg bootstrapped. Settling ${BUDGET_SERVER_SETTLE_S}s before launching faban..."
+sleep $BUDGET_SERVER_SETTLE_S
+
+# --- 6. faban client — run it right here on the serial (no tmux, no polling) -
+# Same as the multi-node follower, which works: run_client.sh enters the faban
+# container, entrypoint.sh runs the benchmark, we read the markers live inline.
+# The serial is NOT closed before savevm, so the container keeps running into the
+# snapshot.
+
+send "./run_client.sh\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: faban container prompt didn't arrive"; quit_qemu $monitor_port; exit 1 }
+    -re {root@qflex:/web20_benchmark#}
+}
 puts "wsv: faban container ready; dispatching entrypoint.sh..."
 
-send "tmux send-keys -t wsv:3 './run/entrypoint.sh 127.0.0.1 4 --encryption=1 --ramp-up=120 --ramp-down=1800 --steady=86400 --oper=run --min=0 --max=0 --type=THINKTIME' Enter\r"
-expect {
-    timeout { puts "ERROR: dispatching entrypoint.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
+send "./run/entrypoint.sh 127.0.0.1 4 --encryption=1 --ramp-up=120 --ramp-down=1800 --steady=86400 --oper=run --min=0 --max=0 --type=THINKTIME\r"
 # 'Ramp up completed' is a TIMER, not proof of success — faban prints it even
 # when every request fails. The real proof is 'Successfully browsed Elgg'.
 # Gate on that FIRST; do not weaken this gate.
 puts "wsv: entrypoint.sh dispatched; waiting for a SUCCESSFUL client op (Successfully browsed Elgg)..."
-wait_for_pane_substring wsv 3 "Successfully browsed Elgg" $BUDGET_WORKLOAD_INIT_S
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: client never logged 'Successfully browsed Elgg' -- workload broken"; quit_qemu $monitor_port; exit 1 }
+    -re {Successfully browsed Elgg}
+}
 puts "wsv: client succeeded (browsed Elgg); waiting for 'Ramp up completed'..."
-wait_for_pane_substring wsv 3 "Ramp up completed" $BUDGET_WORKLOAD_INIT_S
-puts "wsv: ramp-up done WITH verified successful client ops; settling 5s host time before savevm..."
+expect {
+    timeout { puts "ERROR: 'Ramp up completed' never arrived after a successful browse"; quit_qemu $monitor_port; exit 1 }
+    -re {Ramp up completed}
+}
+puts "wsv: ramp-up done WITH verified successful client ops; settling 5s before savevm..."
 sleep 5
 
-catch {close -i $serial_sid}
-catch {wait -i $serial_sid}
+# Do NOT close the serial — faban keeps running so savevm snapshots the live workload.
 
 # --- 7. savevm loaded via the monitor ---------------------------------------
 
