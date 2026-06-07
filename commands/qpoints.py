@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import time
 import json
+import tempfile
 from pathlib import Path
 import sys
 import threading
@@ -346,7 +347,7 @@ def _write_uipc_report(qpoints_root: Path, experiment: str, summaries: list[dict
     )
 
     report = {
-        "engine": "gem5",
+        "engine": summaries[0].get("engine", "gem5"),
         "experiment": experiment,
         "snapshot_count": snapshot_count,
         "cores": report_cores,
@@ -357,6 +358,227 @@ def _write_uipc_report(qpoints_root: Path, experiment: str, summaries: list[dict
     report_path = qpoints_root / "sim_outs" / experiment / "uipc_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report_path
+
+
+def _require_experiment_file(path: Path) -> Path:
+    if not path.exists():
+        raise RuntimeError(f"Required Flexus experiment artifact not found: {path}")
+    return path
+
+
+def _parse_flexus_commit_counters(path: Path, core_count: int) -> dict[int, dict[str, int]]:
+    counters = {
+        core: {"commits": 0, "nonspin_user": 0}
+        for core in range(core_count)
+    }
+    total_pattern = re.compile(r"^\s*(\d+)-uarch-Commits\s+(\d+)\s*$")
+    user_pattern = re.compile(r"^\s*(\d+)-uarch-Commits:NonSpin:User\s+(\d+)\s*$")
+
+    with path.open(encoding="utf-8") as infile:
+        for line in infile:
+            total_match = total_pattern.match(line)
+            if total_match:
+                core = int(total_match.group(1))
+                if core < core_count:
+                    counters[core]["commits"] = int(total_match.group(2))
+                continue
+            user_match = user_pattern.match(line)
+            if user_match:
+                core = int(user_match.group(1))
+                if core < core_count:
+                    counters[core]["nonspin_user"] = int(user_match.group(2))
+    return counters
+
+
+def _patch_flexus_timing_cfg(timing_cfg: Path, flexus_cfg: dict) -> None:
+    text = timing_cfg.read_text(encoding="utf-8")
+    replacements = {
+        "-fag:btbsets": str(int(flexus_cfg["btb_sets"])),
+        "-fag:btbways": str(int(flexus_cfg["btb_associativity"])),
+        "-mmu:itlb_set": str(int(flexus_cfg["itlb_sets"])),
+        "-mmu:itlb_assoc": str(int(flexus_cfg["itlb_associativity"])),
+        "-mmu:dtlb_set": str(int(flexus_cfg["dtlb_sets"])),
+        "-mmu:dtlb_assoc": str(int(flexus_cfg["dtlb_associativity"])),
+        "-mmu:stlb_sete": str(int(flexus_cfg["stlb_sets"])),
+        "-mmu:stlb_assoc": str(int(flexus_cfg["stlb_associativity"])),
+    }
+
+    for key, value in replacements.items():
+        pattern = rf'(flexus\.set\s+"{re.escape(key)}"\s+)"[^"]+"'
+        text, count = re.subn(pattern, rf'\1"{value}"', text)
+        if count == 0:
+            text += f'\nflexus.set "{key}"          "{value}"\n'
+
+    timing_cfg.write_text(text, encoding="utf-8")
+
+
+def _prepare_flexus_snapshot_workspace(
+    experiment_root: Path,
+    snapshot: str,
+    core_count: int,
+) -> tuple[Path, Path]:
+    snapshot_idx = _snapshot_index(snapshot)
+    run_dir = experiment_root / "run"
+    cfg_dir = experiment_root / "cfg"
+    lib_dir = experiment_root / "lib"
+    scripts_dir = experiment_root / "scripts"
+    bin_dir = experiment_root / "bin"
+
+    workspace_root = Path(tempfile.mkdtemp(prefix=f"flexus_run_sample_{snapshot}_"))
+    workspace = workspace_root / "run" / "partition_0"
+    (workspace_root / "cfg").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "lib").mkdir(parents=True, exist_ok=True)
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    flexus_cfg_path = _require_experiment_file(cfg_dir / "flexus_configuration.json")
+    flexus_cfg = json.loads(flexus_cfg_path.read_text(encoding="utf-8"))
+
+    shutil.copy2(flexus_cfg_path, workspace_root / "cfg" / "flexus_configuration.json")
+    timing_cfg_src = _require_experiment_file(cfg_dir / "timing.cfg")
+    timing_cfg_dst = workspace_root / "cfg" / "timing.cfg"
+    shutil.copy2(timing_cfg_src, timing_cfg_dst)
+    _patch_flexus_timing_cfg(timing_cfg_dst, flexus_cfg)
+
+    shutil.copy2(_require_experiment_file(scripts_dir / "run_flexus.sh"), workspace / "run_flexus.sh")
+    _ensure_executable(workspace / "run_flexus.sh")
+    script_text = (workspace / "run_flexus.sh").read_text(encoding="utf-8")
+    script_text = re.sub(r"(-smp\s+)\d+", rf"\g<1>{core_count}", script_text)
+    (workspace / "run_flexus.sh").write_text(script_text, encoding="utf-8")
+
+    image_candidates = sorted(run_dir.glob("*.qcow2"))
+    if not image_candidates:
+        raise RuntimeError(f"No qcow2 image found in {run_dir}")
+    image_path = image_candidates[0]
+
+    symlinks = {
+        workspace / "QEMU_EFI.fd": _require_experiment_file(run_dir / "QEMU_EFI.fd"),
+        workspace / "efi-virtio.rom": _require_experiment_file(run_dir / "efi-virtio.rom"),
+        workspace / "debug.cfg": _require_experiment_file(run_dir / "debug.cfg"),
+        workspace / "root.qcow2": image_path,
+        workspace / f"{snapshot}.loc": _require_experiment_file(run_dir / f"{snapshot}.loc"),
+        workspace / f"{snapshot}.state.zstd": _require_experiment_file(run_dir / f"{snapshot}.state.zstd"),
+        workspace / f"{snapshot}.uarch": _require_experiment_file(run_dir / f"{snapshot}.uarch"),
+        workspace / "init_warmed.mem": _require_experiment_file(run_dir / "init_warmed.mem"),
+        workspace / "checkpoint_conversion": _require_experiment_file(bin_dir / "checkpoint_conversion"),
+        workspace_root / "lib" / "libknottykraken.so": _require_experiment_file(lib_dir / "libknottykraken.so"),
+        workspace_root / "run" / "vanilla-qemu-system-aarch64": _require_experiment_file(run_dir / "vanilla-qemu-system-aarch64"),
+    }
+
+    for target, source in symlinks.items():
+        target.symlink_to(source)
+
+    return workspace_root, workspace / f"result_{snapshot_idx}"
+
+
+def _build_flexus_snapshot_summary(
+    snapshot: str,
+    start_counters: dict[int, dict[str, int]],
+    end_counters: dict[int, dict[str, int]],
+    core_count: int,
+    measurement_cycles: int,
+) -> dict:
+    cores = []
+    aggregate_ipc = 0.0
+    aggregate_uipc = 0.0
+
+    for core in range(core_count):
+        delta_commits = end_counters[core]["commits"] - start_counters[core]["commits"]
+        delta_ucommits = end_counters[core]["nonspin_user"] - start_counters[core]["nonspin_user"]
+        ipc = delta_commits / measurement_cycles
+        uipc = delta_ucommits / measurement_cycles
+        aggregate_ipc += ipc
+        aggregate_uipc += uipc
+        cores.append({"core": core, "ipc": ipc, "uipc": uipc})
+
+    return {
+        "engine": "flexus",
+        "snapshot": snapshot,
+        "cores": cores,
+        "aggregate": {"ipc": aggregate_ipc, "uipc": aggregate_uipc},
+    }
+
+
+def run_sample_flexus(
+    experiment: str,
+    first: str,
+    last: str,
+    core_count: int,
+    warmup_cycles: int,
+    measurement_cycles: int,
+    mounting_folder: str,
+) -> Path:
+    if measurement_cycles <= 0:
+        raise RuntimeError("measurement_cycles must be > 0")
+    if warmup_cycles < 0:
+        raise RuntimeError("warmup_cycles must be >= 0")
+    if warmup_cycles % 100000 != 0 or measurement_cycles % 100000 != 0:
+        raise RuntimeError(
+            "Flexus run_sample currently requires warmup and measurement windows "
+            "to be multiples of 100000 cycles."
+        )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    qpoints_root = repo_root / "QPoints"
+    snapshots = _snapshot_names(first, last)
+    experiment_root = Path(mounting_folder) / "experiments" / experiment
+    if not experiment_root.is_dir():
+        raise RuntimeError(f"Flexus experiment folder not found: {experiment_root}")
+
+    warming_ratio = warmup_cycles // 100000
+    measurement_ratio = measurement_cycles // 100000
+    summaries = []
+
+    for snapshot in snapshots:
+        workspace_root, result_dir = _prepare_flexus_snapshot_workspace(
+            experiment_root, snapshot, core_count
+        )
+        workspace = workspace_root / "run" / "partition_0"
+        try:
+            subprocess.run(
+                ["bash", "./run_flexus.sh", str(warming_ratio), str(measurement_ratio)],
+                cwd=str(workspace),
+                text=True,
+                check=True,
+            )
+            start_counters = {
+                core: {"commits": 0, "nonspin_user": 0}
+                for core in range(core_count)
+            }
+            if warmup_cycles > 0:
+                warmup_log = result_dir / f"all.measurement.{warmup_cycles:010d}.log"
+                start_counters = _parse_flexus_commit_counters(warmup_log, core_count)
+            end_counters = _parse_flexus_commit_counters(
+                result_dir / "all.measurement.end.log", core_count
+            )
+            summary = _build_flexus_snapshot_summary(
+                snapshot,
+                start_counters,
+                end_counters,
+                core_count,
+                measurement_cycles,
+            )
+            output_dir = qpoints_root / "sim_outs" / experiment / snapshot
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for artifact_name in (
+                "all.measurement.end.log",
+                "qemu-timing.log",
+                "debug.log",
+            ):
+                artifact = result_dir / artifact_name
+                if artifact.is_file():
+                    shutil.copy2(artifact, output_dir / artifact_name)
+            summary_path = output_dir / "uipc_summary.json"
+            summary_path.write_text(
+                json.dumps(summary, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            summaries.append(summary)
+        finally:
+            shutil.rmtree(workspace_root, ignore_errors=True)
+
+    report_path = _write_uipc_report(qpoints_root, experiment, summaries)
+    print(f"uIPC report written to {report_path}")
     return report_path
 
 
@@ -630,6 +852,7 @@ def run_sample(
     measurement_cycles: int,
     timing_ruby: bool = False,
     timing_ruby_moesi: bool = False,
+    cache_hierarchy_restore: bool = True,
     sim_config: Optional[str] = None,
 ) -> Path:
     if timing_ruby and timing_ruby_moesi:
@@ -661,6 +884,7 @@ def run_sample(
             core_count=core_count,
             timing_ruby=timing_ruby,
             timing_ruby_moesi=timing_ruby_moesi,
+            cache_hierarchy_restore=cache_hierarchy_restore,
             sim_config=sim_config,
         )
         summary_path = qpoints_root / "sim_outs" / experiment / snapshot / "uipc_summary.json"
@@ -685,6 +909,7 @@ def run_gem5(
     dump_cache_state: bool = False,
     timing_ruby: bool = False,
     timing_ruby_moesi: bool = False,
+    cache_hierarchy_restore: bool = True,
     sim_config: Optional[str] = None,
 ) -> None:
     if timing_ruby and timing_ruby_moesi:
@@ -741,6 +966,8 @@ def run_gem5(
         args.append("--timing-ruby")
     if timing_ruby_moesi:
         args.append("--timing-ruby-moesi")
+    if not cache_hierarchy_restore:
+        args.append("--no-cache-hierarchy-restore")
     if sim_config:
         args.extend(["--sim-config", sim_config])
     subprocess.run(

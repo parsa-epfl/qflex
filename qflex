@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import typer
 from typing import Annotated
 from commands.createimage import CreateImage
@@ -16,6 +17,7 @@ from commands.qpoints import convert_single as qpoints_convert_single
 from commands.qpoints import convert_multi as qpoints_convert_multi
 from commands.qpoints import run_gem5 as qpoints_run_gem5
 from commands.qpoints import run_sample as qpoints_run_sample
+from commands.qpoints import run_sample_flexus as qpoints_run_sample_flexus
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -248,7 +250,7 @@ def result(
 
 @app.command("run_sample")
 def run_sample(
-    timing_engine: Annotated[str, typer.Option(help="Timing engine (currently only gem5 is supported).")] = "gem5",
+    timing_engine: Annotated[str, typer.Option(help="Timing engine (gem5 or flexus).")] = "gem5",
     gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")] = "",
     experiment: Annotated[str, typer.Option(help="Experiment name.")] = "",
     first: Annotated[str, typer.Option(help="First snapshot name, e.g. snapshot_0.")] = "",
@@ -262,45 +264,87 @@ def run_sample(
     timing_ruby_moesi: Annotated[
         bool, typer.Option(help="Run gem5 in O3 Ruby MOESI_CMP_directory mode.")
     ] = False,
+    cache_hierarchy_restore: Annotated[
+        bool,
+        typer.Option(
+            "--cache-hierarchy-restore/--no-cache-hierarchy-restore",
+            help="Enable or disable gem5 LLC/L1 cache-hierarchy restore flags.",
+        ),
+    ] = True,
     sim_config: Annotated[
         str | None,
         typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
     ] = None,
+    mounting_folder: Annotated[
+        str,
+        typer.Option(
+            help="Root folder that contains the experiments directory for Flexus runs."
+        ),
+    ] = os.environ.get("QFLEX_MOUNTING_FOLDER", "/mnt/sdb/aansari"),
 ):
     """
     Run all selected sampling units serially and emit a canonical uIPC report.
     """
-    if timing_engine != "gem5":
-        raise typer.BadParameter(
-            "Only --timing-engine gem5 is supported at the moment."
+    if timing_engine == "gem5":
+        if timing_ruby and timing_ruby_moesi:
+            raise typer.BadParameter(
+                "Choose only one timing Ruby protocol flag: --timing-ruby or --timing-ruby-moesi."
+            )
+        if not (timing_ruby or timing_ruby_moesi):
+            raise typer.BadParameter(
+                "run_sample currently requires --timing-ruby or --timing-ruby-moesi."
+            )
+        if measurement_cycles <= 0:
+            raise typer.BadParameter(
+                "--measurement-cycles must be a positive integer."
+            )
+        if warmup_cycles < 0:
+            raise typer.BadParameter(
+                "--warmup-cycles must be non-negative."
+            )
+        qpoints_run_sample(
+            gem5_ckp_dir=gem5_ckp_dir,
+            experiment=experiment,
+            first=first,
+            last=last,
+            core_count=core_count,
+            warmup_cycles=warmup_cycles,
+            measurement_cycles=measurement_cycles,
+            timing_ruby=timing_ruby,
+            timing_ruby_moesi=timing_ruby_moesi,
+            cache_hierarchy_restore=cache_hierarchy_restore,
+            sim_config=sim_config,
         )
-    if timing_ruby and timing_ruby_moesi:
-        raise typer.BadParameter(
-            "Choose only one timing Ruby protocol flag: --timing-ruby or --timing-ruby-moesi."
+        return
+
+    if timing_engine == "flexus":
+        if timing_ruby or timing_ruby_moesi:
+            raise typer.BadParameter(
+                "--timing-ruby and --timing-ruby-moesi are gem5-only options."
+            )
+        if sim_config:
+            raise typer.BadParameter("--sim-config is currently gem5-only.")
+        if measurement_cycles <= 0:
+            raise typer.BadParameter(
+                "--measurement-cycles must be a positive integer."
+            )
+        if warmup_cycles < 0:
+            raise typer.BadParameter(
+                "--warmup-cycles must be non-negative."
+            )
+        qpoints_run_sample_flexus(
+            experiment=experiment,
+            first=first,
+            last=last,
+            core_count=core_count,
+            warmup_cycles=warmup_cycles,
+            measurement_cycles=measurement_cycles,
+            mounting_folder=mounting_folder,
         )
-    if not (timing_ruby or timing_ruby_moesi):
-        raise typer.BadParameter(
-            "run_sample currently requires --timing-ruby or --timing-ruby-moesi."
-        )
-    if measurement_cycles <= 0:
-        raise typer.BadParameter(
-            "--measurement-cycles must be a positive integer."
-        )
-    if warmup_cycles < 0:
-        raise typer.BadParameter(
-            "--warmup-cycles must be non-negative."
-        )
-    qpoints_run_sample(
-        gem5_ckp_dir=gem5_ckp_dir,
-        experiment=experiment,
-        first=first,
-        last=last,
-        core_count=core_count,
-        warmup_cycles=warmup_cycles,
-        measurement_cycles=measurement_cycles,
-        timing_ruby=timing_ruby,
-        timing_ruby_moesi=timing_ruby_moesi,
-        sim_config=sim_config,
+        return
+
+    raise typer.BadParameter(
+        "Unsupported --timing-engine value. Expected one of: gem5, flexus."
     )
 
 
