@@ -17,7 +17,10 @@ from rich.align import Align
 
 # Global constants
 INTERVAL = 100000
-FREQ_GHZ = 2
+FREQ_GHZ = 2.0  # GHz; overridden by --freq-ghz (the experiment's machine_freq_ghz)
+# TODO: the `* FREQ_GHZ` factor was commented out of the IPC denominators below so this
+# script matches result.py (treats INTERVAL as cycles, not ns). Was making every value
+# half. Check later why it was there — i.e. whether sys_cycles/INTERVAL is really ns.
 
 console = Console()
 
@@ -397,7 +400,7 @@ def calculate_weighted_harmonic_average(
     if index >= instruction_data_u.shape[1]:
         return 0.0
 
-    total_cycles = INTERVAL * sampling_unit_size * FREQ_GHZ
+    total_cycles = INTERVAL * sampling_unit_size  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
     num_snapshots = instruction_data_u.shape[0]
 
     if core_ids is None:
@@ -532,7 +535,7 @@ def plot_u_ipc_distribution(
 
     # Calculate IPC for each snapshot and core
     interval_ipc_data_u = interval_instruction_data_u / (
-        INTERVAL * sampling_unit_size * FREQ_GHZ
+        INTERVAL * sampling_unit_size  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
     )
 
     # Filter by core_ids if specified
@@ -645,7 +648,7 @@ def generate_new_core_info(
         total_instructions = 0
         for snapshot_idx in range(interval_instruction_data.shape[0]):
             total_instructions += interval_instruction_data[snapshot_idx, core_id]
-            total_cycles += INTERVAL * sampling_unit_size * FREQ_GHZ
+            total_cycles += INTERVAL * sampling_unit_size  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
             total_halted_cycles += interval_halted_cycles_data[snapshot_idx, core_id]
 
         valid_core_ipc[core_id] = (
@@ -866,7 +869,7 @@ def analyze_sampling_unit(
 
     # Calculate IPC for each snapshot and core
     interval_ipc_u_data = interval_instruction_u_data / (
-        INTERVAL * sampling_unit_size * FREQ_GHZ
+        INTERVAL * sampling_unit_size  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
     )
 
     # Initialize list to store results for each group
@@ -1152,7 +1155,16 @@ Examples:
         metavar="PATH",
         help="Save parsed measurement data to an NPZ file at the given path (only used when loading from timing.csv)",
     )
+    parser.add_argument(
+        "--freq-ghz",
+        type=float,
+        default=2.0,
+        help="Machine frequency in GHz (cycles per ns); the experiment's machine_freq_ghz (default: 2.0)",
+    )
     args = parser.parse_args()
+
+    global FREQ_GHZ
+    FREQ_GHZ = args.freq_ghz
 
     console.print(
         Panel.fit(

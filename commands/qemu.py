@@ -201,7 +201,7 @@ class VanillaQemuArgParser(QemuCommonArgParser):
         log_command = f""" -D "qemu-timing.log" """
         lib_qflex_command = f""" -libqflex """
         lib_name = "libsemikraken" if self.double_cores else "libknottykraken"
-        mode_command = f""" mode=timing,lib-path=../../lib/"{lib_name}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:100000,debug=crit,ckpt-path=./snapshot_{self.idx}-flexus,freq=2 """
+        mode_command = f""" mode=timing,lib-path=../../lib/"{lib_name}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:100000,debug=crit,ckpt-path=./snapshot_{self.idx}-flexus,freq={int(self.experiment_context.workload.IPC_info.machine_freq_ghz)} """
 
         qemu_args = base_args + \
         single_step_command + \

@@ -19,6 +19,7 @@ from rich.align import Align
 
 # Global constants
 INTERVAL = 100000
+FREQ_GHZ = 2.0  # GHz; overridden by --freq-ghz (the experiment's machine_freq_ghz)
 END = 300000
 CORE_COUNT = 64
 
@@ -410,8 +411,8 @@ def generate_new_core_info(result_folders: list[str], old_core_info_path: str, s
         
         # Use per-core IPC if available, otherwise inherit from old core_info.csv
         if i in valid_core_ipc:
-            # Multiply by 2 and round to 2 decimal places as per requirement
-            new_ipns = round(2 * valid_core_ipc[i], 2)
+            # ipns = IPC * frequency (cycles/ns); round to 2 decimal places
+            new_ipns = round(FREQ_GHZ * valid_core_ipc[i], 2)
             cores_with_timing_data += 1
             updated = True
         else:
@@ -790,8 +791,17 @@ Examples:
         action='store_false',
         help="Disable plotting of U-IPC distribution"
     )
-    
+    parser.add_argument(
+        '--freq-ghz',
+        type=float,
+        default=2.0,
+        help="Machine frequency in GHz (cycles per ns); the experiment's machine_freq_ghz (default: 2.0)"
+    )
+
     args = parser.parse_args()
+
+    global FREQ_GHZ
+    FREQ_GHZ = args.freq_ghz
 
     console.print(Panel.fit("[bold green]Measurement Data Analysis Tool[/bold green]", border_style="green"))
 

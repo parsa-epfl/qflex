@@ -16,9 +16,10 @@ class RunResultCommand(Executor):
         assert os.path.exists(f"{experiment_folder}/run_partitions.sh"), "Error: run_partitions.sh not found. Make sure partition command has been run."
 
         # TODO move all root old replica scripts to proper folders
+        freq_ghz = self.experiment_context.workload.IPC_info.machine_freq_ghz
         return [
             f"cd {experiment_folder}",
-            f"python {experiment_folder}/result.py",
+            f"python {experiment_folder}/result.py --freq-ghz {freq_ghz}",
             f"python {experiment_folder}/collect.py",
-            f"python {experiment_folder}/result_new.py",
+            f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz}",
         ]
