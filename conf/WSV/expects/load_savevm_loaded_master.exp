@@ -63,6 +63,7 @@ set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
 set BUDGET_WORKLOAD_INIT_S 43200   ; # 12h: server init + waiting for follower's faban ramp-up=120 (can be many hours under PDES)
 set BUDGET_CHECKPOINTING_S 10800
+set BUDGET_SERVER_SETTLE_S    30   ; # host-time settle after 8443 is listening, before signalling the follower
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
@@ -337,14 +338,17 @@ puts "wsv: web_server container started."
 # settings.php; Elgg builds its login-redirect + notifications URLs from it, so
 # the follower's faban would chase its own 127.0.0.1 and every getNotifications
 # would fail (browse works because it hits the target directly). Rewrite wwwroot
-# to 192.168.100.1 once Elgg has written settings.php, flush Elgg's cache, and
-# reload php-fpm. Single-node does NOT need this (its client targets 127.0.0.1).
+# to 192.168.100.1 once Elgg has written settings.php, reload php-fpm, then wait
+# until nginx is actually listening on :8443 (don't signal the follower against a
+# not-yet-serving port). Single-node does NOT need this (client targets 127.0.0.1).
 send "cat > ./fix_wwwroot.sh <<'WSV_FIX_EOF'\r"
 send "#!/bin/sh\r"
 send "until docker exec web_server grep -q '127.0.0.1:8443' /usr/share/nginx/html/elgg/elgg-config/settings.php 2>/dev/null; do sleep 5; done\r"
 send "docker exec web_server sed -i 's#https://127.0.0.1:8443/#https://192.168.100.1:8443/#' /usr/share/nginx/html/elgg/elgg-config/settings.php\r"
-send "docker exec web_server sh -c 'cd /usr/share/nginx/html/elgg && php elgg-cli flush -y' 2>/dev/null || true\r"
 send "docker exec web_server sh -c 'kill -USR2 \$(cat /var/run/php/php8.1-fpm.pid 2>/dev/null) 2>/dev/null || pkill -USR2 php-fpm' || true\r"
+# web_server runs --net=host, so its nginx socket shows in this guest's netns.
+send "until netstat -tln 2>/dev/null | grep -q ':8443'; do sleep 5; done\r"
+send "echo 'master: 8443 listening'\r"
 send "echo WSV_WWWROOT_FIXED\r"
 send "WSV_FIX_EOF\r"
 expect {
@@ -352,15 +356,16 @@ expect {
     -re {[\$#] +}
 }
 send "sh ./fix_wwwroot.sh\r"
-puts "wsv: fixing Elgg wwwroot -> https://192.168.100.1:8443/ (await settings.php, sed, flush, php-fpm reload)..."
+puts "wsv: fixing Elgg wwwroot -> https://192.168.100.1:8443/ (await settings.php, sed, php-fpm reload, :8443 listening)..."
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: wwwroot fix never completed"; quit_qemu $monitor_port; exit 1 }
     -re {WSV_WWWROOT_FIXED}
 }
-puts "wsv: Elgg wwwroot set to 192.168.100.1; signalling follower."
+puts "wsv: Elgg wwwroot set + 8443 listening. Settling ${BUDGET_SERVER_SETTLE_S}s before signalling follower."
+sleep $BUDGET_SERVER_SETTLE_S
 
-# --- 9. Signal follower that server is starting ----------------------------
+# --- 9. Signal follower that server is up ----------------------------------
 
 if {[catch {set f [open $server_ready_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $server_ready_flag: $err"; quit_qemu $monitor_port; exit 1
