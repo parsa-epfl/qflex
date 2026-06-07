@@ -1161,6 +1161,11 @@ Examples:
         default=2.0,
         help="Machine frequency in GHz (cycles per ns); the experiment's machine_freq_ghz (default: 2.0)",
     )
+    parser.add_argument(
+        "--no-exit-on-fail",
+        action="store_true",
+        help="Do not sys.exit(-1) when sampling-error bounds are unmet. Used by the statistical-sample loop, where an unmet bound is the normal signal to take another iteration.",
+    )
     args = parser.parse_args()
 
     global FREQ_GHZ
@@ -1231,6 +1236,11 @@ Examples:
         effective_size = max(max_required_size, max_current_size)
         next_sample_size = calculate_next_checkpoint_size(effective_size)
 
+        # Raw required size (unrounded ceil) for the statistical-sample loop, which
+        # does its own round-to-50 and takes the max across nodes.
+        with open("./REQUIRED_SAMPLE_SIZE", "w") as f:
+            f.write(str(int(math.ceil(max_required_size))))
+
         # Write next sample size to file
         with open("./NEXT_SAMPLE_SIZE", "w") as f:
             f.write(str(next_sample_size))
@@ -1283,7 +1293,7 @@ Examples:
         )
 
     # Exit with -1 if sampling error bounds were not satisfied
-    if not all_bounds_satisfied:
+    if not all_bounds_satisfied and not args.no_exit_on_fail:
         console.print(
             "[red]Error: Not all groups satisfy the sampling error bound. Exiting with -1.[/red]"
         )

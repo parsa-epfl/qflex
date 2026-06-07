@@ -39,6 +39,7 @@ def test_qflex_script_imports_cleanly():
     "run-single-partition",
     "run-partition",
     "result",
+    "statistical-sample",
     "get-experiment-folder",
     "multi",
     "create-base-image",

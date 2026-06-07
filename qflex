@@ -13,6 +13,7 @@ from commands.run_partition import RunPartitionCommand
 from commands.run_idx import RunIdxCommand
 from commands.run_single_partition import RunSinglePartitionCommand
 from commands.result import RunResultCommand
+from commands.statistical_sample import StatisticalSampleCommand
 from typer_inputs.config_wrapper import data_class_wrap
 
 app = typer.Typer(
@@ -214,6 +215,22 @@ def result(
         experiment_context=experiment_context,
     )
     run_result_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command(name="statistical-sample")
+@data_class_wrap(create_experiment_context, name="experiment_context")
+def statistical_sample(
+    experiment_context: ExperimentContext,
+    max_iterations: Annotated[int, typer.Option(help="Safety cap on loop iterations before giving up on convergence.")] = 20,
+):
+    """
+    Automate fw -> partition -> run-partition -> result, growing the sample size
+    until every node has enough sampling units. Resumes from the biggest existing
+    run/core_info_<size>.csv; delete those files to recompute from a smaller size.
+    """
+    StatisticalSampleCommand(
+        experiment_context=experiment_context,
+        max_iterations=max_iterations,
+    ).execute(to_stdio=True, run_in_background=False)
 
 @app.command(name="get-experiment-folder")
 @data_class_wrap(create_experiment_context, name="experiment_context")

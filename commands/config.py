@@ -122,6 +122,7 @@ class ExperimentContext(BaseModel):
     partition_number: int = Field(default=-1, description="Partition number for this node, used for some qemu options.")
     partition_count: int = Field(default=16, description="Number of partitions the per-sampling-unit checkpoints are split into for parallel timing runs (driven by the `partition` phase). Same value is used downstream by `run-partition` to enumerate partitions.")
     sample_size: int = Field(default=30, description="Number of sampling units the `fw` phase emits checkpoints for. Only the `fw` command consumes this; the timing-phase commands ignore it.")
+    save_next_core_info: bool = Field(default=False, description="Whether the `result` phase saves the refined IPC as core_info_<next>.csv (next = max required across nodes, rounded to 50). Default False so a standalone/rerun `result` doesn't accidentally write a new sized file; the statistical-sample loop forces it True.")
     warming_ratio: int = Field(default=2, description="Detailed-warming prefix length within each sampling unit, in units relative to `measurement_ratio` (each unit = 100k cycles). Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
     measurement_ratio: int = Field(default=1, description="Measurement segment length within each sampling unit, in units relative to `warming_ratio`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
     idx: int = Field(default=-1, description="Index of the partition to run, used for some qemu options.")
@@ -495,6 +496,19 @@ class ExperimentContext(BaseModel):
 
         return results
     
+    def run_core_info_path(self) -> str:
+        return f'{self.get_experiment_folder_address()}/run/core_info.csv'
+
+    def sized_core_info_sizes(self) -> List[int]:
+        """Sampling-unit sizes S for which a run/core_info_<S>.csv exists, ascending."""
+        import glob
+        sizes = []
+        for p in glob.glob(f'{self.get_experiment_folder_address()}/run/core_info_*.csv'):
+            stem = os.path.basename(p)[len("core_info_"):-len(".csv")]
+            if stem.isdigit():
+                sizes.append(int(stem))
+        return sorted(sizes)
+
     def get_ipns_csv(self) -> str:
         """
         Generates a CSV file containing IPNS information for each core to both cfg and run folders.
@@ -510,11 +524,18 @@ class ExperimentContext(BaseModel):
             df.to_csv(target, index=False)
         else:
             print(f"============== core_info.csv already exists at {target}, not overwriting it. ==============")
-        # Create a sym link to the core info in cfg folder
-        sym_target = f'{self.get_experiment_folder_address()}/run/core_info.csv'
+        run_dir = f'{self.get_experiment_folder_address()}/run'
+        # Step 1: always materialise the base core_info for this experiment's sample
+        # unit (the cli/yaml value). Higher sizes are refined later by the result phase.
+        base = f'{run_dir}/core_info_{self.sample_size}.csv'
+        if not os.path.exists(base):
+            os.system(f"cp {target} {base}")
+        # Step 2: point the hardcoded core_info.csv (read by other code) at the biggest
+        # core_info_<size>.csv on disk.
+        sym_target = self.run_core_info_path()
+        biggest = self.sized_core_info_sizes()[-1]
         os.system(f"rm -f {sym_target}")
-        # Copy file and override if you need to
-        os.system(f"cp -u {target} {sym_target}")
+        os.system(f"cp {run_dir}/core_info_{biggest}.csv {sym_target}")
 
 
         
@@ -563,6 +584,7 @@ def create_experiment_context(
     partition_number: Annotated[int, Field(description="Partition number for the nodes to run things in parallel.")] = -1,
     partition_count: Annotated[int, Field(description="Number of partitions the per-sampling-unit checkpoints are split into for parallel timing runs.")] = 16,
     sample_size: Annotated[int, Field(description="Number of sampling units the `fw` phase emits checkpoints for. Only the `fw` command consumes this; other phases ignore it.")] = 30,
+    save_next_core_info: Annotated[bool, Field(description="Whether the `result` phase saves the refined IPC as core_info_<next>.csv. Default False so a standalone/rerun `result` doesn't accidentally write one; the statistical-sample loop forces it True.")] = False,
     warming_ratio: Annotated[int, Field(description="Detailed-warming prefix length within each sampling unit, in units relative to `measurement_ratio` (each unit = 100k cycles). Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 2,
     measurement_ratio: Annotated[int, Field(description="Measurement segment length within each sampling unit, in units relative to `warming_ratio`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 1,
     idx: Annotated[int, Field(description="Index of the partition to run, used for some qemu options.")] = -1,
@@ -675,6 +697,7 @@ def create_experiment_context(
         partition_number=partition_number,
         partition_count=partition_count,
         sample_size=sample_size,
+        save_next_core_info=save_next_core_info,
         warming_ratio=warming_ratio,
         measurement_ratio=measurement_ratio,
         idx=idx,

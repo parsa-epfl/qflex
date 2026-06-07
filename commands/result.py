@@ -1,6 +1,16 @@
+import math
 import os
+import shutil
+
 from commands import Executor
+from .executer import _is_dry_run
 from .config import ExperimentContext
+
+# Files result_new.py writes per leaf in the experiment folder. REQUIRED is the raw
+# required sample size (convergence signal); NEXT is result_new's own next size.
+REQUIRED_SAMPLE_SIZE_FILE = "REQUIRED_SAMPLE_SIZE"
+NEXT_SAMPLE_SIZE_FILE = "NEXT_SAMPLE_SIZE"
+
 
 class RunResultCommand(Executor):
 
@@ -17,9 +27,58 @@ class RunResultCommand(Executor):
 
         # TODO move all root old replica scripts to proper folders
         freq_ghz = self.experiment_context.workload.IPC_info.machine_freq_ghz
+        # Always regenerate core_info_new.csv + REQUIRED_SAMPLE_SIZE; --no-exit-on-fail so
+        # the cross-node save step below always runs (an unmet bound is not a failure).
         return [
             f"cd {experiment_folder}",
             f"python {experiment_folder}/result.py --freq-ghz {freq_ghz}",
             f"python {experiment_folder}/collect.py",
-            f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz}",
+            f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz} --generate-core-info --core-info-path run/core_info.csv --no-exit-on-fail",
         ]
+
+    def execute(self,
+                to_stdio: bool = True,
+                run_in_background: bool = False,
+                dry_run: bool = False,
+                *,
+                sentinel_dir: str = None,
+                log_path: str = None,
+                err_path: str = None,
+                log_append: bool = False) -> bool:
+        ok = super().execute(to_stdio=to_stdio, run_in_background=run_in_background, dry_run=dry_run,
+                             sentinel_dir=sentinel_dir, log_path=log_path, err_path=err_path, log_append=log_append)
+        # Run the cross-node save once at the top (group) or for a true single-node run,
+        # never inside a multi-node child leaf (which only sees its own node). Off by
+        # default (save_next_core_info) so a standalone/rerun `result` doesn't write a new
+        # sized file by accident; the statistical-sample loop forces it on.
+        exp = self.experiment_context
+        if not _is_dry_run(dry_run) and exp.save_next_core_info and (exp.has_sub_experiments() or not exp.is_multi_node()):
+            self._save_next_core_info()
+        return ok
+
+    def _save_next_core_info(self) -> None:
+        """If the run isn't yet statistically sufficient, save each node's refined IPC
+        as core_info_<next>.csv, where next = max required across nodes rounded up to 50.
+        This is the experiment-wide step, so it must be the parent's job — a single
+        node's result script can't know the max across nodes."""
+        # TODO possible bug: rerunning `result` repeatedly with nothing in between (no new
+        # fw/run-partition) re-saves core_info_<next> off stale data while core_info.csv has
+        # already advanced to the biggest size — current vs data can disagree. Revisit.
+        leaves = self.experiment_context.sub_experiments or [self.experiment_context]
+        required = max(self._read_required(leaf) for leaf in leaves)
+        current = leaves[0].sample_size
+        if required <= current:
+            print(f"[result] sample size {current} is sufficient (required {required}); no new core_info.")
+            return
+        nxt = int(math.ceil(required / 50.0)) * 50
+        for leaf in leaves:
+            folder = leaf.get_experiment_folder_address()
+            shutil.copy(f"{folder}/core_info_new.csv", f"{folder}/run/core_info_{nxt}.csv")
+        print(f"[result] required {required} > {current}; saved core_info_{nxt}.csv on {len(leaves)} node(s).")
+
+    def _read_required(self, leaf: ExperimentContext) -> int:
+        path = f"{leaf.get_experiment_folder_address()}/{REQUIRED_SAMPLE_SIZE_FILE}"
+        if not os.path.exists(path):
+            raise RuntimeError(f"{REQUIRED_SAMPLE_SIZE_FILE} not found at {path}; did the result step run?")
+        with open(path) as f:
+            return int(f.read().strip())
