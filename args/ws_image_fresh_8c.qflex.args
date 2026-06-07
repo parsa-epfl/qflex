@@ -1,0 +1,26 @@
+--core-count 8
+--no-double-cores
+--quantum-size-ns 20000
+--llc-size-per-tile-mb 1
+--parallel
+--network user
+--memory-gb 32
+--host-name SAPHIRE
+--workload-name web-search
+--population-seconds 0.1
+--no-consolidated
+--primary-ipc 2.0
+--primary-core-start 0
+--experiment-name ws-image-fresh-8c
+--image-name root.qcow2
+--image-folder /mnt/sdb/aansari/ws-image/web-search-fresh-8c
+--kernel /mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/kernel/vmlinux-6.1.34-3-virt.elf
+--bootloader /home/dev/qflex_git/QPoints/bin/m5/binaries/boot_v2_qemu_virt.arm64
+--root-device /dev/vda
+--itb-size 64
+--dtb-size 64
+--have-large-asid-64
+--mounting-folder /mnt/sdb/aansari
+--check-period-quantum-coeff 53.0
+--no-unique
+--use-image-directly

@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import time
 import json
+import gzip
 import tempfile
 from pathlib import Path
 import sys
@@ -11,9 +12,15 @@ import threading
 import concurrent.futures
 from typing import Optional
 from commands.qemu_cpu import resolve_qemu_cpu
-
-DEFAULT_ITB_SIZE = 64
-DEFAULT_DTB_SIZE = 64
+from commands.config import (
+    DEFAULT_BOOTMEM_SIZE_BYTES,
+    DEFAULT_DTB_SIZE,
+    DEFAULT_HAVE_LARGE_ASID_64,
+    DEFAULT_ITB_SIZE,
+    DEFAULT_PLATFORM,
+    DEFAULT_ROOT_DEVICE,
+    get_default_bootloader_path,
+)
 
 
 def _ensure_executable(path: Path) -> None:
@@ -95,6 +102,24 @@ def _symlink_file(target: Path, source: Path) -> None:
     if target.exists() or target.is_symlink():
         target.unlink()
     target.symlink_to(source)
+
+
+def _is_gzip_file(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    with path.open("rb") as fh:
+        return fh.read(2) == b"\x1f\x8b"
+
+
+def _materialize_store0_artifact(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() or destination.is_symlink():
+        destination.unlink()
+    if _is_gzip_file(source):
+        with gzip.open(source, "rb") as src, destination.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+    else:
+        shutil.copy2(source, destination)
 
 
 def _prepare_snapshot_gem5_uarch(
@@ -181,6 +206,11 @@ def _apply_snapshot_gem5_uarch(
     core_count: int,
     memory_gb: int,
     kernel: Optional[str],
+    bootloader: Optional[str],
+    root_device: str,
+    itb_size: int,
+    dtb_size: int,
+    have_large_asid_64: bool,
     uarch_manifest: Optional[dict],
 ) -> None:
     if not uarch_manifest:
@@ -201,7 +231,23 @@ def _apply_snapshot_gem5_uarch(
         if kernel
         else qpoints_root / "bin" / "m5" / "binaries" / "vmlinux.arm64"
     )
-    bootloader = qpoints_root / "bin" / "m5" / "binaries" / "boot_v2_qemu_virt.arm64"
+    bootloader_path = (
+        Path(bootloader).expanduser().resolve()
+        if bootloader
+        else qpoints_root / "bin" / "m5" / "binaries" / "boot_v2_qemu_virt.arm64"
+    )
+    machine_config = _load_machine_config(checkpoint_dir / "machine_config.json")
+    _validate_machine_config(
+        machine_config,
+        core_count=core_count,
+        memory_gb=memory_gb,
+        kernel=str(kernel_path),
+        bootloader=str(bootloader_path),
+        root_device=root_device,
+        itb_size=itb_size,
+        dtb_size=dtb_size,
+        have_large_asid_64=have_large_asid_64,
+    )
     disk_image = checkpoint_dir / f"{snapshot}.img"
     outdir = checkpoint_dir / ".tlb_apply_out"
     if outdir.exists():
@@ -224,7 +270,8 @@ def _apply_snapshot_gem5_uarch(
                     "-I",
                     "10000",
                     f"--disk-image={disk_image}",
-                    f"--bootloader={bootloader}",
+                    f"--bootloader={bootloader_path}",
+                    f"--root-device={root_device}",
                     "--caches",
                     "--cpu-type",
                     "AtomicSimpleCPU",
@@ -238,10 +285,14 @@ def _apply_snapshot_gem5_uarch(
                     "--mem-size",
                     f"{memory_gb * 1024}MiB",
                     "--itb-size",
-                    str(DEFAULT_ITB_SIZE),
+                    str(itb_size),
                     "--dtb-size",
-                    str(DEFAULT_DTB_SIZE),
-                    "--have-large-asid-64",
+                    str(dtb_size),
+                    *(
+                        ["--have-large-asid-64"]
+                        if have_large_asid_64
+                        else []
+                    ),
                     "--va-file",
                     tlb_source,
                     "--va-cpu-id",
@@ -276,6 +327,8 @@ def _finalize_snapshot_checkpoint(
             str(core_count),
             "--memory-gb",
             str(memory_gb),
+            "--machine-config",
+            str(checkpoint_dir / "machine_config.json"),
         ],
         cwd=str(repo_root),
         text=True,
@@ -601,12 +654,137 @@ def _tail_file(path: Path, max_lines: int = 20) -> str:
     return f"\nLast {min(len(lines), max_lines)} lines of {path}:\n{tail}"
 
 
+def _load_machine_config(path: Path) -> dict:
+    if not path.is_file():
+        raise RuntimeError(f"Machine config not found: {path}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _validate_machine_config(
+    machine_config: dict,
+    *,
+    core_count: int,
+    memory_gb: int,
+    kernel: Optional[str] = None,
+    bootloader: Optional[str] = None,
+    root_device: Optional[str] = None,
+    itb_size: Optional[int] = None,
+    dtb_size: Optional[int] = None,
+    have_large_asid_64: Optional[bool] = None,
+) -> None:
+    expected = {
+        "core_count": core_count,
+        "memory_gb": memory_gb,
+    }
+    if kernel:
+        expected["kernel"] = str(Path(kernel).expanduser().resolve())
+    if bootloader:
+        expected["bootloader"] = str(Path(bootloader).expanduser().resolve())
+    if root_device is not None:
+        expected["root_device"] = root_device
+    if itb_size is not None:
+        expected["itb_size"] = itb_size
+    if dtb_size is not None:
+        expected["dtb_size"] = dtb_size
+    if have_large_asid_64 is not None:
+        expected["have_large_asid_64"] = have_large_asid_64
+
+    for key, value in expected.items():
+        actual = machine_config.get(key)
+        if actual != value:
+            raise RuntimeError(
+                f"Machine config mismatch for {key}: {actual!r} != {value!r}"
+            )
+
+
+def _write_checkpoint_machine_config(
+    gem5_ckp_dir: Path,
+    checkpoint_dir: Path,
+    snapshot: str,
+    core_count: int,
+    memory_gb: int,
+    kernel: Optional[str],
+    bootloader: Optional[str],
+    root_device: str,
+    itb_size: int,
+    dtb_size: int,
+    have_large_asid_64: bool,
+    disk_image: Path,
+) -> None:
+    kernel_path = str(Path(kernel).expanduser().resolve()) if kernel else ""
+    bootloader_path = (
+        str(Path(bootloader).expanduser().resolve())
+        if bootloader
+        else get_default_bootloader_path()
+    )
+    root_manifest = gem5_ckp_dir / "machine_config.json"
+    snapshot_manifest = checkpoint_dir / "machine_config.json"
+    machine_payload = {
+        "schema_version": 1,
+        "platform": DEFAULT_PLATFORM,
+        "kernel": kernel_path,
+        "bootloader": bootloader_path,
+        "root_device": root_device,
+        "core_count": core_count,
+        "memory_gb": memory_gb,
+        "memory_bytes": int(memory_gb) * (1024 ** 3),
+        "bootmem_size_bytes": DEFAULT_BOOTMEM_SIZE_BYTES,
+        "itb_size": itb_size,
+        "dtb_size": dtb_size,
+        "have_large_asid_64": have_large_asid_64,
+    }
+    snapshot_payload = {
+        **machine_payload,
+        "snapshot": snapshot,
+        "disk_image": str(disk_image.resolve()),
+    }
+
+    if root_manifest.is_file():
+        existing = json.loads(root_manifest.read_text(encoding="utf-8"))
+        for key in (
+            "platform",
+            "kernel",
+            "bootloader",
+            "root_device",
+            "core_count",
+            "memory_gb",
+            "memory_bytes",
+            "bootmem_size_bytes",
+            "itb_size",
+            "dtb_size",
+            "have_large_asid_64",
+        ):
+            if key in existing and existing.get(key) != machine_payload.get(key):
+                raise RuntimeError(
+                    f"Checkpoint machine config mismatch for {key}: "
+                    f"{existing.get(key)!r} != {machine_payload.get(key)!r}"
+                )
+        machine_payload = {**existing, **machine_payload}
+
+    root_manifest.write_text(
+        json.dumps(machine_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    if snapshot_manifest.exists() or snapshot_manifest.is_symlink():
+        snapshot_manifest.unlink()
+    snapshot_manifest.write_text(
+        json.dumps(snapshot_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def convert_single(
     qflex_ckp_dir: str,
     gem5_ckp_dir: str,
     core_count: int,
     memory_gb: int,
     kernel: Optional[str],
+    bootloader: Optional[str],
+    root_device: str,
+    itb_size: int,
+    dtb_size: int,
+    have_large_asid_64: bool,
     base: str,
     snapshot: str,
     ssh_host: str = "127.0.0.1",
@@ -757,12 +935,27 @@ def convert_single(
                 f"[{snapshot}] Converted image not found: {converted_img_tmp}"
             )
 
+        _write_checkpoint_machine_config(
+            Path(gem5_ckp_dir),
+            img_dest_dir,
+            snapshot,
+            core_count,
+            memory_gb,
+            kernel,
+            bootloader,
+            root_device,
+            itb_size,
+            dtb_size,
+            have_large_asid_64,
+            converted_img,
+        )
+
         store0 = run_dir / "system.physmem.store0.pmem"
         if not store0.is_file():
             store0 = _require_qpoints_file(
                 qpoints_root, "scripts/base_files/system.physmem.store0.pmem"
             )
-        shutil.copy2(store0, img_dest_dir / "system.physmem.store0.pmem")
+        _materialize_store0_artifact(store0, img_dest_dir / "system.physmem.store0.pmem")
 
         print(f"[{snapshot}] composing base m5.cpt")
         _finalize_snapshot_checkpoint(
@@ -781,6 +974,11 @@ def convert_single(
             core_count,
             memory_gb,
             kernel,
+            bootloader,
+            root_device,
+            itb_size,
+            dtb_size,
+            have_large_asid_64,
             uarch_manifest,
         )
     except KeyboardInterrupt:
@@ -801,6 +999,11 @@ def convert_multi(
     core_count: int,
     memory_gb: int,
     kernel: Optional[str],
+    bootloader: Optional[str],
+    root_device: str,
+    itb_size: int,
+    dtb_size: int,
+    have_large_asid_64: bool,
     base: str,
     ssh_host: str = "127.0.0.1",
     ssh_user: str = "qflex",
@@ -825,6 +1028,11 @@ def convert_multi(
             core_count=core_count,
             memory_gb=memory_gb,
             kernel=kernel,
+            bootloader=bootloader,
+            root_device=root_device,
+            itb_size=itb_size,
+            dtb_size=dtb_size,
+            have_large_asid_64=have_large_asid_64,
             base=base,
             snapshot=snapshot,
             ssh_host=ssh_host,
@@ -866,6 +1074,11 @@ def run_sample(
     core_count: int,
     memory_gb: int,
     kernel: Optional[str],
+    bootloader: Optional[str],
+    root_device: str,
+    itb_size: int,
+    dtb_size: int,
+    have_large_asid_64: bool,
     warmup_cycles: int,
     measurement_cycles: int,
     timing_ruby: bool = False,
@@ -902,6 +1115,11 @@ def run_sample(
             core_count=core_count,
             memory_gb=memory_gb,
             kernel=kernel,
+            bootloader=bootloader,
+            root_device=root_device,
+            itb_size=itb_size,
+            dtb_size=dtb_size,
+            have_large_asid_64=have_large_asid_64,
             timing_ruby=timing_ruby,
             timing_ruby_moesi=timing_ruby_moesi,
             cache_hierarchy_restore=cache_hierarchy_restore,
@@ -925,6 +1143,11 @@ def run_gem5(
     core_count: int = 1,
     memory_gb: int = 16,
     kernel: Optional[str] = None,
+    bootloader: Optional[str] = None,
+    root_device: str = DEFAULT_ROOT_DEVICE,
+    itb_size: int = DEFAULT_ITB_SIZE,
+    dtb_size: int = DEFAULT_DTB_SIZE,
+    have_large_asid_64: bool = DEFAULT_HAVE_LARGE_ASID_64,
     branch_trace: bool = False,
     tage_decision_trace: bool = False,
     data_trace: bool = False,
@@ -957,6 +1180,20 @@ def run_gem5(
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
     _prepare_qpoints_root(qpoints_root, ("run_gem5.sh",))
+    checkpoint_dir = Path(gem5_ckp_dir) / snapshot
+    machine_config = _load_machine_config(checkpoint_dir / "machine_config.json")
+    expected_kernel = kernel if kernel else machine_config.get("kernel")
+    _validate_machine_config(
+        machine_config,
+        core_count=core_count,
+        memory_gb=memory_gb,
+        kernel=expected_kernel,
+        bootloader=bootloader or machine_config.get("bootloader"),
+        root_device=root_device,
+        itb_size=itb_size,
+        dtb_size=dtb_size,
+        have_large_asid_64=have_large_asid_64,
+    )
     run_gem5_sh = qpoints_root / "run_gem5.sh"
     args = [
         "bash",
@@ -971,6 +1208,12 @@ def run_gem5(
         str(core_count),
         "--memory-gb",
         str(memory_gb),
+        "--root-device",
+        root_device,
+        "--itb-size",
+        str(itb_size),
+        "--dtb-size",
+        str(dtb_size),
     ]
     if inst is not None:
         args.extend(["--inst", str(inst)])
@@ -996,6 +1239,12 @@ def run_gem5(
         args.extend(["--sim-config", sim_config])
     if kernel:
         args.extend(["--kernel", kernel])
+    if bootloader:
+        args.extend(["--bootloader", bootloader])
+    if have_large_asid_64:
+        args.append("--have-large-asid-64")
+    else:
+        args.append("--no-large-asid-64")
     subprocess.run(
         args,
         cwd=str(qpoints_root),

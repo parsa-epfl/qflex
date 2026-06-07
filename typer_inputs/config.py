@@ -59,6 +59,22 @@ class ExperimentContextTyper(TyperDataClassMeta):
         kernel: Annotated[str, typer.Option(
             help="Kernel image to use for gem5 restore and TLB sidecar generation."
         )] = "",
+        bootloader: Annotated[str, typer.Option(
+            help="Bootloader image to use for gem5 restore runs."
+        )] = "",
+        root_device: Annotated[str, typer.Option(
+            help="Root device to pass to gem5 full-system configs."
+        )] = "/dev/vda",
+        itb_size: Annotated[int, typer.Option(
+            help="Instruction TLB size to use for gem5 restore and TLB sidecar generation."
+        )] = 64,
+        dtb_size: Annotated[int, typer.Option(
+            help="Data TLB size to use for gem5 restore and TLB sidecar generation."
+        )] = 64,
+        have_large_asid_64: Annotated[bool, typer.Option(
+            "--have-large-asid-64/--no-large-asid-64",
+            help="Whether the target machine uses 64-bit large ASIDs."
+        )] = True,
         unique: Annotated[bool, typer.Option(
             help="Whether to keep the experiment folder unique by adding a timestamp."
         )] = True,
@@ -111,6 +127,11 @@ class ExperimentContextTyper(TyperDataClassMeta):
             phantom_cpu_ipc=phantom_cpu_ipc,
             image_folder=image_folder,
             kernel=kernel,
+            bootloader=bootloader,
+            root_device=root_device,
+            itb_size=itb_size,
+            dtb_size=dtb_size,
+            have_large_asid_64=have_large_asid_64,
             keep_experiment_unique=unique,
             use_image_directly=use_image_directly,
             loadvm_name=loadvm_name,

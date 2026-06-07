@@ -61,6 +61,48 @@ def _hex_to_int(hex_str):
     return int(hex_str, 16)
 
 
+def load_machine_config(machine_config_path):
+    if not machine_config_path:
+        return None
+    path = Path(machine_config_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Machine config not found: {path}")
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def validate_memory_artifacts(gem_dir, *, bootmem_size_bytes, physmem_store1_range_size):
+    gem_dir = Path(gem_dir)
+    checks = [
+        (
+            gem_dir / "system.physmem.store0.pmem",
+            int(bootmem_size_bytes),
+            "system.physmem.store0.pmem",
+        ),
+        (
+            gem_dir / "system.physmem.store1.pmem",
+            int(physmem_store1_range_size),
+            "system.physmem.store1.pmem",
+        ),
+    ]
+
+    for path, expected_size, label in checks:
+        if not path.is_file():
+            raise FileNotFoundError(f"Required memory artifact not found: {path}")
+        with path.open("rb") as fh:
+            magic = fh.read(2)
+        if magic == b"\x1f\x8b":
+            raise ValueError(
+                f"{label} is gzip-compressed. Expected a raw pmem artifact at {path}"
+            )
+        actual_size = path.stat().st_size
+        if actual_size < expected_size:
+            raise ValueError(
+                f"{label} is smaller than declared checkpoint range: "
+                f"{actual_size} < {expected_size}"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Input parsing
 # ---------------------------------------------------------------------------
@@ -284,6 +326,7 @@ def generate_m5_cpt(
     gem_dir,
     num_cores,
     memory_gb=16,
+    machine_config=None,
     template_name=None,
     verbose=False,
 ):
@@ -322,8 +365,37 @@ def generate_m5_cpt(
     # Load TLB data from mmu-cpuN.cpt files if present
     tlb_entries = load_tlb_entries(gem_dir, num_cores)
     all_missing_regs = []  # Track missing regs across all cores
+    bootmem_size_bytes = 64 * 1024 * 1024
+
+    if machine_config:
+        manifest_core_count = machine_config.get("core_count")
+        manifest_memory_gb = machine_config.get("memory_gb")
+        manifest_memory_bytes = machine_config.get("memory_bytes")
+        manifest_bootmem_size_bytes = machine_config.get("bootmem_size_bytes")
+        if manifest_core_count is not None and int(manifest_core_count) != int(num_cores):
+            raise ValueError(
+                f"Machine config core_count mismatch: {manifest_core_count} != {num_cores}"
+            )
+        if manifest_memory_gb is not None and int(manifest_memory_gb) != int(memory_gb):
+            raise ValueError(
+                f"Machine config memory_gb mismatch: {manifest_memory_gb} != {memory_gb}"
+            )
+        if manifest_memory_bytes is not None:
+            expected_memory_bytes = int(memory_gb) * (1024 ** 3)
+            if int(manifest_memory_bytes) != expected_memory_bytes:
+                raise ValueError(
+                    "Machine config memory_bytes mismatch: "
+                    f"{manifest_memory_bytes} != {expected_memory_bytes}"
+                )
+        if manifest_bootmem_size_bytes is not None:
+            bootmem_size_bytes = int(manifest_bootmem_size_bytes)
 
     physmem_store1_range_size = int(memory_gb) * (1024 ** 3)
+    validate_memory_artifacts(
+        gem_dir,
+        bootmem_size_bytes=bootmem_size_bytes,
+        physmem_store1_range_size=physmem_store1_range_size,
+    )
 
     if num_cores == 1:
         reg_map = parse_register_json(json_path, cpu_index=0)
@@ -350,6 +422,7 @@ def generate_m5_cpt(
                 fpreg_string=fpreg_str,
                 ccreg_string=ccreg_str,
                 reg_map=reg_map,
+                physmem_store0_range_size=bootmem_size_bytes,
                 physmem_store1_range_size=physmem_store1_range_size,
                 tlb_entries=tlb_entries,
             )
@@ -389,6 +462,7 @@ def generate_m5_cpt(
                 ccreg_string=ccreg_str,
                 reg_map=reg_map,
                 num_cores=num_cores,
+                physmem_store0_range_size=bootmem_size_bytes,
                 physmem_store1_range_size=physmem_store1_range_size,
                 tlb_entries=tlb_entries,
             )
@@ -432,6 +506,11 @@ def main():
         help="Main RAM size in GiB for system.physmem.store1 (default: 16)",
     )
     parser.add_argument(
+        "--machine-config",
+        default=None,
+        help="Optional machine_config.json path used to validate and derive machine parameters.",
+    )
+    parser.add_argument(
         "--template",
         default=None,
         help="Override Jinja2 template filename (looked up in templates/)",
@@ -443,10 +522,31 @@ def main():
     )
 
     args = parser.parse_args()
+    machine_config_path = args.machine_config
+    if machine_config_path is None:
+        default_machine_config = Path(args.gem_dir) / "machine_config.json"
+        if default_machine_config.is_file():
+            machine_config_path = str(default_machine_config)
+    machine_config = (
+        load_machine_config(machine_config_path)
+        if machine_config_path
+        else None
+    )
+    resolved_num_cores = (
+        int(machine_config["core_count"])
+        if machine_config and machine_config.get("core_count") is not None
+        else args.num_cores
+    )
+    resolved_memory_gb = (
+        int(machine_config["memory_gb"])
+        if machine_config and machine_config.get("memory_gb") is not None
+        else args.memory_gb
+    )
     generate_m5_cpt(
         args.gem_dir,
-        args.num_cores,
-        memory_gb=args.memory_gb,
+        resolved_num_cores,
+        memory_gb=resolved_memory_gb,
+        machine_config=machine_config,
         template_name=args.template,
         verbose=args.verbose,
     )
