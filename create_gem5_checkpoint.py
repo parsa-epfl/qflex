@@ -280,7 +280,13 @@ def load_tlb_entries(gem_dir, num_cores):
 # Checkpoint generation
 # ---------------------------------------------------------------------------
 
-def generate_m5_cpt(gem_dir, num_cores, template_name=None, verbose=False):
+def generate_m5_cpt(
+    gem_dir,
+    num_cores,
+    memory_gb=16,
+    template_name=None,
+    verbose=False,
+):
     """Generate m5.cpt inside *gem_dir* from register-info.json + dev.info.
 
     Parameters
@@ -317,6 +323,8 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None, verbose=False):
     tlb_entries = load_tlb_entries(gem_dir, num_cores)
     all_missing_regs = []  # Track missing regs across all cores
 
+    physmem_store1_range_size = int(memory_gb) * (1024 ** 3)
+
     if num_cores == 1:
         reg_map = parse_register_json(json_path, cpu_index=0)
         parse_dev_info(dev_info_path, reg_map)
@@ -342,6 +350,7 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None, verbose=False):
                 fpreg_string=fpreg_str,
                 ccreg_string=ccreg_str,
                 reg_map=reg_map,
+                physmem_store1_range_size=physmem_store1_range_size,
                 tlb_entries=tlb_entries,
             )
         )
@@ -380,6 +389,7 @@ def generate_m5_cpt(gem_dir, num_cores, template_name=None, verbose=False):
                 ccreg_string=ccreg_str,
                 reg_map=reg_map,
                 num_cores=num_cores,
+                physmem_store1_range_size=physmem_store1_range_size,
                 tlb_entries=tlb_entries,
             )
         )
@@ -416,6 +426,12 @@ def main():
         help="Number of CPU cores (default: 1)",
     )
     parser.add_argument(
+        "--memory-gb",
+        type=int,
+        default=16,
+        help="Main RAM size in GiB for system.physmem.store1 (default: 16)",
+    )
+    parser.add_argument(
         "--template",
         default=None,
         help="Override Jinja2 template filename (looked up in templates/)",
@@ -427,7 +443,13 @@ def main():
     )
 
     args = parser.parse_args()
-    generate_m5_cpt(args.gem_dir, args.num_cores, args.template, verbose=args.verbose)
+    generate_m5_cpt(
+        args.gem_dir,
+        args.num_cores,
+        memory_gb=args.memory_gb,
+        template_name=args.template,
+        verbose=args.verbose,
+    )
 
 
 if __name__ == "__main__":

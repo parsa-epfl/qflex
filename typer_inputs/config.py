@@ -56,6 +56,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         image_folder: Annotated[str, typer.Option(
             help="Folder where images are stored."
         )] = './images',
+        kernel: Annotated[str, typer.Option(
+            help="Kernel image to use for gem5 restore and TLB sidecar generation."
+        )] = "",
         unique: Annotated[bool, typer.Option(
             help="Whether to keep the experiment folder unique by adding a timestamp."
         )] = True,
@@ -107,6 +110,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
             secondary_ipc=secondary_ipc,
             phantom_cpu_ipc=phantom_cpu_ipc,
             image_folder=image_folder,
+            kernel=kernel,
             keep_experiment_unique=unique,
             use_image_directly=use_image_directly,
             loadvm_name=loadvm_name,

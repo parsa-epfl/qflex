@@ -180,6 +180,7 @@ def _apply_snapshot_gem5_uarch(
     snapshot: str,
     core_count: int,
     memory_gb: int,
+    kernel: Optional[str],
     uarch_manifest: Optional[dict],
 ) -> None:
     if not uarch_manifest:
@@ -195,7 +196,11 @@ def _apply_snapshot_gem5_uarch(
 
     gem5_bin = qpoints_root / "gem5" / "build" / "ARM" / "gem5.opt"
     gem5_cfg = qpoints_root / "gem5" / "configs" / "example" / "arm" / "starter_fs.py"
-    kernel = qpoints_root / "bin" / "m5" / "binaries" / "vmlinux.arm64"
+    kernel_path = (
+        Path(kernel).expanduser().resolve()
+        if kernel
+        else qpoints_root / "bin" / "m5" / "binaries" / "vmlinux.arm64"
+    )
     bootloader = qpoints_root / "bin" / "m5" / "binaries" / "boot_v2_qemu_virt.arm64"
     disk_image = checkpoint_dir / f"{snapshot}.img"
     outdir = checkpoint_dir / ".tlb_apply_out"
@@ -244,7 +249,7 @@ def _apply_snapshot_gem5_uarch(
                     "--tlb-output-dir",
                     str(gem5_uarch_dir),
                     "--kernel",
-                    str(kernel),
+                    str(kernel_path),
                 ],
                 cwd=str(qpoints_root / "gem5"),
                 text=True,
@@ -259,6 +264,7 @@ def _finalize_snapshot_checkpoint(
     repo_root: Path,
     checkpoint_dir: Path,
     core_count: int,
+    memory_gb: int,
 ) -> None:
     create_gem5_checkpoint = repo_root / "create_gem5_checkpoint.py"
     subprocess.run(
@@ -268,6 +274,8 @@ def _finalize_snapshot_checkpoint(
             str(checkpoint_dir),
             "--num-cores",
             str(core_count),
+            "--memory-gb",
+            str(memory_gb),
         ],
         cwd=str(repo_root),
         text=True,
@@ -598,6 +606,7 @@ def convert_single(
     gem5_ckp_dir: str,
     core_count: int,
     memory_gb: int,
+    kernel: Optional[str],
     base: str,
     snapshot: str,
     ssh_host: str = "127.0.0.1",
@@ -756,7 +765,9 @@ def convert_single(
         shutil.copy2(store0, img_dest_dir / "system.physmem.store0.pmem")
 
         print(f"[{snapshot}] composing base m5.cpt")
-        _finalize_snapshot_checkpoint(repo_root, img_dest_dir, core_count)
+        _finalize_snapshot_checkpoint(
+            repo_root, img_dest_dir, core_count, memory_gb
+        )
 
         _check_cancelled()
         uarch_manifest = _prepare_snapshot_gem5_uarch(
@@ -769,6 +780,7 @@ def convert_single(
             snapshot,
             core_count,
             memory_gb,
+            kernel,
             uarch_manifest,
         )
     except KeyboardInterrupt:
@@ -788,6 +800,7 @@ def convert_multi(
     gem5_ckp_dir: str,
     core_count: int,
     memory_gb: int,
+    kernel: Optional[str],
     base: str,
     ssh_host: str = "127.0.0.1",
     ssh_user: str = "qflex",
@@ -811,6 +824,7 @@ def convert_multi(
             gem5_ckp_dir=gem5_ckp_dir,
             core_count=core_count,
             memory_gb=memory_gb,
+            kernel=kernel,
             base=base,
             snapshot=snapshot,
             ssh_host=ssh_host,
@@ -851,6 +865,7 @@ def run_sample(
     last: str,
     core_count: int,
     memory_gb: int,
+    kernel: Optional[str],
     warmup_cycles: int,
     measurement_cycles: int,
     timing_ruby: bool = False,
@@ -886,6 +901,7 @@ def run_sample(
             measurement_cycles=measurement_cycles,
             core_count=core_count,
             memory_gb=memory_gb,
+            kernel=kernel,
             timing_ruby=timing_ruby,
             timing_ruby_moesi=timing_ruby_moesi,
             cache_hierarchy_restore=cache_hierarchy_restore,
@@ -908,6 +924,7 @@ def run_gem5(
     measurement_cycles: Optional[int] = None,
     core_count: int = 1,
     memory_gb: int = 16,
+    kernel: Optional[str] = None,
     branch_trace: bool = False,
     tage_decision_trace: bool = False,
     data_trace: bool = False,
@@ -977,6 +994,8 @@ def run_gem5(
         args.append("--no-cache-hierarchy-restore")
     if sim_config:
         args.extend(["--sim-config", sim_config])
+    if kernel:
+        args.extend(["--kernel", kernel])
     subprocess.run(
         args,
         cwd=str(qpoints_root),

@@ -106,6 +106,10 @@ class ExperimentContext(BaseModel):
     # TODO move image name to the workload section
     image_folder: str = Field(description="Address of the image to use")
     image_name: str = Field(description="Name of the image to use")
+    kernel: str = Field(
+        default="",
+        description="Kernel image to use for gem5 restore and TLB sidecar generation",
+    )
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
     host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
@@ -353,6 +357,7 @@ def create_experiment_context(
     phantom_cpu_ipc: float,
     # experiment sections
     image_folder: str,
+    kernel: str = "",
     # Default parameters that can be induced from others
     experiment_name=None,
     image_name: str=None,
@@ -374,6 +379,7 @@ def create_experiment_context(
     # TODO check this to make sure it doesn't have edge cases
     mounting_folder = os.path.abspath(mounting_folder)
     image_folder = os.path.abspath(image_folder)
+    kernel = os.path.abspath(kernel) if kernel else ""
 
     workload = create_workload(
         workload_name=workload_name,
@@ -421,6 +427,7 @@ def create_experiment_context(
         experiment_name=experiment_name,
         image_folder=image_folder,
         image_name=image_name,
+        kernel=kernel,
         keep_experiment_unique=keep_experiment_unique,
         simulation_context=simulation_context,
         host=host,
