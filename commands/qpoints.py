@@ -179,6 +179,7 @@ def _apply_snapshot_gem5_uarch(
     checkpoint_dir: Path,
     snapshot: str,
     core_count: int,
+    memory_gb: int,
     uarch_manifest: Optional[dict],
 ) -> None:
     if not uarch_manifest:
@@ -230,7 +231,7 @@ def _apply_snapshot_gem5_uarch(
                     "--num-cores",
                     str(core_count),
                     "--mem-size",
-                    "16384MiB",
+                    f"{memory_gb * 1024}MiB",
                     "--itb-size",
                     str(DEFAULT_ITB_SIZE),
                     "--dtb-size",
@@ -767,6 +768,7 @@ def convert_single(
             img_dest_dir,
             snapshot,
             core_count,
+            memory_gb,
             uarch_manifest,
         )
     except KeyboardInterrupt:
@@ -848,6 +850,7 @@ def run_sample(
     first: str,
     last: str,
     core_count: int,
+    memory_gb: int,
     warmup_cycles: int,
     measurement_cycles: int,
     timing_ruby: bool = False,
@@ -882,6 +885,7 @@ def run_sample(
             warmup_cycles=warmup_cycles,
             measurement_cycles=measurement_cycles,
             core_count=core_count,
+            memory_gb=memory_gb,
             timing_ruby=timing_ruby,
             timing_ruby_moesi=timing_ruby_moesi,
             cache_hierarchy_restore=cache_hierarchy_restore,
@@ -903,6 +907,7 @@ def run_gem5(
     warmup_cycles: Optional[int] = None,
     measurement_cycles: Optional[int] = None,
     core_count: int = 1,
+    memory_gb: int = 16,
     branch_trace: bool = False,
     tage_decision_trace: bool = False,
     data_trace: bool = False,
@@ -941,12 +946,14 @@ def run_gem5(
         str(run_gem5_sh),
         "--gem5-ckp-dir",
         gem5_ckp_dir,
-        "--experiment",
+        "--experiment-name",
         experiment,
         "--snapshot",
         snapshot,
-        "--cores",
+        "--core-count",
         str(core_count),
+        "--memory-gb",
+        str(memory_gb),
     ]
     if inst is not None:
         args.extend(["--inst", str(inst)])

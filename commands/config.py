@@ -74,7 +74,7 @@ def create_simulation_context(
     if 'none' == network.strip().lower():
         network = "-nic none"
     elif 'user' == network.strip().lower():
-        network = "-nic user,model=virtio-net-pci"
+        network = "-nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22"
     else:
         raise ValueError("Unsupported network type. Supported types are 'none' and 'user'.")
     return SimulationContext(
@@ -349,7 +349,7 @@ def create_experiment_context(
     is_consolidated: bool,
     primary_ipc: float,
     secondary_ipc: float,
-    population_seconds: int,
+    population_seconds: float,
     phantom_cpu_ipc: float,
     # experiment sections
     image_folder: str,
