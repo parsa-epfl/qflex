@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
 import os
+import shlex
+import sys
 import typer
 from typing import Annotated
 from commands.createimage import CreateImage
@@ -30,6 +32,33 @@ qpoints_app = typer.Typer(help="QPoints utilities.")
 app.add_typer(qpoints_app, name="qpoints")
 
 SUPPORTED_RUBY_PROTOCOLS = ("mesi_two_level", "moesi_cmp_directory")
+
+
+def _load_args_file(path: str) -> list[str]:
+    file_args: list[str] = []
+    with open(path, encoding="utf-8") as infile:
+        for raw_line in infile:
+            line = raw_line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            file_args.extend(shlex.split(line))
+    return file_args
+
+
+def _expand_args_files(argv: list[str]) -> list[str]:
+    expanded: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--args-file":
+            if i + 1 >= len(argv):
+                raise SystemExit("--args-file requires a value.")
+            expanded.extend(_load_args_file(argv[i + 1]))
+            i += 2
+            continue
+        expanded.append(arg)
+        i += 1
+    return expanded
 
 
 def _validate_qpoints_ruby_protocol(ruby_protocol: str) -> str:
@@ -583,4 +612,5 @@ def qpoints_run_gem5_cmd(
 
 
 if __name__ == "__main__":
+    sys.argv = [sys.argv[0], *_expand_args_files(sys.argv[1:])]
     app()
