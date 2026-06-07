@@ -379,8 +379,8 @@ class ExperimentContext(BaseModel):
                 print(f"Removing shared memory file {shm_path}...")
                 # Force femove the file
                 os.system(f"rm -f {shm_path}")
-            else:
-                print(f"Shared memory file {shm_path} does not exist, skipping removal.")
+            # else:
+            #     print(f"Shared memory file {shm_path} does not exist, skipping removal.")
 
     def group_sentinel_clean_up_master(self):
         """Master removes all *.flag sentinels in the group folder. Workload
