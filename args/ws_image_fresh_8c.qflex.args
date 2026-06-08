@@ -16,9 +16,6 @@
 --image-folder /mnt/sdb/aansari/ws-image/web-search-fresh-8c
 --bootloader /home/dev/qflex_git/QPoints/bin/m5/binaries/boot_v2_qemu_virt.arm64
 --root-device /dev/vda
---itb-size 64
---dtb-size 64
---have-large-asid-64
 --mounting-folder /mnt/sdb/aansari
 --check-period-quantum-coeff 53.0
 --no-unique

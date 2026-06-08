@@ -14,13 +14,14 @@ from typing import Optional
 from commands.qemu_cpu import resolve_qemu_cpu
 from commands.config import (
     DEFAULT_BOOTMEM_SIZE_BYTES,
-    DEFAULT_DTB_SIZE,
-    DEFAULT_HAVE_LARGE_ASID_64,
-    DEFAULT_ITB_SIZE,
     DEFAULT_PLATFORM,
     DEFAULT_ROOT_DEVICE,
     get_default_bootloader_path,
 )
+
+DEFAULT_GEM5_ITB_SIZE = 64
+DEFAULT_GEM5_DTB_SIZE = 64
+DEFAULT_GEM5_HAVE_LARGE_ASID_64 = True
 
 
 def _ensure_executable(path: Path) -> None:
@@ -1255,9 +1256,9 @@ def run_gem5(
     kernel: Optional[str] = None,
     bootloader: Optional[str] = None,
     root_device: str = DEFAULT_ROOT_DEVICE,
-    itb_size: int = DEFAULT_ITB_SIZE,
-    dtb_size: int = DEFAULT_DTB_SIZE,
-    have_large_asid_64: bool = DEFAULT_HAVE_LARGE_ASID_64,
+    itb_size: int = DEFAULT_GEM5_ITB_SIZE,
+    dtb_size: int = DEFAULT_GEM5_DTB_SIZE,
+    have_large_asid_64: bool = DEFAULT_GEM5_HAVE_LARGE_ASID_64,
     branch_trace: bool = False,
     tage_decision_trace: bool = False,
     data_trace: bool = False,

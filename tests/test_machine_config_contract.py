@@ -55,6 +55,22 @@ def _load_qpoints_commands_module():
             sys.path.pop(0)
 
 
+def _load_config_module():
+    repo_root = _repo_root()
+    repo_root_str = str(repo_root)
+    inserted_repo_root = False
+    if repo_root_str not in sys.path:
+        sys.path.insert(0, repo_root_str)
+        inserted_repo_root = True
+    try:
+        from commands import config as module
+
+        return module
+    finally:
+        if inserted_repo_root and sys.path and sys.path[0] == repo_root_str:
+            sys.path.pop(0)
+
+
 def test_qflex_args_file_expands_in_command_position(tmp_path: Path):
     module = _load_qflex_module()
     args_file = tmp_path / "ws.args"
@@ -91,6 +107,43 @@ def test_qflex_args_file_expands_in_command_position(tmp_path: Path):
     ]
 
 
+def test_experiment_machine_config_omits_gem5_tlb_geometry(tmp_path: Path):
+    module = _load_config_module()
+    image_dir = tmp_path / "images"
+    image_dir.mkdir(parents=True)
+    (image_dir / "root.qcow2").write_bytes(b"")
+    context = module.create_experiment_context(
+        experiment_name="tlb-boundary",
+        image_name="root.qcow2",
+        image_folder=str(image_dir),
+        core_count=1,
+        quantum_size=20000,
+        doubled_vcpu=False,
+        llc_size_per_tile_mb=1,
+        is_parallel=True,
+        network="user",
+        memory_gb=16,
+        host_name="SAPHIRE",
+        workload_name="single-core",
+        primary_core_start=0,
+        secondary_core_start=-1,
+        is_consolidated=False,
+        primary_ipc=2.0,
+        secondary_ipc=0.0,
+        population_seconds=0.1,
+        phantom_cpu_ipc=-1.0,
+        mounting_folder=str(tmp_path),
+        use_image_directly=True,
+        keep_experiment_unique=False,
+    )
+
+    machine_config = context.get_machine_config()
+
+    assert "itb_size" not in machine_config
+    assert "dtb_size" not in machine_config
+    assert "have_large_asid_64" not in machine_config
+
+
 def test_write_checkpoint_machine_config_records_extended_machine_fields(tmp_path: Path):
     module = _load_qpoints_commands_module()
     root_dir = tmp_path / "checkpoints"
@@ -98,6 +151,19 @@ def test_write_checkpoint_machine_config_records_extended_machine_fields(tmp_pat
     snapshot_dir.mkdir(parents=True)
     disk_image = snapshot_dir / "snapshot_0.img"
     disk_image.write_bytes(b"")
+    experiment_kernel_dir = tmp_path / "experiment" / "kernel"
+    experiment_kernel_dir.mkdir(parents=True)
+    checkpoint_kernel_dir = root_dir / "kernel"
+    checkpoint_kernel_dir.symlink_to(
+        experiment_kernel_dir, target_is_directory=True
+    )
+    experiment_machine_config = {
+        "kernel_bundle_dir": str(experiment_kernel_dir),
+        "kernel_capture_status": "ready",
+        "kernel_capture_reason": "",
+        "kernel_provider": "manual_adopt",
+        "kernel_augmentation_note": "",
+    }
 
     module._write_checkpoint_machine_config(
         gem5_ckp_dir=root_dir,
@@ -112,6 +178,8 @@ def test_write_checkpoint_machine_config_records_extended_machine_fields(tmp_pat
         dtb_size=128,
         have_large_asid_64=True,
         disk_image=disk_image,
+        checkpoint_kernel_dir=checkpoint_kernel_dir,
+        experiment_machine_config=experiment_machine_config,
     )
 
     root_manifest = json.loads((root_dir / "machine_config.json").read_text(encoding="utf-8"))

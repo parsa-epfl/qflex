@@ -12,9 +12,6 @@ import datetime
 DEFAULT_ROOT_DEVICE = "/dev/vda"
 DEFAULT_PLATFORM = "QEMU_Virt"
 DEFAULT_BOOTMEM_SIZE_BYTES = 64 * 1024 * 1024
-DEFAULT_ITB_SIZE = 64
-DEFAULT_DTB_SIZE = 64
-DEFAULT_HAVE_LARGE_ASID_64 = True
 
 
 def _repo_root() -> Path:
@@ -147,18 +144,6 @@ class ExperimentContext(BaseModel):
         default=DEFAULT_ROOT_DEVICE,
         description="Root device to pass to gem5 full-system configs",
     )
-    itb_size: int = Field(
-        default=DEFAULT_ITB_SIZE,
-        description="Instruction TLB size to use for gem5 restore and TLB sidecar generation",
-    )
-    dtb_size: int = Field(
-        default=DEFAULT_DTB_SIZE,
-        description="Data TLB size to use for gem5 restore and TLB sidecar generation",
-    )
-    have_large_asid_64: bool = Field(
-        default=DEFAULT_HAVE_LARGE_ASID_64,
-        description="Whether the target machine uses 64-bit large ASIDs",
-    )
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
     host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
@@ -205,9 +190,6 @@ class ExperimentContext(BaseModel):
             "memory_gb": self.simulation_context.memory_gb,
             "memory_bytes": int(self.simulation_context.memory_gb) * (1024 ** 3),
             "bootmem_size_bytes": DEFAULT_BOOTMEM_SIZE_BYTES,
-            "itb_size": self.itb_size,
-            "dtb_size": self.dtb_size,
-            "have_large_asid_64": self.have_large_asid_64,
             "network": self.simulation_context.network_mode,
             "qemu_nic": self.simulation_context.qemu_nic,
             "parallel": self.simulation_context.is_parallel,
@@ -476,9 +458,6 @@ def create_experiment_context(
     kernel: str = "",
     bootloader: str = "",
     root_device: str = DEFAULT_ROOT_DEVICE,
-    itb_size: int = DEFAULT_ITB_SIZE,
-    dtb_size: int = DEFAULT_DTB_SIZE,
-    have_large_asid_64: bool = DEFAULT_HAVE_LARGE_ASID_64,
     # Default parameters that can be induced from others
     experiment_name=None,
     image_name: str=None,
@@ -552,9 +531,6 @@ def create_experiment_context(
         kernel=kernel,
         bootloader=bootloader,
         root_device=root_device,
-        itb_size=itb_size,
-        dtb_size=dtb_size,
-        have_large_asid_64=have_large_asid_64,
         keep_experiment_unique=keep_experiment_unique,
         simulation_context=simulation_context,
         host=host,
