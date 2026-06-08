@@ -20,7 +20,7 @@ class Boot(Executor):
     SSH_PASSWORD = "qflex"
     MONITOR_HOST = "127.0.0.1"
     MONITOR_WAIT_SECONDS = 60
-    QEMU_EXIT_WAIT_SECONDS = 60
+    QEMU_EXIT_WAIT_SECONDS = 10
     CAPTURE_WAIT_SECONDS = 900
     INVENTORY_WAIT_SECONDS = 120
     SNAPSHOT_WAIT_SECONDS = 600
@@ -113,13 +113,15 @@ class Boot(Executor):
         tn = Telnet(self.MONITOR_HOST, monitor_port, timeout=10)
         try:
             self._wait_for_monitor_prompt(tn, 30)
-            self._monitor_command(tn, "stop", timeout=30)
-            self._monitor_command(tn, f"delvm {self.SNAPSHOT_NAME}", timeout=60)
             self._monitor_command(
                 tn,
                 f"savevm {self.SNAPSHOT_NAME}",
                 timeout=self.SNAPSHOT_WAIT_SECONDS,
             )
+            # In our live power-on boot path, QEMU acknowledges `quit` but may
+            # still stay alive. We keep the explicit `quit` request here, then
+            # rely on the bounded-workflow fallback in `_wait_for_qemu_exit()`
+            # to terminate the process if it does not exit promptly.
             tn.write(b"quit\n")
         finally:
             tn.close()
@@ -137,21 +139,19 @@ class Boot(Executor):
         except OSError:
             process.terminate()
 
-    def _wait_for_qemu_exit(self, process: subprocess.Popen) -> None:
+    def _wait_for_qemu_exit(self, process: subprocess.Popen) -> bool:
         try:
             process.wait(timeout=self.QEMU_EXIT_WAIT_SECONDS)
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=10)
-            raise RuntimeError(
-                "QEMU did not exit after boot cleanup. "
-                f"See {self._boot_log_path()}."
-            )
+            return True
         if process.returncode not in (0, None):
             raise RuntimeError(
                 f"QEMU exited with code {process.returncode}. "
                 f"See {self._boot_log_path()}."
             )
+        return False
 
     def _run_capture_helper(self, kernel_log: Path) -> subprocess.CompletedProcess:
         machine_config = self._machine_config_path()
@@ -272,6 +272,7 @@ class Boot(Executor):
         capture_result: subprocess.CompletedProcess | None = None
         boot_error: Exception | None = None
         process: subprocess.Popen | None = None
+        forced_qemu_termination = False
 
         with boot_log.open("w", encoding="utf-8") as boot_stream:
             process = subprocess.Popen(
@@ -289,11 +290,11 @@ class Boot(Executor):
                 boot_error = exc
                 self._quit_qemu(process, monitor_port)
             else:
-                self._wait_for_qemu_exit(process)
+                forced_qemu_termination = self._wait_for_qemu_exit(process)
                 process = None
 
         if process is not None:
-            self._wait_for_qemu_exit(process)
+            forced_qemu_termination = self._wait_for_qemu_exit(process) or forced_qemu_termination
 
         if boot_error is not None:
             raise boot_error
@@ -317,6 +318,11 @@ class Boot(Executor):
         print(f"Kernel capture status: {kernel_status}")
         if kernel_reason:
             print(f"Kernel capture reason: {kernel_reason}")
+        if forced_qemu_termination:
+            print(
+                "QEMU did not exit promptly after the monitor quit request; "
+                "the bounded boot workflow terminated it explicitly."
+            )
         if kernel_status == "ready":
             print("Next step: qflex load")
         elif kernel_status == "user_action_required":
