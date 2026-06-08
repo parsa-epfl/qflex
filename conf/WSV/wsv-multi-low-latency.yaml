@@ -1,9 +1,9 @@
-extends: ws-multi
+extends: wsv-multi
 
 components:
   experiment_context:
     _base_: _leaf_defaults
-    experiment_name: web-search-multi-node-yaml-0-low-latency
+    experiment_name: web-serving-multi-node-0-low-latency
     _deps_:
       sub_experiments:
         - name: node_0
@@ -12,7 +12,7 @@ components:
   experiment_context_node_0:
     _base_: _leaf_defaults
     _name_: node_0
-    experiment_name: web-search-node-0-yaml-0-low-latency
+    experiment_name: web-serving-node-0-0-low-latency
     node_number: 0
     neighbor_node_list: [1]
     pdes_net_devs: ["virtio-net-pci"]
@@ -22,7 +22,7 @@ components:
   experiment_context_node_1:
     _base_: _leaf_defaults
     _name_: node_1
-    experiment_name: web-search-node-1-yaml-0-low-latency
+    experiment_name: web-serving-node-1-0-low-latency
     node_number: 1
     neighbor_node_list: [0]
     pdes_net_devs: ["virtio-net-pci"]
