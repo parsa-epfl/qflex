@@ -1073,7 +1073,7 @@ def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
     Cumulative columns are converted to per-window deltas the same way
     parse_measurements_from_csv does (stride by unit size, then np.diff); `maf`
     is an average, so it is taken as the strided point value, not diffed.
-    Returns (totals_by_core: dict[core -> dict[col -> float]], maf_by_core).
+    Returns (totals_by_core, maf_by_core) or None if the CSV is unusable.
     """
     if not os.path.exists(csv_path):
         console.print(f"[yellow]Diagnostics skipped: {csv_path} not found.[/yellow]")
@@ -1473,7 +1473,8 @@ Examples:
             f"\n[yellow]Core info file not found at {args.core_info_path}, skipping core_info_new.csv generation[/yellow]"
         )
 
-    # Always print diagnostics (additive; non-fatal — never affects the output above).
+    # Always print diagnostics (additive; non-fatal — runs AFTER the plot/U-IPC
+    # output above and never affects it).
     console.print("\n[bold cyan]=== Diagnostics ===[/bold cyan]")
     report_diagnostics(args.timing_csv, args.index, args.unit_size, core_groups)
 
