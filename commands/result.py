@@ -18,6 +18,11 @@ class RunResultCommand(Executor):
                  experiment_context: ExperimentContext):
         self.experiment_context = experiment_context
 
+    def should_generate_core_info(self) -> bool:
+        exp = self.experiment_context
+        return exp.save_next_core_info and (exp.has_sub_experiments() or not exp.is_multi_node())
+        
+
     def cmd(self) -> str:
         # Preconditions are checked at run time (not __init__) so the executor can
         # be constructed for a group context where leaf artifacts don't exist yet.
@@ -29,11 +34,16 @@ class RunResultCommand(Executor):
         freq_ghz = self.experiment_context.workload.IPC_info.machine_freq_ghz
         # Always regenerate core_info_new.csv + REQUIRED_SAMPLE_SIZE; --no-exit-on-fail so
         # the cross-node save step below always runs (an unmet bound is not a failure).
+        new_result_cmd = ""
+        if self.should_generate_core_info():
+            new_result_cmd = f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz} --generate-core-info --no-exit-on-fail" 
+        else:
+            new_result_cmd = f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz}"
         return [
             f"cd {experiment_folder}",
             f"python {experiment_folder}/result.py --freq-ghz {freq_ghz}",
             f"python {experiment_folder}/collect.py",
-            f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz} --generate-core-info --core-info-path run/core_info.csv --no-exit-on-fail",
+            new_result_cmd,
         ]
 
     def execute(self,
@@ -52,7 +62,7 @@ class RunResultCommand(Executor):
         # default (save_next_core_info) so a standalone/rerun `result` doesn't write a new
         # sized file by accident; the statistical-sample loop forces it on.
         exp = self.experiment_context
-        if not _is_dry_run(dry_run) and exp.save_next_core_info and (exp.has_sub_experiments() or not exp.is_multi_node()):
+        if not _is_dry_run(dry_run) and self.should_generate_core_info():
             self._save_next_core_info()
         return ok
 
