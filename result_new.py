@@ -1055,6 +1055,187 @@ def analyze_sampling_unit(
     return group_results
 
 
+# --- Additive diagnostics (always printed) -----------------------------------
+# Self-contained: reads timing.csv directly and never touches MeasurementData,
+# parse_measurements_from_csv, generate_new_core_info, or any existing output path.
+# Non-fatal by design — if the CSV/columns/index are unusable it skips (returns
+# None) so the normal analysis, charts, and U-IPC values are never affected.
+
+TB_BUCKETS = [
+    "tb_frontend", "tb_branch", "tb_backend", "tb_mem_local", "tb_mem_remote",
+    "tb_sbdrain", "tb_spin", "tb_interrupt", "tb_other",
+]
+
+
+def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
+    """Per-core totals (summed over snapshots) for sampling unit `index`.
+
+    Cumulative columns are converted to per-window deltas the same way
+    parse_measurements_from_csv does (stride by unit size, then np.diff); `maf`
+    is an average, so it is taken as the strided point value, not diffed.
+    Returns (totals_by_core: dict[core -> dict[col -> float]], maf_by_core).
+    """
+    if not os.path.exists(csv_path):
+        console.print(f"[yellow]Diagnostics skipped: {csv_path} not found.[/yellow]")
+        return None
+    df = pd.read_csv(csv_path)
+
+    cumulative = [
+        "instruction", "instruction:u", "core_cycles", "spin_cycles", "wfi_cycles",
+        "spins", "commits_nonspin_system", "commits_spin_user", "commits_spin_system",
+        "l1i_miss", "l1d_miss", "l2_miss", "nic_sent", "nic_recv",
+    ] + TB_BUCKETS
+    missing = [c for c in cumulative + ["maf"] if c not in df.columns]
+    if missing:
+        console.print(
+            f"[yellow]Diagnostics skipped: timing.csv missing columns {missing} — "
+            f"re-run collect.py to regenerate with instrumentation.[/yellow]"
+        )
+        return None
+
+    df = df[df["sys_cycles"] % INTERVAL == 0].copy()
+    snaps = sorted(df["snapshot_id"].unique())
+    snap_to_idx = {s: i for i, s in enumerate(snaps)}
+    df["snapshot_idx"] = df["snapshot_id"].map(snap_to_idx)
+    df["su_idx"] = df["sys_cycles"] // INTERVAL - 1
+    n_snap = len(snaps)
+    n_pts = int(df["su_idx"].max()) + 1
+    n_core = int(df["core"].max()) + 1
+    si = df["snapshot_idx"].to_numpy(dtype=np.intp)
+    pi = df["su_idx"].to_numpy(dtype=np.intp)
+    ci = df["core"].to_numpy(dtype=np.intp)
+
+    def delta(col):
+        a = np.zeros((n_snap, n_pts, n_core))
+        a[si, pi, ci] = df[col].to_numpy()
+        a = a[:, ::sampling_unit_size, :]
+        return np.diff(a, axis=1, prepend=np.zeros((n_snap, 1, n_core)))
+
+    def strided(col):
+        a = np.zeros((n_snap, n_pts, n_core))
+        a[si, pi, ci] = df[col].to_numpy()
+        return a[:, ::sampling_unit_size, :]
+
+    deltas = {c: delta(c) for c in cumulative}
+    maf_arr = strided("maf")
+    n_units = deltas["instruction"].shape[1]
+    if index >= n_units:
+        console.print(
+            f"[yellow]Diagnostics skipped: index {index} out of bounds (max {n_units - 1})[/yellow]"
+        )
+        return None
+
+    totals, maf_by_core = {}, {}
+    for core in range(n_core):
+        tot_instr = float(deltas["instruction"][:, index, core].sum())
+        if tot_instr <= 0:
+            continue  # inactive core for this unit
+        totals[core] = {c: float(deltas[c][:, index, core].sum()) for c in cumulative}
+        vals = maf_arr[:, index, core]
+        vals = vals[vals > 0]
+        maf_by_core[core] = float(vals.mean()) if len(vals) else 0.0
+    return totals, maf_by_core
+
+
+def report_diagnostics(
+    csv_path: str, index: int, sampling_unit_size: int,
+    core_groups: list[list[int]] | None = None,
+):
+    """Print per-core diagnostic tables for the all-three-shrink investigation."""
+    result = _diag_window_totals(csv_path, index, sampling_unit_size)
+    if result is None:
+        return
+    totals, maf_by_core = result
+    if not totals:
+        console.print("[yellow]Diagnostics skipped: no active cores for this sampling unit.[/yellow]")
+        return
+
+    cores = sorted(totals)
+    if core_groups:
+        wanted = {c for g in core_groups for c in g}
+        cores = [c for c in cores if c in wanted]
+
+    def agg(keys):
+        return {k: sum(totals[c][k] for c in cores) for k in keys}
+
+    all_keys = next(iter(totals.values())).keys()
+
+    # Table A: IPC & cycle accounting
+    ta = Table(title=f"Diagnostics — IPC & cycle accounting (unit {index})", box=box.ROUNDED)
+    for col in ["Core", "IPC", "U-IPC(user)", "U-IPC(nonspin)", "gap", "spin% (β)",
+                "idle%", "useful%", "spin-IPC"]:
+        ta.add_column(col, justify="center")
+
+    def ipc_row(label, t):
+        cyc = t["core_cycles"] or 1
+        ipc = t["instruction"] / cyc
+        uipc_u = t["instruction:u"] / cyc
+        uipc_ns = (t["instruction:u"] + t["commits_nonspin_system"]) / cyc
+        beta = t["spin_cycles"] / cyc
+        idle = t["wfi_cycles"] / cyc
+        spin_instr = t["commits_spin_user"] + t["commits_spin_system"]
+        spin_ipc = spin_instr / t["spin_cycles"] if t["spin_cycles"] > 0 else 0.0
+        ta.add_row(label, f"{ipc:.4f}", f"{uipc_u:.4f}", f"{uipc_ns:.4f}",
+                   f"{ipc - uipc_u:.4f}", f"{100 * beta:.3f}", f"{100 * idle:.3f}",
+                   f"{100 * (1 - beta - idle):.3f}", f"{spin_ipc:.4f}")
+
+    for c in cores:
+        ipc_row(str(c), totals[c])
+    ipc_row("ALL", agg(all_keys))
+    console.print(ta)
+
+    # Table B: memory & communication
+    tb_ = Table(title="Diagnostics — memory & communication", box=box.ROUNDED)
+    for col in ["Core", "L1I-MPKI", "L1D-MPKI", "L2-MPKI", "MLP(MAF)", "nic_sent", "nic_recv"]:
+        tb_.add_column(col, justify="center")
+    for c in cores:
+        t = totals[c]
+        instr = t["instruction"] or 1
+        tb_.add_row(str(c), f"{1000 * t['l1i_miss'] / instr:.3f}",
+                    f"{1000 * t['l1d_miss'] / instr:.3f}", f"{1000 * t['l2_miss'] / instr:.3f}",
+                    f"{maf_by_core.get(c, 0.0):.2f}", f"{int(t['nic_sent'])}",
+                    f"{int(t['nic_recv'])}")
+    console.print(tb_)
+
+    # Table C: CPI-stack fractions (proportional attribution, not cycles)
+    tc = Table(title="Diagnostics — CPI-stack fractions (proportional)", box=box.ROUNDED)
+    tc.add_column("Core", justify="center")
+    for b in TB_BUCKETS:
+        tc.add_column(b.replace("tb_", ""), justify="center")
+
+    def tb_row(label, t):
+        tot = sum(t[b] for b in TB_BUCKETS) or 1
+        tc.add_row(label, *[f"{t[b] / tot:.3f}" for b in TB_BUCKETS])
+
+    for c in cores:
+        tb_row(str(c), totals[c])
+    tb_row("ALL", agg(TB_BUCKETS))
+    console.print(tc)
+
+    # Invariants (the solid, same-unit ones)
+    inv = Table(title="Invariants", box=box.SIMPLE)
+    for col in ["Core", "spin+wfi ≤ cyc", "U-IPC ≤ IPC", "cycles", "sim-time (cyc/freq) ns"]:
+        inv.add_column(col, justify="center")
+    for c in cores:
+        t = totals[c]
+        cyc = t["core_cycles"]
+        ok1 = t["spin_cycles"] + t["wfi_cycles"] <= cyc
+        ok2 = t["instruction:u"] <= t["instruction"]
+        inv.add_row(str(c),
+                    Text("✓", style="green") if ok1 else Text("✗", style="red"),
+                    Text("✓", style="green") if ok2 else Text("✗", style="red"),
+                    f"{int(cyc)}", f"{cyc / FREQ_GHZ:.0f}")
+    console.print(inv)
+
+    console.print(Panel(
+        "[yellow]Not available from timing stats (need guest/faban logs or new "
+        "PDES instrumentation): measured RTT, requests-completed / p99, cross-node "
+        "PDES message conservation, bytes/drops, context-switch/futex, user/kernel "
+        "cycle split.[/yellow]",
+        title="Out of scope", border_style="yellow",
+    ))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Analyze sampling results and generate core_info.csv from direct measurement data",
@@ -1291,6 +1472,10 @@ Examples:
         console.print(
             f"\n[yellow]Core info file not found at {args.core_info_path}, skipping core_info_new.csv generation[/yellow]"
         )
+
+    # Always print diagnostics (additive; non-fatal — never affects the output above).
+    console.print("\n[bold cyan]=== Diagnostics ===[/bold cyan]")
+    report_diagnostics(args.timing_csv, args.index, args.unit_size, core_groups)
 
     # Exit with -1 if sampling error bounds were not satisfied
     if not all_bounds_satisfied and not args.no_exit_on_fail:

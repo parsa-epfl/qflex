@@ -9,6 +9,33 @@ import csv
 
 MAX_CORES = 256  # Maximum expected cores
 
+# Top-down CPI-stack buckets aggregated from uarch-TB:<class>:Bkd:<reason> lines.
+# TB values are proportional stall attribution (NOT cycles) — normalize to fractions downstream.
+TB_BUCKETS = [
+    "tb_frontend", "tb_branch", "tb_backend", "tb_mem_local", "tb_mem_remote",
+    "tb_sbdrain", "tb_spin", "tb_interrupt", "tb_other",
+]
+
+
+def tb_bucket(reason: str) -> str:
+    """Map a TB Bkd:<reason> tail to one top-down bucket (precedence matters)."""
+    if reason.startswith("Spin"):
+        return "tb_spin"
+    if "Interrupt" in reason:
+        return "tb_interrupt"
+    if reason.startswith("Branch"):
+        return "tb_branch"
+    if "SBDrain" in reason or reason.startswith("Store:SBFull"):
+        return "tb_sbdrain"
+    if reason.startswith("EmptyROB"):
+        return "tb_frontend"
+    if reason.startswith("Dataflow") or reason == "Busy":
+        return "tb_backend"
+    if reason.startswith(("Load", "Store", "Atomic", "SideEffect:Load",
+                          "SideEffect:Store", "SideEffect:Atomic", "Forwarded")):
+        return "tb_mem_remote" if ("Remote" in reason or "PeerL" in reason) else "tb_mem_local"
+    return "tb_other"
+
 
 def parse_core_idx(line):
     """Extract core index from a log line."""
@@ -227,6 +254,18 @@ def parse_one_result(folder_name: str):
 
         core_cycles = [-1] * MAX_CORES  # New: extract cycles from log
 
+        # Additive diagnostic instrumentation (log-only; existing columns unchanged).
+        spin_cycles = [-1] * MAX_CORES
+        wfi_cycles = [-1] * MAX_CORES
+        spins = [-1] * MAX_CORES
+        commits_nonspin_system = [-1] * MAX_CORES
+        commits_spin_user = [-1] * MAX_CORES
+        commits_spin_system = [-1] * MAX_CORES
+        nic_sent = [-1] * MAX_CORES
+        nic_recv = [-1] * MAX_CORES
+        maf = [-1.0] * MAX_CORES
+        tb = {b: [0] * MAX_CORES for b in TB_BUCKETS}
+
         log_file = f"{folder_name}/all.measurement.{point:010}.log"
         with open(log_file) as f:
             for line in f:
@@ -296,6 +335,9 @@ def parse_one_result(folder_name: str):
                         continue
                     llc_write_misses[core_idx] = int(line.split()[1])
 
+                # TODO: Flexus emits no -uarch-HaltedCycles (real stat is -uarch-WFICycles),
+                # so halted_cycles is always 0. Not fixed here: result_new.py's default IPNS uses
+                # (cycles - halted_cycles), so correcting the name would shift every reported IPNS.
                 if "-uarch-HaltedCycles" in line:
                     core_idx = parse_core_idx(line)
                     if core_idx >= MAX_CORES:
@@ -308,6 +350,70 @@ def parse_one_result(folder_name: str):
                     if core_idx >= MAX_CORES:
                         continue
                     core_cycles[core_idx] = int(line.split()[1])
+
+                # --- Additive diagnostic scrapes (log-only) ---
+                if "-uarch-SpinCycles " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    spin_cycles[core_idx] = int(line.split()[1])
+
+                if "-uarch-WFICycles " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    wfi_cycles[core_idx] = int(line.split()[1])
+
+                if "-uarch-Spins " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    spins[core_idx] = int(line.split()[1])
+
+                if "-uarch-Commits:NonSpin:System" in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    commits_nonspin_system[core_idx] = int(line.split()[1])
+
+                if "-uarch-Commits:Spin:User" in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    commits_spin_user[core_idx] = int(line.split()[1])
+
+                if "-uarch-Commits:Spin:System" in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    commits_spin_system[core_idx] = int(line.split()[1])
+
+                if "-nic-MsgsSent " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    nic_sent[core_idx] = int(line.split()[1])
+
+                if "-nic-MsgsReceived " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    nic_recv[core_idx] = int(line.split()[1])
+
+                if "-L1d-MAFAvg:Total " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    val = line.split()[1]
+                    # MAFAvg can be "{nan}" when a core had no L1d reads — record 0 there.
+                    maf[core_idx] = float(val) if val[0].isdigit() else 0.0
+
+                if "-uarch-TB:" in line and ":Bkd:" in line and len(line.split()) >= 2:
+                    core_idx = parse_core_idx(line)
+                    if core_idx >= MAX_CORES:
+                        continue
+                    reason = line.split()[0].split(":Bkd:", 1)[1]
+                    tb[tb_bucket(reason)][core_idx] += int(line.split()[1])
 
         # Determine actual core count from log file data
         actual_core_count = 0
@@ -435,6 +541,21 @@ def parse_one_result(folder_name: str):
                     csv_stats["bx_shared_cache_miss_read"][core_id]
                     if csv_stats["bx_shared_cache_miss_read"][core_id] != -1
                     else 0,
+                    # --- Additive diagnostic columns (log-only) ---
+                    spin_cycles[core_id] if spin_cycles[core_id] != -1 else 0,
+                    wfi_cycles[core_id] if wfi_cycles[core_id] != -1 else 0,
+                    spins[core_id] if spins[core_id] != -1 else 0,
+                    commits_nonspin_system[core_id]
+                    if commits_nonspin_system[core_id] != -1
+                    else 0,
+                    commits_spin_user[core_id] if commits_spin_user[core_id] != -1 else 0,
+                    commits_spin_system[core_id]
+                    if commits_spin_system[core_id] != -1
+                    else 0,
+                    nic_sent[core_id] if nic_sent[core_id] != -1 else 0,
+                    nic_recv[core_id] if nic_recv[core_id] != -1 else 0,
+                    maf[core_id] if maf[core_id] != -1 else 0,
+                    *(tb[b][core_id] for b in TB_BUCKETS),
                 ]
             )
     return result
@@ -456,7 +577,9 @@ for folder in folders:
 # Write the result to a csv file.
 with open("timing.csv", "w") as f:
     f.write(
-        "snapshot_id,core,asid,sys_cycles,instruction,instruction:u,itlb_miss,dtlb_miss,stlb_miss,btb_miss,tage_miss,l1i_miss,l1d_miss,l2_miss,halted_cycles,core_cycles,virtio_blk_read,virtio_blk_write,virtio_complete,bx_instruction,bx_instruction_access,bx_data_access,bx_private_icache_miss,bx_private_dcache_miss,bx_shared_cache_miss,bx_branch_count,bx_bp_miss,bx_tlb_miss,bx_drain_pipeline,bx_drain_store_buffer,bx_read_noc_hop,bx_write_noc_hop,bx_instruction_u,bx_instruction_k,bx_private_dcache_miss_load,bx_private_dcache_miss_store,bx_private_dcache_miss_ptw,bx_private_dcache_miss_load_ptw,bx_ifetch_noc_hop,bx_shared_cache_miss_write,bx_shared_cache_miss_ifetch,bx_shared_cache_miss_read\n"
+        "snapshot_id,core,asid,sys_cycles,instruction,instruction:u,itlb_miss,dtlb_miss,stlb_miss,btb_miss,tage_miss,l1i_miss,l1d_miss,l2_miss,halted_cycles,core_cycles,virtio_blk_read,virtio_blk_write,virtio_complete,bx_instruction,bx_instruction_access,bx_data_access,bx_private_icache_miss,bx_private_dcache_miss,bx_shared_cache_miss,bx_branch_count,bx_bp_miss,bx_tlb_miss,bx_drain_pipeline,bx_drain_store_buffer,bx_read_noc_hop,bx_write_noc_hop,bx_instruction_u,bx_instruction_k,bx_private_dcache_miss_load,bx_private_dcache_miss_store,bx_private_dcache_miss_ptw,bx_private_dcache_miss_load_ptw,bx_ifetch_noc_hop,bx_shared_cache_miss_write,bx_shared_cache_miss_ifetch,bx_shared_cache_miss_read,spin_cycles,wfi_cycles,spins,commits_nonspin_system,commits_spin_user,commits_spin_system,nic_sent,nic_recv,maf,"
+        + ",".join(TB_BUCKETS)
+        + "\n"
     )
     for result in all_results:
         f.write(",".join([str(x) for x in result]) + "\n")
