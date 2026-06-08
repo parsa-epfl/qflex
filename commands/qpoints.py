@@ -966,6 +966,7 @@ def convert_single(
     experiment_kernel_dir, experiment_kernel_path = _require_ready_experiment_kernel(
         experiment_machine_config
     )
+    Path(gem5_ckp_dir).mkdir(parents=True, exist_ok=True)
     checkpoint_kernel_dir = _ensure_checkpoint_kernel_link(
         Path(gem5_ckp_dir), experiment_kernel_dir
     )
