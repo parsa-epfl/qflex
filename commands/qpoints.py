@@ -677,7 +677,7 @@ def _validate_machine_config(
         "memory_gb": memory_gb,
     }
     if kernel:
-        expected["kernel"] = str(Path(kernel).expanduser().resolve())
+        expected["kernel"] = os.path.abspath(Path(kernel).expanduser())
     if bootloader:
         expected["bootloader"] = str(Path(bootloader).expanduser().resolve())
     if root_device is not None:
@@ -697,6 +697,84 @@ def _validate_machine_config(
             )
 
 
+def _require_ready_checkpoint_kernel_contract(machine_config: dict) -> str:
+    status = machine_config.get("kernel_capture_status", "")
+    if status != "ready":
+        raise RuntimeError(
+            "Checkpoint kernel bundle is not ready. "
+            f"Current kernel_capture_status={status!r}."
+        )
+    kernel_bundle_dir = machine_config.get("kernel_bundle_dir", "")
+    kernel_value = machine_config.get("kernel", "")
+    if not kernel_bundle_dir:
+        raise RuntimeError("Checkpoint machine config is missing kernel_bundle_dir.")
+    if not kernel_value:
+        raise RuntimeError("Checkpoint machine config is missing kernel.")
+    kernel_dir = Path(os.path.abspath(Path(kernel_bundle_dir).expanduser()))
+    kernel_path = Path(os.path.abspath(Path(kernel_value).expanduser()))
+    if not kernel_dir.exists():
+        raise RuntimeError(f"Checkpoint kernel bundle directory not found: {kernel_dir}")
+    if not kernel_path.is_file():
+        raise RuntimeError(f"Checkpoint kernel not found: {kernel_path}")
+    if kernel_path.parent != kernel_dir:
+        raise RuntimeError(
+            f"Checkpoint kernel path is not under checkpoint kernel bundle dir: "
+            f"{kernel_path} not under {kernel_dir}"
+        )
+    return str(kernel_path)
+
+
+def _load_experiment_machine_config(qflex_ckp_dir: str) -> dict:
+    experiment_root = Path(qflex_ckp_dir)
+    for candidate in (
+        experiment_root / "machine_config.json",
+        experiment_root / "cfg" / "machine_config.json",
+    ):
+        if candidate.is_file():
+            return _load_machine_config(candidate)
+    raise RuntimeError(
+        f"Experiment machine config not found under {experiment_root}"
+    )
+
+
+def _require_ready_experiment_kernel(experiment_machine_config: dict) -> tuple[Path, Path]:
+    status = experiment_machine_config.get("kernel_capture_status", "")
+    kernel_dir_value = experiment_machine_config.get("kernel_bundle_dir", "")
+    kernel_value = experiment_machine_config.get("kernel", "")
+    if status != "ready":
+        raise RuntimeError(
+            "Experiment kernel bundle is not ready. "
+            f"Current kernel_capture_status={status!r}."
+        )
+    if not kernel_dir_value:
+        raise RuntimeError("Experiment machine config is missing kernel_bundle_dir.")
+    if not kernel_value:
+        raise RuntimeError("Experiment machine config is missing kernel.")
+    kernel_dir = Path(kernel_dir_value).expanduser().resolve()
+    kernel_path = Path(kernel_value).expanduser().resolve()
+    if not kernel_dir.is_dir():
+        raise RuntimeError(f"Experiment kernel bundle directory not found: {kernel_dir}")
+    if not kernel_path.is_file():
+        raise RuntimeError(f"Experiment kernel not found: {kernel_path}")
+    return kernel_dir, kernel_path
+
+
+def _ensure_checkpoint_kernel_link(gem5_ckp_dir: Path, source_kernel_dir: Path) -> Path:
+    link_path = gem5_ckp_dir / "kernel"
+    if link_path.is_symlink():
+        if link_path.resolve() == source_kernel_dir:
+            return link_path
+        raise RuntimeError(
+            f"Checkpoint kernel symlink points at the wrong target: {link_path} -> {link_path.resolve()}"
+        )
+    if link_path.exists():
+        raise RuntimeError(
+            f"Checkpoint kernel path already exists and is not a symlink: {link_path}"
+        )
+    link_path.symlink_to(os.path.relpath(source_kernel_dir, start=gem5_ckp_dir))
+    return link_path
+
+
 def _write_checkpoint_machine_config(
     gem5_ckp_dir: Path,
     checkpoint_dir: Path,
@@ -710,6 +788,8 @@ def _write_checkpoint_machine_config(
     dtb_size: int,
     have_large_asid_64: bool,
     disk_image: Path,
+    checkpoint_kernel_dir: Path,
+    experiment_machine_config: dict,
 ) -> None:
     kernel_path = str(Path(kernel).expanduser().resolve()) if kernel else ""
     bootloader_path = (
@@ -723,6 +803,22 @@ def _write_checkpoint_machine_config(
         "schema_version": 1,
         "platform": DEFAULT_PLATFORM,
         "kernel": kernel_path,
+        "kernel_bundle_dir": os.path.abspath(checkpoint_kernel_dir),
+        "kernel_origin_bundle_dir": str(
+            Path(
+                experiment_machine_config.get("kernel_bundle_dir", "")
+            ).expanduser().resolve()
+        ),
+        "kernel_capture_status": experiment_machine_config.get(
+            "kernel_capture_status", ""
+        ),
+        "kernel_capture_reason": experiment_machine_config.get(
+            "kernel_capture_reason", ""
+        ),
+        "kernel_provider": experiment_machine_config.get("kernel_provider", ""),
+        "kernel_augmentation_note": experiment_machine_config.get(
+            "kernel_augmentation_note", ""
+        ),
         "bootloader": bootloader_path,
         "root_device": root_device,
         "core_count": core_count,
@@ -744,6 +840,8 @@ def _write_checkpoint_machine_config(
         for key in (
             "platform",
             "kernel",
+            "kernel_bundle_dir",
+            "kernel_origin_bundle_dir",
             "bootloader",
             "root_device",
             "core_count",
@@ -806,6 +904,16 @@ def convert_single(
             f"Required checkpoint composer not found: {create_gem5_checkpoint}"
         )
     _prepare_qpoints_root(qpoints_root, ("scripts/uarch_restore/prepare_gem5_uarch.py",))
+    experiment_machine_config = _load_experiment_machine_config(qflex_ckp_dir)
+    experiment_kernel_dir, experiment_kernel_path = _require_ready_experiment_kernel(
+        experiment_machine_config
+    )
+    checkpoint_kernel_dir = _ensure_checkpoint_kernel_link(
+        Path(gem5_ckp_dir), experiment_kernel_dir
+    )
+    checkpoint_kernel_path = os.path.abspath(
+        checkpoint_kernel_dir / experiment_kernel_path.name
+    )
 
     run_dir = Path(qflex_ckp_dir) / "run"
     if not run_dir.is_dir():
@@ -941,13 +1049,15 @@ def convert_single(
             snapshot,
             core_count,
             memory_gb,
-            kernel,
+            checkpoint_kernel_path,
             bootloader,
             root_device,
             itb_size,
             dtb_size,
             have_large_asid_64,
             converted_img,
+            checkpoint_kernel_dir,
+            experiment_machine_config,
         )
 
         store0 = run_dir / "system.physmem.store0.pmem"
@@ -973,7 +1083,7 @@ def convert_single(
             snapshot,
             core_count,
             memory_gb,
-            kernel,
+            checkpoint_kernel_path,
             bootloader,
             root_device,
             itb_size,
@@ -1182,7 +1292,14 @@ def run_gem5(
     _prepare_qpoints_root(qpoints_root, ("run_gem5.sh",))
     checkpoint_dir = Path(gem5_ckp_dir) / snapshot
     machine_config = _load_machine_config(checkpoint_dir / "machine_config.json")
-    expected_kernel = kernel if kernel else machine_config.get("kernel")
+    expected_kernel = _require_ready_checkpoint_kernel_contract(machine_config)
+    if kernel:
+        explicit_kernel = str(Path(kernel).expanduser().resolve())
+        if explicit_kernel != expected_kernel:
+            raise RuntimeError(
+                "Explicit kernel override does not match the checkpoint kernel contract: "
+                f"{explicit_kernel!r} != {expected_kernel!r}"
+            )
     _validate_machine_config(
         machine_config,
         core_count=core_count,

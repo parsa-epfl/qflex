@@ -187,6 +187,9 @@ class ExperimentContext(BaseModel):
     def get_machine_config_path(self) -> str:
         return f"{self.get_experiment_folder_address()}/machine_config.json"
 
+    def get_kernel_bundle_dir(self) -> str:
+        return f"{self.get_experiment_folder_address()}/kernel"
+
     def get_machine_config(self) -> dict:
         return {
             "schema_version": 1,
@@ -195,6 +198,7 @@ class ExperimentContext(BaseModel):
             "image_name": self.image_name,
             "image_path": self.get_local_image_address(),
             "kernel": self.kernel,
+            "kernel_bundle_dir": self.get_kernel_bundle_dir(),
             "bootloader": self.bootloader,
             "root_device": self.root_device,
             "core_count": self.simulation_context.core_count,
@@ -288,7 +292,7 @@ class ExperimentContext(BaseModel):
         self.set_up_image()
 
 
-        for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts", "images"]:
+        for subfolder in ["bin", "cfg", "flags", "kernel", "lib", "run", "scripts", "images"]:
             os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
         self.write_machine_config()
         self.get_ipns_csv()

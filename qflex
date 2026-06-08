@@ -117,6 +117,7 @@ def boot(
     )
     boot_executor.execute(to_stdio=True, run_in_background=False)
 
+
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def load(
@@ -350,7 +351,7 @@ def run_sample(
             last=last,
             core_count=core_count,
             memory_gb=memory_gb,
-            kernel=experiment_context.kernel or None,
+            kernel=None,
             bootloader=experiment_context.bootloader,
             root_device=experiment_context.root_device,
             itb_size=experiment_context.itb_size,
@@ -594,7 +595,7 @@ def qpoints_run_gem5_cmd(
         measurement_cycles=measurement_cycles,
         core_count=experiment_context.simulation_context.core_count,
         memory_gb=experiment_context.simulation_context.memory_gb,
-        kernel=experiment_context.kernel or None,
+        kernel=None,
         bootloader=experiment_context.bootloader,
         root_device=experiment_context.root_device,
         itb_size=experiment_context.itb_size,

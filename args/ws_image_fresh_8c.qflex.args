@@ -14,7 +14,6 @@
 --experiment-name ws-image-fresh-8c
 --image-name root.qcow2
 --image-folder /mnt/sdb/aansari/ws-image/web-search-fresh-8c
---kernel /mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/kernel/vmlinux-6.1.34-3-virt.elf
 --bootloader /home/dev/qflex_git/QPoints/bin/m5/binaries/boot_v2_qemu_virt.arm64
 --root-device /dev/vda
 --itb-size 64
