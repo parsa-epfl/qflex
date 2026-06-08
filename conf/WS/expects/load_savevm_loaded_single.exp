@@ -58,8 +58,8 @@ set timeout 900
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
-set BUDGET_WORKLOAD_INIT_S 7200   ; # 120 min for solr init + client ramp-up
-set BUDGET_CHECKPOINTING_S 1800
+set BUDGET_WORKLOAD_INIT_S 86400   ; # 120 min for solr init + client ramp-up
+set BUDGET_CHECKPOINTING_S 86400
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
