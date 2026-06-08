@@ -791,7 +791,7 @@ def _write_checkpoint_machine_config(
     checkpoint_kernel_dir: Path,
     experiment_machine_config: dict,
 ) -> None:
-    kernel_path = str(Path(kernel).expanduser().resolve()) if kernel else ""
+    kernel_path = os.path.abspath(Path(kernel).expanduser()) if kernel else ""
     bootloader_path = (
         str(Path(bootloader).expanduser().resolve())
         if bootloader

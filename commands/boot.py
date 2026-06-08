@@ -1,4 +1,6 @@
 import os
+import re
+import shutil
 import shlex
 from commands import Executor
 from .config import ExperimentContext
@@ -11,9 +13,45 @@ class Boot(Executor):
         self.experiment_context = experiment_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
 
+    @staticmethod
+    def _session_name(experiment_name: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", experiment_name).strip("-")
+        if not cleaned:
+            cleaned = "qflex-boot"
+        return f"qflex-boot-{cleaned}"
+
     def cmd(self) -> str:
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         experiment_root = self.experiment_context.get_experiment_folder_address()
+        run_root = f"{experiment_root}/run"
+        boot_log = f"{run_root}/boot.log"
+        session_name = self._session_name(self.experiment_context.experiment_name)
+        qemu_args = " ".join(self.qemu_common_parser.get_qemu_base_args().split())
+        qemu_session_cmd = (
+            f"cd {run_root} && ./qemu-system-aarch64 {qemu_args} > {boot_log} 2>&1"
+        )
+        tmux_path = shutil.which("tmux")
+        screen_path = shutil.which("screen")
+        if tmux_path:
+            attach_cmd = f"{tmux_path} attach -t {shlex.quote(session_name)}"
+            session_start_cmd = (
+                f"{tmux_path} has-session -t {shlex.quote(session_name)} 2>/dev/null && "
+                f"{{ echo 'Boot session already exists: {session_name}'; exit 1; }} || "
+                f"{tmux_path} new-session -d -s {shlex.quote(session_name)} "
+                f"{shlex.quote(qemu_session_cmd)}"
+            )
+        elif screen_path:
+            attach_cmd = f"{screen_path} -r {shlex.quote(session_name)}"
+            session_start_cmd = (
+                f"{screen_path} -ls {shlex.quote(session_name)} >/dev/null 2>&1 && "
+                f"{{ echo 'Boot session already exists: {session_name}'; exit 1; }} || "
+                f"{screen_path} -S {shlex.quote(session_name)} -dm "
+                f"bash -lc {shlex.quote(qemu_session_cmd)}"
+            )
+        else:
+            raise RuntimeError(
+                "Detached boot requires tmux or screen, but neither was found in PATH."
+            )
         pre_boot_cmds = []
         if self.experiment_context.simulation_context.network_mode == "user":
             machine_config = f"{experiment_root}/machine_config.json"
@@ -28,6 +66,16 @@ class Boot(Executor):
             pre_boot_cmds.append(
                 f"echo 'Kernel manifest target: {kernel_manifest}'"
             )
+            pre_boot_cmds.append(
+                f"echo 'Boot session: {session_name}'"
+            )
+            pre_boot_cmds.append(
+                f"echo 'Attach command: {attach_cmd}'"
+            )
+            pre_boot_cmds.append(
+                f"echo 'Boot log: {boot_log}'"
+            )
+            pre_boot_cmds.append(session_start_cmd)
             pre_boot_cmds.append(
                 f"(cd {shlex.quote(repo_root)} && "
                 f"python3 -m commands.capture_kernel "
@@ -56,22 +104,19 @@ class Boot(Executor):
                 f"echo 'Machine config to update later: {machine_config}'"
             )
             pre_boot_cmds.append(
+                f"echo 'Boot session: {session_name}'"
+            )
+            pre_boot_cmds.append(
+                f"echo 'Attach command: {attach_cmd}'"
+            )
+            pre_boot_cmds.append(
+                f"echo 'Boot log: {boot_log}'"
+            )
+            pre_boot_cmds.append(session_start_cmd)
+            pre_boot_cmds.append(
                 f"cd {shlex.quote(repo_root)} && "
                 f"python3 -m commands.capture_kernel "
                 f"--machine-config {shlex.quote(machine_config)} "
                 f"--manual-required-reason {shlex.quote(reason)}"
             )
-
-        boot_cmd = f"""
-        ./qemu-system-aarch64 \
-        {self.qemu_common_parser.get_qemu_base_args()}
-        """
-
-        commands = list(pre_boot_cmds)
-        commands.extend(
-            [
-                f"cd {experiment_root}/run",
-                boot_cmd,
-            ]
-        )
-        return commands
+        return pre_boot_cmds
