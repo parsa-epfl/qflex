@@ -2,6 +2,9 @@ import os
 from commands.config import ExperimentContext
 from commands.qemu_cpu import resolve_qemu_cpu
 
+DEFAULT_MONITOR_PORT = 45454
+QEMU_MONITOR_PORT_ENV_VAR = "QFLEX_MONITOR_PORT"
+
 class QemuCommonArgParser:
     def __init__(self, experiment_context: ExperimentContext):
         self.experiment_context = experiment_context
@@ -44,6 +47,8 @@ class QemuCommonArgParser:
     def get_qemu_base_args(self, monitor_port: int | None = None) -> str:
         drive_arg = f"-drive if=virtio,file={self.image_address},format=qcow2"
         qemu_cpu = resolve_qemu_cpu()
+        if monitor_port is None:
+            monitor_port = int(os.environ.get(QEMU_MONITOR_PORT_ENV_VAR, DEFAULT_MONITOR_PORT))
 
         qemu_args = f""" -M virt,gic-version=max,virtualization=off,secure=off \
         -smp {self.core_coeff * self.cores} \

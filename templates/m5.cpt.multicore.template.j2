@@ -361,12 +361,12 @@ nbr_of_stores=2
 [system.physmem.store0]
 store_id=0
 filename=system.physmem.store0.pmem
-range_size=67108864
+range_size={{ physmem_store0_range_size }}
 
 [system.physmem.store1]
 store_id=1
 filename=system.physmem.store1.pmem
-range_size=17179869184
+range_size={{ physmem_store1_range_size }}
 
 [system.realview.bootmem]
 currState=0

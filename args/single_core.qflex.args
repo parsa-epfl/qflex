@@ -1,0 +1,22 @@
+--core-count 1
+--no-double-cores
+--quantum-size-ns 20000
+--llc-size-per-tile-mb 1
+--parallel
+--network user
+--memory-gb 16
+--host-name SAPHIRE
+--workload-name single-core
+--population-seconds 0.1
+--no-consolidated
+--primary-ipc 2.0
+--primary-core-start 0
+--experiment-name single-core
+--image-name single-core.qcow2
+--image-folder /mnt/sdb/aansari/images
+--bootloader /home/dev/qflex_git/QPoints/bin/m5/binaries/boot_v2_qemu_virt.arm64
+--root-device /dev/vda
+--mounting-folder /mnt/sdb/aansari
+--check-period-quantum-coeff 53.0
+--no-unique
+--use-image-directly

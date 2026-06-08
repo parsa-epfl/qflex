@@ -1,11 +1,33 @@
 from pydantic import BaseModel, Field
+import json
 import os
+from pathlib import Path
 import shutil
 import pandas
 
 from .host import Host, SMTHost, HOSTS, HostType
 from .workload import Workload, create_workload
 import datetime
+
+DEFAULT_ROOT_DEVICE = "/dev/vda"
+DEFAULT_PLATFORM = "QEMU_Virt"
+DEFAULT_BOOTMEM_SIZE_BYTES = 64 * 1024 * 1024
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def get_default_bootloader_path() -> str:
+    return str(
+        _repo_root()
+        / "QPoints"
+        / "bin"
+        / "m5"
+        / "binaries"
+        / "boot_v2_qemu_virt.arm64"
+    )
+
 
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
@@ -40,6 +62,7 @@ class SimulationContext(BaseModel):
     mem_controller_count: int = Field(description="number of memory controllers")
     mem_controller_positions: str = Field(description="positions of memory controllers")
     memory_gb: int = Field(description="memory size in GB")
+    network_mode: str = Field(description="semantic network mode for the VM")
     qemu_nic: str = Field(description="type of NIC to use in QEMU")
     quantum_size: int = Field(description="quantum size for the simulator in nanoseconds")
     is_parallel: bool = Field(default=True, description="whether the simulation is parallel or not")
@@ -72,9 +95,11 @@ def create_simulation_context(
         raise ValueError("Unsupported core count")
 
     if 'none' == network.strip().lower():
+        network_mode = "none"
         network = "-nic none"
     elif 'user' == network.strip().lower():
-        network = "-nic user,model=virtio-net-pci"
+        network_mode = "user"
+        network = "-nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22"
     else:
         raise ValueError("Unsupported network type. Supported types are 'none' and 'user'.")
     return SimulationContext(
@@ -87,6 +112,7 @@ def create_simulation_context(
         mem_controller_count=memory_controller_count,
         mem_controller_positions=memory_controller_positions,
         memory_gb=memory_gb,
+        network_mode=network_mode,
         qemu_nic=network,
         quantum_size=quantum_size,
         is_parallel=is_parallel,
@@ -106,6 +132,18 @@ class ExperimentContext(BaseModel):
     # TODO move image name to the workload section
     image_folder: str = Field(description="Address of the image to use")
     image_name: str = Field(description="Name of the image to use")
+    kernel: str = Field(
+        default="",
+        description="Kernel image to use for gem5 restore and TLB sidecar generation",
+    )
+    bootloader: str = Field(
+        default_factory=get_default_bootloader_path,
+        description="Bootloader image to use for gem5 restore runs",
+    )
+    root_device: str = Field(
+        default=DEFAULT_ROOT_DEVICE,
+        description="Root device to pass to gem5 full-system configs",
+    )
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
     host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
@@ -130,6 +168,69 @@ class ExperimentContext(BaseModel):
 
     def get_local_image_address(self) -> str:
         return self.image_address
+
+    def get_machine_config_path(self) -> str:
+        return f"{self.get_experiment_folder_address()}/machine_config.json"
+
+    def get_kernel_bundle_dir(self) -> str:
+        return f"{self.get_experiment_folder_address()}/kernel"
+
+    def get_machine_config(self) -> dict:
+        return {
+            "schema_version": 1,
+            "platform": DEFAULT_PLATFORM,
+            "experiment_name": self.experiment_name,
+            "image_name": self.image_name,
+            "image_path": self.get_local_image_address(),
+            "kernel": self.kernel,
+            "kernel_bundle_dir": self.get_kernel_bundle_dir(),
+            "bootloader": self.bootloader,
+            "root_device": self.root_device,
+            "core_count": self.simulation_context.core_count,
+            "memory_gb": self.simulation_context.memory_gb,
+            "memory_bytes": int(self.simulation_context.memory_gb) * (1024 ** 3),
+            "bootmem_size_bytes": DEFAULT_BOOTMEM_SIZE_BYTES,
+            "network": self.simulation_context.network_mode,
+            "qemu_nic": self.simulation_context.qemu_nic,
+            "parallel": self.simulation_context.is_parallel,
+            "quantum_size_ns": self.simulation_context.quantum_size,
+            "check_period_quantum_coeff": self.simulation_context.check_period_quantum_coeff,
+            "llc_sets": self.simulation_context.l2_set,
+            "llc_ways": self.simulation_context.l2_way,
+            "directory_sets": self.simulation_context.directory_set,
+            "directory_ways": self.simulation_context.directory_way,
+            "mem_controller_count": self.simulation_context.mem_controller_count,
+            "mem_controller_positions": self.simulation_context.mem_controller_positions,
+            "host_name": self.host.name,
+            "workload_name": self.workload.name,
+        }
+
+    def write_machine_config(self) -> None:
+        machine_config_path = Path(self.get_machine_config_path())
+        data = self.get_machine_config()
+        if machine_config_path.is_file():
+            existing = json.loads(machine_config_path.read_text(encoding="utf-8"))
+            for key in (
+                "kernel",
+                "kernel_bundle_dir",
+                "kernel_capture_status",
+                "kernel_capture_reason",
+                "kernel_provider",
+                "kernel_augmentation_note",
+            ):
+                if key in existing and (key not in data or not data.get(key)):
+                    data[key] = existing.get(key)
+        machine_config_path.write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        for link_name in ("cfg/machine_config.json", "run/machine_config.json"):
+            link_path = Path(self.get_experiment_folder_address()) / link_name
+            if link_path.exists() or link_path.is_symlink():
+                link_path.unlink()
+            link_path.symlink_to(machine_config_path)
+
     def get_vanila_qemu_build_folder(self) -> str:
         return f'{self.get_experiment_folder_address()}/qemu-saved'
     def get_pflex_qemu_build_folder(self) -> str:
@@ -186,8 +287,9 @@ class ExperimentContext(BaseModel):
         self.set_up_image()
 
 
-        for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts", "images"]:
+        for subfolder in ["bin", "cfg", "flags", "kernel", "lib", "run", "scripts", "images"]:
             os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
+        self.write_machine_config()
         self.get_ipns_csv()
 
         if not os.path.exists(f"{self.get_experiment_folder_address()}/run/{self.image_name}"):
@@ -349,10 +451,13 @@ def create_experiment_context(
     is_consolidated: bool,
     primary_ipc: float,
     secondary_ipc: float,
-    population_seconds: int,
+    population_seconds: float,
     phantom_cpu_ipc: float,
     # experiment sections
     image_folder: str,
+    kernel: str = "",
+    bootloader: str = "",
+    root_device: str = DEFAULT_ROOT_DEVICE,
     # Default parameters that can be induced from others
     experiment_name=None,
     image_name: str=None,
@@ -374,6 +479,8 @@ def create_experiment_context(
     # TODO check this to make sure it doesn't have edge cases
     mounting_folder = os.path.abspath(mounting_folder)
     image_folder = os.path.abspath(image_folder)
+    kernel = os.path.abspath(kernel) if kernel else ""
+    bootloader = os.path.abspath(bootloader) if bootloader else get_default_bootloader_path()
 
     workload = create_workload(
         workload_name=workload_name,
@@ -421,6 +528,9 @@ def create_experiment_context(
         experiment_name=experiment_name,
         image_folder=image_folder,
         image_name=image_name,
+        kernel=kernel,
+        bootloader=bootloader,
+        root_device=root_device,
         keep_experiment_unique=keep_experiment_unique,
         simulation_context=simulation_context,
         host=host,

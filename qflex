@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
 import os
+import shlex
+import sys
 import typer
 from typing import Annotated
 from commands.createimage import CreateImage
@@ -28,8 +30,37 @@ app = typer.Typer(
 
 qpoints_app = typer.Typer(help="QPoints utilities.")
 app.add_typer(qpoints_app, name="qpoints")
+kernel_app = typer.Typer(help="Kernel bundle utilities.")
+app.add_typer(kernel_app, name="kernel")
 
 SUPPORTED_RUBY_PROTOCOLS = ("mesi_two_level", "moesi_cmp_directory")
+
+
+def _load_args_file(path: str) -> list[str]:
+    file_args: list[str] = []
+    with open(path, encoding="utf-8") as infile:
+        for raw_line in infile:
+            line = raw_line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            file_args.extend(shlex.split(line))
+    return file_args
+
+
+def _expand_args_files(argv: list[str]) -> list[str]:
+    expanded: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--args-file":
+            if i + 1 >= len(argv):
+                raise SystemExit("--args-file requires a value.")
+            expanded.extend(_load_args_file(argv[i + 1]))
+            i += 2
+            continue
+        expanded.append(arg)
+        i += 1
+    return expanded
 
 
 def _validate_qpoints_ruby_protocol(ruby_protocol: str) -> str:
@@ -40,6 +71,14 @@ def _validate_qpoints_ruby_protocol(ruby_protocol: str) -> str:
             + ", ".join(SUPPORTED_RUBY_PROTOCOLS)
         )
     return ruby_protocol
+
+
+def _default_gem5_ckp_dir(experiment_context: ExperimentContext) -> str:
+    return os.path.join(
+        experiment_context.get_mounting_folder(),
+        "checkpoints",
+        experiment_context.experiment_name,
+    )
 
 @app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
 def create_base_image(
@@ -68,17 +107,65 @@ def boot(
     experiment_context: ExperimentContext,
 ):
     """
-    Boot a QEMU virtual machine with specified parameters.
-    Once booted, you can log in with username 'root' and no password.
-    After installing your desired packages and making changes,
-    you can save the state with Ctrl+A, then C to create a snapshot named 'base' by savevm base, 
-    then exit with Ctrl+C, then quit.
-    This is the second step to create the images for an experiment, with all the necessary packages installed.
+    Run a bounded boot workflow for the experiment image.
+    This command boots the VM, waits for the guest to become reachable over SSH,
+    captures kernel provenance, creates the QEMU snapshot named `boot`,
+    shuts the VM down cleanly, and returns with no live emulator left behind.
+    On success you can proceed to the `load` stage.
     """
     boot_executor = Boot(
         experiment_context=experiment_context,
     )
     boot_executor.execute(to_stdio=True, run_in_background=False)
+
+
+@kernel_app.command("adopt")
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def kernel_adopt(
+    experiment_context: ExperimentContext,
+    kernel_path: Annotated[str, typer.Option(
+        "--kernel",
+        help="Path to the externally sourced matching vmlinux ELF to adopt into the experiment kernel bundle.",
+    )] = ...,
+    kind: Annotated[str, typer.Option(
+        "--kind",
+        help="Provenance label recorded in the kernel manifest for this adoption.",
+    )] = "manual_adopt",
+):
+    """
+    Adopt an externally sourced matching vmlinux ELF into the experiment kernel bundle.
+    This finalizes a lineage whose kernel bundle is incomplete by installing the canonical
+    kernel artifact into the standard bundle and marking it ready for downstream consumers.
+    """
+    import subprocess
+    from pathlib import Path
+    import json
+
+    machine_config = experiment_context.get_machine_config_path()
+    repo_root = os.path.abspath(os.path.dirname(__file__))
+    command = [
+        "python3",
+        "-m",
+        "commands.capture_kernel",
+        "--machine-config",
+        machine_config,
+        "--adopt-kernel",
+        os.path.abspath(kernel_path),
+        "--adopt-kind",
+        kind,
+    ]
+    subprocess.run(command, cwd=repo_root, check=True, text=True)
+
+    machine_config_data = json.loads(Path(machine_config).read_text(encoding="utf-8"))
+    kernel_bundle_dir = machine_config_data.get("kernel_bundle_dir", "")
+    selected_kernel = machine_config_data.get("kernel", "")
+    kernel_status = machine_config_data.get("kernel_capture_status", "")
+    print(f"Kernel bundle: {kernel_bundle_dir}")
+    print(f"Selected kernel: {selected_kernel}")
+    print(f"Kernel capture status: {kernel_status}")
+    if kernel_status == "ready":
+        print("Next step: rerun qflex boot if you want a refreshed boot summary, or proceed to qflex load.")
+
 
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
@@ -249,13 +336,18 @@ def result(
 
 
 @app.command("run_sample")
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
 def run_sample(
+    experiment_context: ExperimentContext,
     timing_engine: Annotated[str, typer.Option(help="Timing engine (gem5 or flexus).")] = "gem5",
-    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")] = "",
-    experiment: Annotated[str, typer.Option(help="Experiment name.")] = "",
+    gem5_ckp_dir: Annotated[
+        str | None,
+        typer.Option(
+            help="Gem5 checkpoint directory. Defaults to <mounting>/checkpoints/<experiment>."
+        ),
+    ] = None,
     first: Annotated[str, typer.Option(help="First snapshot name, e.g. snapshot_0.")] = "",
     last: Annotated[str, typer.Option(help="Last snapshot name, e.g. snapshot_99.")] = "",
-    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")] = 1,
     warmup_cycles: Annotated[int, typer.Option(help="Detailed warmup window in CPU cycles.")] = 0,
     measurement_cycles: Annotated[int, typer.Option(help="Measurement window in CPU cycles.")] = 0,
     timing_ruby: Annotated[
@@ -275,16 +367,15 @@ def run_sample(
         str | None,
         typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
     ] = None,
-    mounting_folder: Annotated[
-        str,
-        typer.Option(
-            help="Root folder that contains the experiments directory for Flexus runs."
-        ),
-    ] = os.environ.get("QFLEX_MOUNTING_FOLDER", "/mnt/sdb/aansari"),
 ):
     """
     Run all selected sampling units serially and emit a canonical uIPC report.
     """
+    experiment = experiment_context.experiment_name
+    core_count = experiment_context.simulation_context.core_count
+    memory_gb = experiment_context.simulation_context.memory_gb
+    resolved_gem5_ckp_dir = gem5_ckp_dir or _default_gem5_ckp_dir(experiment_context)
+
     if timing_engine == "gem5":
         if timing_ruby and timing_ruby_moesi:
             raise typer.BadParameter(
@@ -303,11 +394,14 @@ def run_sample(
                 "--warmup-cycles must be non-negative."
             )
         qpoints_run_sample(
-            gem5_ckp_dir=gem5_ckp_dir,
+            gem5_ckp_dir=resolved_gem5_ckp_dir,
             experiment=experiment,
             first=first,
             last=last,
             core_count=core_count,
+            memory_gb=memory_gb,
+            bootloader=experiment_context.bootloader,
+            root_device=experiment_context.root_device,
             warmup_cycles=warmup_cycles,
             measurement_cycles=measurement_cycles,
             timing_ruby=timing_ruby,
@@ -339,7 +433,7 @@ def run_sample(
             core_count=core_count,
             warmup_cycles=warmup_cycles,
             measurement_cycles=measurement_cycles,
-            mounting_folder=mounting_folder,
+            mounting_folder=experiment_context.get_mounting_folder(),
         )
         return
 
@@ -349,13 +443,22 @@ def run_sample(
 
 
 @qpoints_app.command("convert-single")
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
 def qpoints_convert_single_cmd(
-    qflex_ckp_dir: Annotated[str, typer.Option(help="QFlex checkpoint directory.")],
-    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")],
-    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
-    memory_gb: Annotated[int, typer.Option(help="Memory size in GB.")],
-    base: Annotated[str, typer.Option(help="Base disk image (qcow2).")],
-    snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")],
+    experiment_context: ExperimentContext,
+    gem5_ckp_dir: Annotated[
+        str | None,
+        typer.Option(
+            help="Gem5 checkpoint directory. Defaults to <mounting>/checkpoints/<experiment>."
+        ),
+    ] = None,
+    base: Annotated[
+        str | None,
+        typer.Option(
+            help="Base disk image (qcow2). Defaults to the image from the experiment context."
+        ),
+    ] = None,
+    snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")] = "",
     ssh_host: Annotated[str, typer.Option(help="SSH host for the VM.")] = "127.0.0.1",
     ssh_user: Annotated[str, typer.Option(help="SSH user for the VM.")] = "qflex",
     monitor_base: Annotated[int, typer.Option(help="Base port for QEMU monitor.")] = 45454,
@@ -363,18 +466,28 @@ def qpoints_convert_single_cmd(
     ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
     overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directory.")] = False,
     ruby_protocol: Annotated[str, typer.Option(help="Target Ruby protocol for gem5 uarch restore preparation (e.g. mesi_two_level or moesi_cmp_directory).")] = "mesi_two_level",
+    sim_config: Annotated[
+        str | None,
+        typer.Option(
+            help="Optional QPoints/gem5 config args file used to resolve machine/model parameters for checkpoint conversion."
+        ),
+    ] = None,
 ):
     """
     Convert a single QPoints snapshot by running the QEMU emulation and gem5 checkpoint generation.
     """
     ruby_protocol = _validate_qpoints_ruby_protocol(ruby_protocol)
     qpoints_convert_single(
-        qflex_ckp_dir=qflex_ckp_dir,
-        gem5_ckp_dir=gem5_ckp_dir,
-        core_count=core_count,
-        memory_gb=memory_gb,
-        base=base,
+        qflex_ckp_dir=experiment_context.get_experiment_folder_address(),
+        gem5_ckp_dir=gem5_ckp_dir or _default_gem5_ckp_dir(experiment_context),
+        core_count=experiment_context.simulation_context.core_count,
+        memory_gb=experiment_context.simulation_context.memory_gb,
+        kernel=experiment_context.kernel or None,
+        bootloader=experiment_context.bootloader,
+        root_device=experiment_context.root_device,
+        base=base or experiment_context.get_local_image_address(),
         snapshot=snapshot,
+        sim_config=sim_config,
         ssh_host=ssh_host,
         ssh_user=ssh_user,
         monitor_base=monitor_base,
@@ -395,6 +508,24 @@ def qpoints_convert_multi_cmd(
     core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
     memory_gb: Annotated[int, typer.Option(help="Memory size in GB.")],
     base: Annotated[str, typer.Option(help="Base disk image (qcow2).")],
+    kernel: Annotated[
+        str | None,
+        typer.Option(help="Kernel image to use for gem5 restore and TLB sidecar generation."),
+    ] = None,
+    bootloader: Annotated[
+        str | None,
+        typer.Option(help="Bootloader image to use for gem5 restore runs."),
+    ] = None,
+    root_device: Annotated[
+        str,
+        typer.Option(help="Root device to pass to gem5 full-system configs."),
+    ] = "/dev/vda",
+    sim_config: Annotated[
+        str | None,
+        typer.Option(
+            help="Optional QPoints/gem5 config args file used to resolve machine/model parameters for checkpoint conversion."
+        ),
+    ] = None,
     ssh_host: Annotated[str, typer.Option(help="SSH host for the VM.")] = "127.0.0.1",
     ssh_user: Annotated[str, typer.Option(help="SSH user for the VM.")] = "qflex",
     monitor_base: Annotated[int, typer.Option(help="Base port for QEMU monitor.")] = 45454,
@@ -415,7 +546,11 @@ def qpoints_convert_multi_cmd(
         gem5_ckp_dir=gem5_ckp_dir,
         core_count=core_count,
         memory_gb=memory_gb,
+        kernel=kernel,
+        bootloader=bootloader,
+        root_device=root_device,
         base=base,
+        sim_config=sim_config,
         ssh_host=ssh_host,
         ssh_user=ssh_user,
         monitor_base=monitor_base,
@@ -427,11 +562,16 @@ def qpoints_convert_multi_cmd(
 
 
 @qpoints_app.command("run-gem5")
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
 def qpoints_run_gem5_cmd(
-    gem5_ckp_dir: Annotated[str, typer.Option(help="Gem5 checkpoint directory.")],
-    experiment: Annotated[str, typer.Option(help="Experiment name.")],
-    snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")],
-    core_count: Annotated[int, typer.Option(help="Number of CPU cores.")],
+    experiment_context: ExperimentContext,
+    gem5_ckp_dir: Annotated[
+        str | None,
+        typer.Option(
+            help="Gem5 checkpoint directory. Defaults to <mounting>/checkpoints/<experiment>."
+        ),
+    ] = None,
+    snapshot: Annotated[str, typer.Option(help="Snapshot name, e.g. snapshot_0.")] = "",
     inst: Annotated[int | None, typer.Option(help="Instruction count for legacy instruction-bounded runs.")] = None,
     warmup_cycles: Annotated[int | None, typer.Option(help="Detailed warmup window in CPU cycles (timing Ruby only).")] = None,
     measurement_cycles: Annotated[int | None, typer.Option(help="Measurement window in CPU cycles (timing Ruby only).")] = None,
@@ -447,6 +587,13 @@ def qpoints_run_gem5_cmd(
     timing_ruby_moesi: Annotated[
         bool, typer.Option(help="Run gem5 in O3 Ruby MOESI_CMP_directory mode.")
     ] = False,
+    cache_hierarchy_restore: Annotated[
+        bool,
+        typer.Option(
+            "--cache-hierarchy-restore/--no-cache-hierarchy-restore",
+            help="Enable or disable gem5 LLC/L1 cache-hierarchy restore flags.",
+        ),
+    ] = True,
     sim_config: Annotated[
         str | None,
         typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
@@ -481,22 +628,27 @@ def qpoints_run_gem5_cmd(
             "Either --inst or --measurement-cycles must be provided."
         )
     qpoints_run_gem5(
-        gem5_ckp_dir=gem5_ckp_dir,
-        experiment=experiment,
+        gem5_ckp_dir=gem5_ckp_dir or _default_gem5_ckp_dir(experiment_context),
+        experiment=experiment_context.experiment_name,
         snapshot=snapshot,
         inst=inst,
         warmup_cycles=warmup_cycles,
         measurement_cycles=measurement_cycles,
-        core_count=core_count,
+        core_count=experiment_context.simulation_context.core_count,
+        memory_gb=experiment_context.simulation_context.memory_gb,
+        bootloader=experiment_context.bootloader,
+        root_device=experiment_context.root_device,
         branch_trace=branch_trace,
         tage_decision_trace=tage_decision_trace,
         data_trace=data_trace,
         dump_cache_state=dump_cache_state,
         timing_ruby=timing_ruby,
         timing_ruby_moesi=timing_ruby_moesi,
+        cache_hierarchy_restore=cache_hierarchy_restore,
         sim_config=sim_config,
     )
 
 
 if __name__ == "__main__":
+    sys.argv = [sys.argv[0], *_expand_args_files(sys.argv[1:])]
     app()
