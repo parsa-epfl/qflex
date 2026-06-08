@@ -18,7 +18,7 @@ set timeout 900
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         120
-set BUDGET_WORKLOAD_INIT_S 129600   ; # 36h client budget (cqlsh + YCSB warmup of 10M records can take many hours wall-clock under PDES)
+set BUDGET_WORKLOAD_INIT_S 259200   ; # 72h client budget (cqlsh + YCSB warmup of 10M records can take many hours wall-clock under PDES)
 set BUDGET_CHECKPOINTING_S 10800
 
 set serial_port  $env(TELNET_SERIAL_PORT)
