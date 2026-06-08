@@ -562,7 +562,8 @@ def plot_u_ipc_distribution(
     snapshot_total_u_ipc = np.sum(
         interval_ipc_data_u, axis=1
     )  # Sum across cores for each snapshot
-    valid_u_ipc_data = [x for x in snapshot_total_u_ipc if not math.isnan(x)]
+    # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
+    valid_u_ipc_data = [x for x in snapshot_total_u_ipc if not math.isnan(x) and x != 0]
 
     if len(valid_u_ipc_data) > 0:
         # make sure all U-IPC is larger than 0.
@@ -907,8 +908,8 @@ def analyze_sampling_unit(
                 group_u_ipc_data, axis=1
             )  # Shape: [snapshots]
 
-            # Filter out NaN and zero values
-            valid_data = [x for x in snapshot_group_u_ipc if not math.isnan(x)]
+            # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
+            valid_data = [x for x in snapshot_group_u_ipc if not math.isnan(x) and x != 0]
 
             if len(valid_data) == 0:
                 console.print(
@@ -990,7 +991,7 @@ def analyze_sampling_unit(
         # Aggregate across cores for each snapshot to get total IPC per snapshot
         snapshot_total_u_ipc = np.sum(interval_ipc_u_data, axis=1)  # Shape: [snapshots]
 
-        # Filter out NaN and zero values
+        # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
         valid_data = [x for x in snapshot_total_u_ipc if not math.isnan(x) and x != 0]
 
         if len(valid_data) == 0:
