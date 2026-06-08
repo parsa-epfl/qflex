@@ -144,6 +144,29 @@ def test_experiment_machine_config_omits_gem5_tlb_geometry(tmp_path: Path):
     assert "have_large_asid_64" not in machine_config
 
 
+def test_tlb_geometry_is_resolved_from_sim_config_overlay(tmp_path: Path):
+    module = _load_qpoints_commands_module()
+    repo_root = _repo_root()
+    qpoints_root = repo_root / "QPoints"
+    sim_config = tmp_path / "tlb_override.args"
+    sim_config.write_text(
+        "--itb-size=96\n"
+        "--dtb-size=128\n"
+        "--no-large-asid-64\n",
+        encoding="utf-8",
+    )
+
+    itb_size, dtb_size, have_large_asid_64 = module._resolve_tlb_geometry_from_sim_configs(
+        qpoints_root,
+        module.DEFAULT_CLASSIC_SIM_CONFIG_REL,
+        str(sim_config),
+    )
+
+    assert itb_size == 96
+    assert dtb_size == 128
+    assert have_large_asid_64 is False
+
+
 def test_write_checkpoint_machine_config_records_extended_machine_fields(tmp_path: Path):
     module = _load_qpoints_commands_module()
     root_dir = tmp_path / "checkpoints"

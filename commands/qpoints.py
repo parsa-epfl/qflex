@@ -22,6 +22,9 @@ from commands.config import (
 DEFAULT_GEM5_ITB_SIZE = 64
 DEFAULT_GEM5_DTB_SIZE = 64
 DEFAULT_GEM5_HAVE_LARGE_ASID_64 = True
+DEFAULT_CLASSIC_SIM_CONFIG_REL = "configs/classic_atomic_gem5.args"
+DEFAULT_TIMING_RUBY_MESI_SIM_CONFIG_REL = "configs/timing_ruby_gem5.args"
+DEFAULT_TIMING_RUBY_MOESI_SIM_CONFIG_REL = "configs/timing_ruby_moesi_gem5.args"
 
 
 def _ensure_executable(path: Path) -> None:
@@ -58,6 +61,55 @@ def _prepare_qpoints_root(qpoints_root: Path, required_paths) -> None:
         )
     for relative_path in required_paths:
         _require_qpoints_file(qpoints_root, relative_path)
+
+
+def _load_sim_config_args(path: Path) -> list[str]:
+    if not path.is_file():
+        raise RuntimeError(f"Simulation config file not found: {path}")
+    args: list[str] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        args.append(line)
+    return args
+
+
+def _resolve_tlb_geometry_from_sim_configs(
+    qpoints_root: Path,
+    default_sim_config_rel: str,
+    sim_config: Optional[str] = None,
+) -> tuple[int, int, bool]:
+    itb_size = DEFAULT_GEM5_ITB_SIZE
+    dtb_size = DEFAULT_GEM5_DTB_SIZE
+    have_large_asid_64 = DEFAULT_GEM5_HAVE_LARGE_ASID_64
+
+    config_paths = [qpoints_root / default_sim_config_rel]
+    if sim_config:
+        config_paths.append(Path(sim_config).expanduser().resolve())
+
+    for config_path in config_paths:
+        for arg in _load_sim_config_args(config_path):
+            if arg.startswith("--itb-size="):
+                value = arg.split("=", 1)[1]
+                if not re.fullmatch(r"[1-9][0-9]*", value):
+                    raise RuntimeError(
+                        f"Invalid --itb-size value in {config_path}: {value!r}"
+                    )
+                itb_size = int(value)
+            elif arg.startswith("--dtb-size="):
+                value = arg.split("=", 1)[1]
+                if not re.fullmatch(r"[1-9][0-9]*", value):
+                    raise RuntimeError(
+                        f"Invalid --dtb-size value in {config_path}: {value!r}"
+                    )
+                dtb_size = int(value)
+            elif arg == "--have-large-asid-64":
+                have_large_asid_64 = True
+            elif arg == "--no-large-asid-64":
+                have_large_asid_64 = False
+
+    return itb_size, dtb_size, have_large_asid_64
 
 
 def _refresh_qpoints_helper(
@@ -228,7 +280,7 @@ def _apply_snapshot_gem5_uarch(
     gem5_bin = qpoints_root / "gem5" / "build" / "ARM" / "gem5.opt"
     gem5_cfg = qpoints_root / "gem5" / "configs" / "example" / "arm" / "starter_fs.py"
     kernel_path = (
-        Path(kernel).expanduser().resolve()
+        Path(os.path.abspath(Path(kernel).expanduser()))
         if kernel
         else qpoints_root / "bin" / "m5" / "binaries" / "vmlinux.arm64"
     )
@@ -881,11 +933,9 @@ def convert_single(
     kernel: Optional[str],
     bootloader: Optional[str],
     root_device: str,
-    itb_size: int,
-    dtb_size: int,
-    have_large_asid_64: bool,
     base: str,
     snapshot: str,
+    sim_config: Optional[str] = None,
     ssh_host: str = "127.0.0.1",
     ssh_user: str = "qflex",
     monitor_base: int = 45454,
@@ -905,6 +955,13 @@ def convert_single(
             f"Required checkpoint composer not found: {create_gem5_checkpoint}"
         )
     _prepare_qpoints_root(qpoints_root, ("scripts/uarch_restore/prepare_gem5_uarch.py",))
+    resolved_itb_size, resolved_dtb_size, resolved_have_large_asid_64 = (
+        _resolve_tlb_geometry_from_sim_configs(
+            qpoints_root,
+            DEFAULT_CLASSIC_SIM_CONFIG_REL,
+            sim_config,
+        )
+    )
     experiment_machine_config = _load_experiment_machine_config(qflex_ckp_dir)
     experiment_kernel_dir, experiment_kernel_path = _require_ready_experiment_kernel(
         experiment_machine_config
@@ -1053,9 +1110,9 @@ def convert_single(
             checkpoint_kernel_path,
             bootloader,
             root_device,
-            itb_size,
-            dtb_size,
-            have_large_asid_64,
+            resolved_itb_size,
+            resolved_dtb_size,
+            resolved_have_large_asid_64,
             converted_img,
             checkpoint_kernel_dir,
             experiment_machine_config,
@@ -1087,9 +1144,9 @@ def convert_single(
             checkpoint_kernel_path,
             bootloader,
             root_device,
-            itb_size,
-            dtb_size,
-            have_large_asid_64,
+            resolved_itb_size,
+            resolved_dtb_size,
+            resolved_have_large_asid_64,
             uarch_manifest,
         )
     except KeyboardInterrupt:
@@ -1112,10 +1169,8 @@ def convert_multi(
     kernel: Optional[str],
     bootloader: Optional[str],
     root_device: str,
-    itb_size: int,
-    dtb_size: int,
-    have_large_asid_64: bool,
     base: str,
+    sim_config: Optional[str] = None,
     ssh_host: str = "127.0.0.1",
     ssh_user: str = "qflex",
     monitor_base: int = 45454,
@@ -1141,11 +1196,9 @@ def convert_multi(
             kernel=kernel,
             bootloader=bootloader,
             root_device=root_device,
-            itb_size=itb_size,
-            dtb_size=dtb_size,
-            have_large_asid_64=have_large_asid_64,
             base=base,
             snapshot=snapshot,
+            sim_config=sim_config,
             ssh_host=ssh_host,
             ssh_user=ssh_user,
             monitor_base=monitor_base,
@@ -1184,12 +1237,8 @@ def run_sample(
     last: str,
     core_count: int,
     memory_gb: int,
-    kernel: Optional[str],
     bootloader: Optional[str],
     root_device: str,
-    itb_size: int,
-    dtb_size: int,
-    have_large_asid_64: bool,
     warmup_cycles: int,
     measurement_cycles: int,
     timing_ruby: bool = False,
@@ -1225,12 +1274,8 @@ def run_sample(
             measurement_cycles=measurement_cycles,
             core_count=core_count,
             memory_gb=memory_gb,
-            kernel=kernel,
             bootloader=bootloader,
             root_device=root_device,
-            itb_size=itb_size,
-            dtb_size=dtb_size,
-            have_large_asid_64=have_large_asid_64,
             timing_ruby=timing_ruby,
             timing_ruby_moesi=timing_ruby_moesi,
             cache_hierarchy_restore=cache_hierarchy_restore,
@@ -1253,12 +1298,8 @@ def run_gem5(
     measurement_cycles: Optional[int] = None,
     core_count: int = 1,
     memory_gb: int = 16,
-    kernel: Optional[str] = None,
     bootloader: Optional[str] = None,
     root_device: str = DEFAULT_ROOT_DEVICE,
-    itb_size: int = DEFAULT_GEM5_ITB_SIZE,
-    dtb_size: int = DEFAULT_GEM5_DTB_SIZE,
-    have_large_asid_64: bool = DEFAULT_GEM5_HAVE_LARGE_ASID_64,
     branch_trace: bool = False,
     tage_decision_trace: bool = False,
     data_trace: bool = False,
@@ -1291,26 +1332,32 @@ def run_gem5(
     repo_root = Path(__file__).resolve().parents[1]
     qpoints_root = repo_root / "QPoints"
     _prepare_qpoints_root(qpoints_root, ("run_gem5.sh",))
+    default_sim_config_rel = DEFAULT_CLASSIC_SIM_CONFIG_REL
+    if timing_ruby:
+        default_sim_config_rel = DEFAULT_TIMING_RUBY_MESI_SIM_CONFIG_REL
+    elif timing_ruby_moesi:
+        default_sim_config_rel = DEFAULT_TIMING_RUBY_MOESI_SIM_CONFIG_REL
+    resolved_itb_size, resolved_dtb_size, resolved_have_large_asid_64 = (
+        _resolve_tlb_geometry_from_sim_configs(
+            qpoints_root,
+            default_sim_config_rel,
+            sim_config,
+        )
+    )
     checkpoint_dir = Path(gem5_ckp_dir) / snapshot
     machine_config = _load_machine_config(checkpoint_dir / "machine_config.json")
     expected_kernel = _require_ready_checkpoint_kernel_contract(machine_config)
-    if kernel:
-        explicit_kernel = str(Path(kernel).expanduser().resolve())
-        if explicit_kernel != expected_kernel:
-            raise RuntimeError(
-                "Explicit kernel override does not match the checkpoint kernel contract: "
-                f"{explicit_kernel!r} != {expected_kernel!r}"
-            )
+    resolved_bootloader = bootloader or machine_config.get("bootloader")
     _validate_machine_config(
         machine_config,
         core_count=core_count,
         memory_gb=memory_gb,
         kernel=expected_kernel,
-        bootloader=bootloader or machine_config.get("bootloader"),
+        bootloader=resolved_bootloader,
         root_device=root_device,
-        itb_size=itb_size,
-        dtb_size=dtb_size,
-        have_large_asid_64=have_large_asid_64,
+        itb_size=resolved_itb_size,
+        dtb_size=resolved_dtb_size,
+        have_large_asid_64=resolved_have_large_asid_64,
     )
     run_gem5_sh = qpoints_root / "run_gem5.sh"
     args = [
@@ -1328,10 +1375,6 @@ def run_gem5(
         str(memory_gb),
         "--root-device",
         root_device,
-        "--itb-size",
-        str(itb_size),
-        "--dtb-size",
-        str(dtb_size),
     ]
     if inst is not None:
         args.extend(["--inst", str(inst)])
@@ -1355,14 +1398,8 @@ def run_gem5(
         args.append("--no-cache-hierarchy-restore")
     if sim_config:
         args.extend(["--sim-config", sim_config])
-    if kernel:
-        args.extend(["--kernel", kernel])
-    if bootloader:
-        args.extend(["--bootloader", bootloader])
-    if have_large_asid_64:
-        args.append("--have-large-asid-64")
-    else:
-        args.append("--no-large-asid-64")
+    if resolved_bootloader:
+        args.extend(["--bootloader", resolved_bootloader])
     subprocess.run(
         args,
         cwd=str(qpoints_root),

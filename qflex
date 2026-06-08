@@ -20,11 +20,6 @@ from commands.qpoints import convert_multi as qpoints_convert_multi
 from commands.qpoints import run_gem5 as qpoints_run_gem5
 from commands.qpoints import run_sample as qpoints_run_sample
 from commands.qpoints import run_sample_flexus as qpoints_run_sample_flexus
-from commands.qpoints import (
-    DEFAULT_GEM5_DTB_SIZE,
-    DEFAULT_GEM5_HAVE_LARGE_ASID_64,
-    DEFAULT_GEM5_ITB_SIZE,
-)
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -372,25 +367,6 @@ def run_sample(
         str | None,
         typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
     ] = None,
-    itb_size: Annotated[
-        int,
-        typer.Option(
-            help="Instruction TLB size for gem5 restore and runtime validation."
-        ),
-    ] = DEFAULT_GEM5_ITB_SIZE,
-    dtb_size: Annotated[
-        int,
-        typer.Option(
-            help="Data TLB size for gem5 restore and runtime validation."
-        ),
-    ] = DEFAULT_GEM5_DTB_SIZE,
-    have_large_asid_64: Annotated[
-        bool,
-        typer.Option(
-            "--have-large-asid-64/--no-large-asid-64",
-            help="Whether the gem5 target machine uses 64-bit large ASIDs.",
-        ),
-    ] = DEFAULT_GEM5_HAVE_LARGE_ASID_64,
 ):
     """
     Run all selected sampling units serially and emit a canonical uIPC report.
@@ -424,12 +400,8 @@ def run_sample(
             last=last,
             core_count=core_count,
             memory_gb=memory_gb,
-            kernel=None,
             bootloader=experiment_context.bootloader,
             root_device=experiment_context.root_device,
-            itb_size=itb_size,
-            dtb_size=dtb_size,
-            have_large_asid_64=have_large_asid_64,
             warmup_cycles=warmup_cycles,
             measurement_cycles=measurement_cycles,
             timing_ruby=timing_ruby,
@@ -494,25 +466,12 @@ def qpoints_convert_single_cmd(
     ssh_base: Annotated[int, typer.Option(help="Base port for SSH forwarding.")] = 2222,
     overwrite: Annotated[bool, typer.Option(help="Overwrite existing snapshot directory.")] = False,
     ruby_protocol: Annotated[str, typer.Option(help="Target Ruby protocol for gem5 uarch restore preparation (e.g. mesi_two_level or moesi_cmp_directory).")] = "mesi_two_level",
-    itb_size: Annotated[
-        int,
+    sim_config: Annotated[
+        str | None,
         typer.Option(
-            help="Instruction TLB size for gem5 restore and TLB sidecar generation."
+            help="Optional QPoints/gem5 config args file used to resolve machine/model parameters for checkpoint conversion."
         ),
-    ] = DEFAULT_GEM5_ITB_SIZE,
-    dtb_size: Annotated[
-        int,
-        typer.Option(
-            help="Data TLB size for gem5 restore and TLB sidecar generation."
-        ),
-    ] = DEFAULT_GEM5_DTB_SIZE,
-    have_large_asid_64: Annotated[
-        bool,
-        typer.Option(
-            "--have-large-asid-64/--no-large-asid-64",
-            help="Whether the gem5 target machine uses 64-bit large ASIDs.",
-        ),
-    ] = DEFAULT_GEM5_HAVE_LARGE_ASID_64,
+    ] = None,
 ):
     """
     Convert a single QPoints snapshot by running the QEMU emulation and gem5 checkpoint generation.
@@ -526,11 +485,9 @@ def qpoints_convert_single_cmd(
         kernel=experiment_context.kernel or None,
         bootloader=experiment_context.bootloader,
         root_device=experiment_context.root_device,
-        itb_size=itb_size,
-        dtb_size=dtb_size,
-        have_large_asid_64=have_large_asid_64,
         base=base or experiment_context.get_local_image_address(),
         snapshot=snapshot,
+        sim_config=sim_config,
         ssh_host=ssh_host,
         ssh_user=ssh_user,
         monitor_base=monitor_base,
@@ -563,18 +520,12 @@ def qpoints_convert_multi_cmd(
         str,
         typer.Option(help="Root device to pass to gem5 full-system configs."),
     ] = "/dev/vda",
-    itb_size: Annotated[
-        int,
-        typer.Option(help="Instruction TLB size to use for gem5 restore and TLB sidecar generation."),
-    ] = DEFAULT_GEM5_ITB_SIZE,
-    dtb_size: Annotated[
-        int,
-        typer.Option(help="Data TLB size to use for gem5 restore and TLB sidecar generation."),
-    ] = DEFAULT_GEM5_DTB_SIZE,
-    have_large_asid_64: Annotated[
-        bool,
-        typer.Option("--have-large-asid-64/--no-large-asid-64", help="Whether the target machine uses 64-bit large ASIDs."),
-    ] = DEFAULT_GEM5_HAVE_LARGE_ASID_64,
+    sim_config: Annotated[
+        str | None,
+        typer.Option(
+            help="Optional QPoints/gem5 config args file used to resolve machine/model parameters for checkpoint conversion."
+        ),
+    ] = None,
     ssh_host: Annotated[str, typer.Option(help="SSH host for the VM.")] = "127.0.0.1",
     ssh_user: Annotated[str, typer.Option(help="SSH user for the VM.")] = "qflex",
     monitor_base: Annotated[int, typer.Option(help="Base port for QEMU monitor.")] = 45454,
@@ -598,10 +549,8 @@ def qpoints_convert_multi_cmd(
         kernel=kernel,
         bootloader=bootloader,
         root_device=root_device,
-        itb_size=itb_size,
-        dtb_size=dtb_size,
-        have_large_asid_64=have_large_asid_64,
         base=base,
+        sim_config=sim_config,
         ssh_host=ssh_host,
         ssh_user=ssh_user,
         monitor_base=monitor_base,
@@ -649,25 +598,6 @@ def qpoints_run_gem5_cmd(
         str | None,
         typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
     ] = None,
-    itb_size: Annotated[
-        int,
-        typer.Option(
-            help="Instruction TLB size for gem5 restore and runtime validation."
-        ),
-    ] = DEFAULT_GEM5_ITB_SIZE,
-    dtb_size: Annotated[
-        int,
-        typer.Option(
-            help="Data TLB size for gem5 restore and runtime validation."
-        ),
-    ] = DEFAULT_GEM5_DTB_SIZE,
-    have_large_asid_64: Annotated[
-        bool,
-        typer.Option(
-            "--have-large-asid-64/--no-large-asid-64",
-            help="Whether the gem5 target machine uses 64-bit large ASIDs.",
-        ),
-    ] = DEFAULT_GEM5_HAVE_LARGE_ASID_64,
 ):
     """
     Run gem5 for a single snapshot using QPoints run_gem5.sh.
@@ -706,12 +636,8 @@ def qpoints_run_gem5_cmd(
         measurement_cycles=measurement_cycles,
         core_count=experiment_context.simulation_context.core_count,
         memory_gb=experiment_context.simulation_context.memory_gb,
-        kernel=None,
         bootloader=experiment_context.bootloader,
         root_device=experiment_context.root_device,
-        itb_size=itb_size,
-        dtb_size=dtb_size,
-        have_large_asid_64=have_large_asid_64,
         branch_trace=branch_trace,
         tage_decision_trace=tage_decision_trace,
         data_trace=data_trace,
