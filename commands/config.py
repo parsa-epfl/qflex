@@ -225,8 +225,21 @@ class ExperimentContext(BaseModel):
 
     def write_machine_config(self) -> None:
         machine_config_path = Path(self.get_machine_config_path())
+        data = self.get_machine_config()
+        if machine_config_path.is_file():
+            existing = json.loads(machine_config_path.read_text(encoding="utf-8"))
+            for key in (
+                "kernel",
+                "kernel_bundle_dir",
+                "kernel_capture_status",
+                "kernel_capture_reason",
+                "kernel_provider",
+                "kernel_augmentation_note",
+            ):
+                if key in existing and (key not in data or not data.get(key)):
+                    data[key] = existing.get(key)
         machine_config_path.write_text(
-            json.dumps(self.get_machine_config(), indent=2, sort_keys=True) + "\n",
+            json.dumps(data, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
 

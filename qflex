@@ -30,6 +30,8 @@ app = typer.Typer(
 
 qpoints_app = typer.Typer(help="QPoints utilities.")
 app.add_typer(qpoints_app, name="qpoints")
+kernel_app = typer.Typer(help="Kernel bundle utilities.")
+app.add_typer(kernel_app, name="kernel")
 
 SUPPORTED_RUBY_PROTOCOLS = ("mesi_two_level", "moesi_cmp_directory")
 
@@ -105,17 +107,64 @@ def boot(
     experiment_context: ExperimentContext,
 ):
     """
-    Boot a QEMU virtual machine with specified parameters.
-    Once booted, you can log in with username 'root' and no password.
-    After installing your desired packages and making changes,
-    you can save the state with Ctrl+A, then C to create a snapshot named 'base' by savevm base, 
-    then exit with Ctrl+C, then quit.
-    This is the second step to create the images for an experiment, with all the necessary packages installed.
+    Run a bounded boot workflow for the experiment image.
+    This command boots the VM, waits for the guest to become reachable over SSH,
+    captures kernel provenance, creates the QEMU snapshot named `boot`,
+    shuts the VM down cleanly, and returns with no live emulator left behind.
+    On success you can proceed to the `load` stage.
     """
     boot_executor = Boot(
         experiment_context=experiment_context,
     )
     boot_executor.execute(to_stdio=True, run_in_background=False)
+
+
+@kernel_app.command("adopt")
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def kernel_adopt(
+    experiment_context: ExperimentContext,
+    kernel_path: Annotated[str, typer.Option(
+        "--kernel",
+        help="Path to the externally sourced matching vmlinux ELF to adopt into the experiment kernel bundle.",
+    )],
+    kind: Annotated[str, typer.Option(
+        "--kind",
+        help="Provenance label recorded in the kernel manifest for this adoption.",
+    )] = "manual_adopt",
+):
+    """
+    Adopt an externally sourced matching vmlinux ELF into the experiment kernel bundle.
+    This finalizes a lineage whose kernel bundle is incomplete by installing the canonical
+    kernel artifact into the standard bundle and marking it ready for downstream consumers.
+    """
+    import subprocess
+    from pathlib import Path
+    import json
+
+    machine_config = experiment_context.get_machine_config_path()
+    repo_root = os.path.abspath(os.path.dirname(__file__))
+    command = [
+        "python3",
+        "-m",
+        "commands.capture_kernel",
+        "--machine-config",
+        machine_config,
+        "--adopt-kernel",
+        os.path.abspath(kernel_path),
+        "--adopt-kind",
+        kind,
+    ]
+    subprocess.run(command, cwd=repo_root, check=True, text=True)
+
+    machine_config_data = json.loads(Path(machine_config).read_text(encoding="utf-8"))
+    kernel_bundle_dir = machine_config_data.get("kernel_bundle_dir", "")
+    selected_kernel = machine_config_data.get("kernel", "")
+    kernel_status = machine_config_data.get("kernel_capture_status", "")
+    print(f"Kernel bundle: {kernel_bundle_dir}")
+    print(f"Selected kernel: {selected_kernel}")
+    print(f"Kernel capture status: {kernel_status}")
+    if kernel_status == "ready":
+        print("Next step: rerun qflex boot if you want a refreshed boot summary, or proceed to qflex load.")
 
 
 @app.command()

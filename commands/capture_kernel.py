@@ -71,29 +71,25 @@ class KernelCapture:
         )
 
     @classmethod
-    def mark_manual_required(
+    def _write_user_action_required_notice_file(
         cls,
+        *,
+        kernel_dir: Path,
         machine_config_path: Path,
         reason: str,
     ) -> Path:
-        machine_config_path = machine_config_path.resolve()
-        data = cls._load_machine_config(machine_config_path)
-        kernel_dir = Path(data["kernel_bundle_dir"]).expanduser().resolve()
         kernel_dir.mkdir(parents=True, exist_ok=True)
-        data["kernel_capture_status"] = "manual_required"
-        data["kernel_capture_reason"] = reason
-        data["kernel_augmentation_note"] = FUTURE_AUGMENTATION_NOTE
-        cls._write_machine_config(machine_config_path, data)
-
         notice_path = kernel_dir / "MANUAL_CAPTURE_REQUIRED.txt"
         notice_path.write_text(
             "\n".join(
                 [
-                    "Automatic kernel capture was not performed for this lineage.",
+                    "Kernel augmentation cannot proceed automatically for this lineage.",
                     "",
                     f"Reason: {reason}",
                     "",
-                    "Provide the matching guest kernel ELF manually and update machine_config.json.",
+                    "The automated workflow stopped in a user-action-required state.",
+                    "Provide the matching guest kernel ELF explicitly before",
+                    "downstream stages consume this lineage.",
                     "",
                     FUTURE_AUGMENTATION_NOTE,
                     "Required canonical artifact:",
@@ -112,6 +108,26 @@ class KernelCapture:
             encoding="utf-8",
         )
         return notice_path
+
+    @classmethod
+    def mark_user_action_required(
+        cls,
+        machine_config_path: Path,
+        reason: str,
+    ) -> Path:
+        machine_config_path = machine_config_path.resolve()
+        data = cls._load_machine_config(machine_config_path)
+        kernel_dir = Path(data["kernel_bundle_dir"]).expanduser().resolve()
+        kernel_dir.mkdir(parents=True, exist_ok=True)
+        data["kernel_capture_status"] = "user_action_required"
+        data["kernel_capture_reason"] = reason
+        data["kernel_augmentation_note"] = FUTURE_AUGMENTATION_NOTE
+        cls._write_machine_config(machine_config_path, data)
+        return cls._write_user_action_required_notice_file(
+            kernel_dir=kernel_dir,
+            machine_config_path=machine_config_path,
+            reason=reason,
+        )
 
     @classmethod
     def mark_capture_failed(
@@ -361,6 +377,10 @@ class KernelCapture:
         self.machine_config = data
 
     def execute(self, *, inventory_wait_seconds: int = 120) -> Path:
+        print(
+            f"[capture-kernel] start machine_config={self.machine_config_path}",
+            flush=True,
+        )
         manifest_path = self.kernel_dir / "kernel_manifest.json"
         existing_manifest = {}
         if manifest_path.is_file():
@@ -376,6 +396,10 @@ class KernelCapture:
         )
         release = inventory["release"]
         package_provider = inventory["package_provider"]
+        print(
+            f"[capture-kernel] guest release={release} provider={package_provider}",
+            flush=True,
+        )
         package_lines = inventory["package_lines"]
         debug_boot = inventory["debug_boot"]
         boot = inventory["boot"]
@@ -485,6 +509,10 @@ class KernelCapture:
             notice_path.unlink()
 
         if output_kernel is not None:
+            print(
+                f"[capture-kernel] result=ready source=guest_vmlinux kernel={output_kernel}",
+                flush=True,
+            )
             self._update_machine_config(
                 kernel_path=output_kernel,
                 status="ready",
@@ -492,6 +520,11 @@ class KernelCapture:
                 provider=package_provider,
             )
         elif existing_ready and existing_kernel_is_valid:
+            print(
+                "[capture-kernel] result=ready source=preserved_existing_kernel "
+                f"kernel={existing_selected_kernel}",
+                flush=True,
+            )
             self._update_machine_config(
                 kernel_path=Path(existing_selected_kernel).expanduser(),
                 status="ready",
@@ -501,14 +534,24 @@ class KernelCapture:
         else:
             reason = (
                 "No matching guest vmlinux artifact found in /usr/lib/debug/boot "
-                "or /boot. Boot-side kernel provenance was captured, but the "
-                "canonical ELF is still missing."
+                "or /boot. Boot-side kernel provenance was captured, but qflex "
+                "does not yet implement automated external recovery of the "
+                "canonical ELF."
+            )
+            print(
+                f"[capture-kernel] result=user_action_required reason={reason}",
+                flush=True,
             )
             self._update_machine_config(
                 kernel_path=None,
-                status="augmentable",
+                status="user_action_required",
                 reason=reason,
                 provider=package_provider,
+            )
+            self._write_user_action_required_notice_file(
+                kernel_dir=self.kernel_dir,
+                machine_config_path=self.machine_config_path,
+                reason=reason,
             )
         return manifest_path
 
@@ -524,7 +567,7 @@ def main() -> int:
     parser.add_argument("--ssh-password", default="qflex")
     parser.add_argument("--wait-seconds", type=int, default=900)
     parser.add_argument("--inventory-wait-seconds", type=int, default=120)
-    parser.add_argument("--manual-required-reason", default="")
+    parser.add_argument("--user-action-required-reason", default="")
     parser.add_argument("--adopt-kernel", default="")
     parser.add_argument("--adopt-kind", default="manual_adopt")
     parser.add_argument("--seed-kernel", default="")
@@ -533,6 +576,10 @@ def main() -> int:
 
     machine_config_path = Path(args.machine_config)
     if args.adopt_kernel:
+        print(
+            f"[capture-kernel] adopt kernel={args.adopt_kernel} kind={args.adopt_kind}",
+            flush=True,
+        )
         manifest_path = KernelCapture.seed_existing_kernel(
             machine_config_path=machine_config_path,
             kernel_path=Path(args.adopt_kernel),
@@ -542,6 +589,10 @@ def main() -> int:
         print(manifest_path)
         return 0
     if args.seed_kernel:
+        print(
+            f"[capture-kernel] seed kernel={args.seed_kernel} kind={args.seed_kind}",
+            flush=True,
+        )
         manifest_path = KernelCapture.seed_existing_kernel(
             machine_config_path=machine_config_path,
             kernel_path=Path(args.seed_kernel),
@@ -549,10 +600,14 @@ def main() -> int:
         )
         print(manifest_path)
         return 0
-    if args.manual_required_reason:
-        notice_path = KernelCapture.mark_manual_required(
+    if args.user_action_required_reason:
+        print(
+            f"[capture-kernel] user_action_required reason={args.user_action_required_reason}",
+            flush=True,
+        )
+        notice_path = KernelCapture.mark_user_action_required(
             machine_config_path=machine_config_path,
-            reason=args.manual_required_reason,
+            reason=args.user_action_required_reason,
         )
         print(notice_path)
         return 0
@@ -572,13 +627,15 @@ def main() -> int:
         print(manifest_path)
         return 0
     except FileNotFoundError as exc:
-        notice_path = KernelCapture.mark_manual_required(
+        print(f"[capture-kernel] file_not_found error={exc}", flush=True)
+        notice_path = KernelCapture.mark_user_action_required(
             machine_config_path=machine_config_path,
             reason=str(exc),
         )
         print(notice_path)
         return 0
     except Exception as exc:
+        print(f"[capture-kernel] failed error={exc}", flush=True)
         KernelCapture.mark_capture_failed(
             machine_config_path=machine_config_path,
             reason=str(exc),
