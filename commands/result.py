@@ -24,6 +24,11 @@ class RunResultCommand(Executor):
         
 
     def cmd(self) -> str:
+        # Fully-phantom node ran no detailed model, so it has no result_<idx>/measurement output
+        # to aggregate — skip it (the result scripts would otherwise find nothing and error).
+        exp = self.experiment_context
+        if exp.all_phantom_cores:
+            return [f'echo "[result] skipping fully-phantom node {exp.node_number} (no measurement output)"']
         # Preconditions are checked at run time (not __init__) so the executor can
         # be constructed for a group context where leaf artifacts don't exist yet.
         experiment_folder = self.experiment_context.get_experiment_folder_address()
@@ -74,7 +79,10 @@ class RunResultCommand(Executor):
         # TODO possible bug: rerunning `result` repeatedly with nothing in between (no new
         # fw/run-partition) re-saves core_info_<next> off stale data while core_info.csv has
         # already advanced to the biggest size — current vs data can disagree. Revisit.
-        leaves = self.experiment_context.sub_experiments or [self.experiment_context]
+        # Fully-phantom nodes emit no REQUIRED_SAMPLE_SIZE (no measurement) — exclude them from
+        # both the cross-node required-size max and the per-node core_info_<next> save.
+        leaves = [l for l in (self.experiment_context.sub_experiments or [self.experiment_context])
+                  if not l.all_phantom_cores]
         required = max(self._read_required(leaf) for leaf in leaves)
         current = leaves[0].sample_size
         if required <= current:
