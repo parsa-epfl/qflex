@@ -136,12 +136,12 @@ expect { timeout { puts "ERROR: launching database didn't return prompt"; quit_q
 puts "wsv: database launched; running ALTER USER (retry until MariaDB accepts)..."
 # Foreground retry loop: docker exec runs the ALTER against the detached
 # container (which keeps running after the exec returns). The retry rides out
-# MariaDB's startup. Streams live to the serial; ends on the marker.
-send "until docker exec database_server mysql -u root -e \"ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD(''); FLUSH PRIVILEGES;\"; do sleep 5; done; echo WSV_DB_ALTERED\r"
+# MariaDB's startup. PID-suffixed marker so the typed command echo doesn't false-match.
+send "until docker exec database_server mysql -u root -e \"ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD(''); FLUSH PRIVILEGES;\"; do sleep 5; done; printf 'WSV_DB_ALTERED%s\\n' \"\$\$\"\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: mysql ALTER USER never succeeded"; quit_qemu $monitor_port; exit 1 }
-    -re {WSV_DB_ALTERED}
+    -re {WSV_DB_ALTERED[0-9]+}
 }
 set timeout $BUDGET_PROMPT_S
 send "\r"; expect { timeout { } -re {[\$#] +} }
@@ -149,11 +149,11 @@ puts "wsv: mysql ALTER USER done."
 
 # --- 3. Memcached: detached container (no tmux) -----------------------------
 
-send "./run_memcached.sh && echo WSV_MEMCACHED_OK\r"
+send "./run_memcached.sh && printf 'WSV_MEMCACHED_OK%s\\n' \"\$\$\"\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: memcached didn't confirm start"; quit_qemu $monitor_port; exit 1 }
-    -re {WSV_MEMCACHED_OK}
+    -re {WSV_MEMCACHED_OK[0-9]+}
 }
 set timeout $BUDGET_PROMPT_S
 expect { timeout { } -re {[\$#] +} }
@@ -163,11 +163,11 @@ puts "wsv: memcached container started."
 # run_server.sh is `docker run -dt` (baked, advertised addr 127.0.0.1 for single).
 # The Elgg-bootstrap wait targets the running container, so it stays docker exec.
 
-send "./run_server.sh && echo WSV_SERVER_OK\r"
+send "./run_server.sh && printf 'WSV_SERVER_OK%s\\n' \"\$\$\"\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: web_server didn't confirm start"; quit_qemu $monitor_port; exit 1 }
-    -re {WSV_SERVER_OK}
+    -re {WSV_SERVER_OK[0-9]+}
 }
 set timeout $BUDGET_PROMPT_S
 expect { timeout { } -re {[\$#] +} }
