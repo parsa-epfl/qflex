@@ -179,6 +179,10 @@ expect {
     timeout { puts "ERROR: Elgg never wrote settings.php (web_server not serving)"; quit_qemu $monitor_port; exit 1 }
     -re {ELGGUP[0-9]+}
 }
+# Drain the prompt after the marker (like the db/memcached/web_server sections),
+# so the faban heredoc's prompt-expect below starts from a clean buffer.
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 puts "wsv: Elgg bootstrapped. Settling ${BUDGET_SERVER_SETTLE_S}s before launching faban..."
 sleep $BUDGET_SERVER_SETTLE_S
 

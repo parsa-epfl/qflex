@@ -15,6 +15,15 @@ class FunctionalWarming(SimulationCommand):
 
     def cmd(self) -> str:
         self._assert_syncs_true()
+        exp = self.experiment_context
+        # Phantom node: no detailed warming — run a plain parallel qemu like load (no worm
+        # plugin). It feeds PDES and advances at the phantom IPC; the master's distributed
+        # savevm still persists this node's per-idx checkpoints (without microarch state).
+        if exp.all_phantom_cores:
+            return [
+                f"cd {exp.get_experiment_folder_address()}/run",
+                QemuCommonArgParser(exp).get_qemu_command(),
+            ]
         # Build per-context derived state fresh so this method works whether
         # self.experiment_context was set at __init__ or mutated later (multi-experiment dispatch).
         parser = QemuCommonArgParser(self.experiment_context)

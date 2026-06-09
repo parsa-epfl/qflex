@@ -113,6 +113,7 @@ class ExperimentContext(BaseModel):
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     seed_image_address: str = Field(default="", description="Full address of the seed image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
+    all_phantom_cores: bool = Field(default=False, description="If True, this whole node is simulated as phantom only: from FW onward it runs a plain parallel qemu (no worm warming, no Flexus timing); every core uses the phantom IPNS so its virtual time tracks the phantom IPC.")
     node_number: int = Field(default=-1, description="Node number in multi-node setup, -1 means single node. 0 is the master node.")
 
     neighbor_node_list: List[int] = Field(default=[], description="List of neighbor node numbers in multi-node setup.")
@@ -440,7 +441,11 @@ class ExperimentContext(BaseModel):
                     dev = f" -device virtio-net-pci,netdev=net{i},bus=pcie.0,addr=0x{pci_addr:02x},{mac_address},rx_queue_size=1024,tx_queue_size=256 "
                 else:
                     raise ValueError(f"Unsupported network device {net_dev} for neighbor {self.neighbor_node_list[i]}. Supported devices are 'e1000' and 'virtio-net-pci'.")
-                nic_command = nic_command + f"""  -netdev pdes,id=net{i},shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()} {dev} """
+                # Timing-phase phantom leaf runs plain parallel qemu with no Flexus: tell the PDES
+                # engine so it announces CTRL_READY immediately and exits on the master's CTRL_CLEANUP
+                # (the master's vanilla leaf won't peer-kill it). idx>=0 scopes this to the timing run.
+                phantom_opt = ",phantom=on" if (self.all_phantom_cores and self.idx >= 0) else ""
+                nic_command = nic_command + f"""  -netdev pdes,id=net{i},shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()}{phantom_opt} {dev} """
 
         internet_pci_addr = 0x10 + self.get_neighbor_count()
         internet_nic = f' -netdev user,id=net_user -device e1000,netdev=net_user,bus=pcie.0,addr=0x{internet_pci_addr:02x} '
@@ -478,7 +483,10 @@ class ExperimentContext(BaseModel):
             2
         )
 
-        if not is_consolidated:
+        if self.all_phantom_cores:
+            for core_idx in range(core_count):
+                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_phantom))
+        elif not is_consolidated:
             for core_idx in range(core_count):
                 results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_primary))
         else:
@@ -573,6 +581,7 @@ def create_experiment_context(
     use_cd_rom: Annotated[bool, Field(description="Whether to use a CD-ROM for initial setup.")] = False,
     machine_freq_ghz: Annotated[float, Field(description="Machine frequency in GHz.")] = 2.0,
     include_affinity: Annotated[bool, Field(description="Whether or not to generate affinity index in core_info.csv.")] = False,
+    all_phantom_cores: Annotated[bool, Field(description="If True, this whole node is simulated as phantom only: from FW onward it runs a plain parallel qemu (no worm warming, no Flexus timing); every core uses the phantom IPNS so its virtual time tracks the phantom IPC.")] = False,
     # Multi-node parameters
     node_number: Annotated[int, Field(description="Node number in multi-node setup, -1 means single node. 0 is the master node.")] = -1,
     neighbor_node_list: Annotated[Optional[List[int]], Field(description="List of neighbor node numbers in multi-node setup, only used if node_number is not -1.")] = None,
@@ -687,6 +696,7 @@ def create_experiment_context(
         loadvm_name=loadvm_name,
         use_gdb=use_gdb,
         include_affinity=include_affinity,
+        all_phantom_cores=all_phantom_cores,
         node_number=node_number,
         neighbor_node_list=neighbor_node_list,
         latencies_ns_list=latencies_ns_list,

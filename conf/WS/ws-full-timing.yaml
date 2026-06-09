@@ -1,3 +1,5 @@
+extends: ws
+
 _leaf_defaults:
   _target_: commands.config.create_experiment_context
   quantum_size: 1000
@@ -13,8 +15,8 @@ _leaf_defaults:
   primary_core_start: 0
   memory_gb: 16
   host_name: ZEN3
-  workload_name: media-streaming
-  image_folder: /mnt/sdb/multi-node-experiments/image-1c/ms/
+  workload_name: web-search
+  image_folder: /mnt/sdb/multi-node-experiments/image-1c/ws/
   mounting_folder: /mnt/sdb/multi-node-experiments/
   image_name: root.qcow2
   keep_experiment_unique: false
@@ -26,11 +28,9 @@ _leaf_defaults:
 
 
 
-run_idx:
-  _leaf_defaults:
-    partition_number: 0
-    idx: 0
-
-run_single_partition:
-  _leaf_defaults:
-    partition_number: 0
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: web-search-single-node-yaml-0-full-timing
+    latencies_ns_list: [1000000]
+    syncs_list: ["false"]

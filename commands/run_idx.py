@@ -2,18 +2,22 @@ import contextlib
 
 from commands import SimulationCommand
 from .config import ExperimentContext
-from commands.qemu import VanillaQemuArgParser
+from commands.qemu import VanillaQemuArgParser, PhantomTimingArgParser
 from .executer import _is_dry_run
 
 
 class RunIdxCommand(SimulationCommand):
-    NEEDS_PDES_PEER_KILL = False
-
     def __init__(self,
                  experiment_context: ExperimentContext,
                  use_stdio: bool = True):
         self.experiment_context = experiment_context
         self.use_stdio = use_stdio
+
+    @property
+    def NEEDS_PDES_PEER_KILL(self) -> bool:
+        # vanilla-qemu's PDES exit handshake is clean → no peer-kill. A phantom node runs the
+        # parallel binary (PDES exit-hang bug) and the master won't kill it, so it needs one.
+        return self.experiment_context.all_phantom_cores
 
     def execute(self, to_stdio: bool = True, run_in_background: bool = False,
                 dry_run: bool = False, *, sentinel_dir: str = None,
@@ -39,24 +43,13 @@ class RunIdxCommand(SimulationCommand):
 
     def cmd(self) -> str:
         self._assert_syncs_true()
+        exp = self.experiment_context
         # TODO turn this into a param, for now each ratio represents 100000 cycles
         ratio_coefficient = 100000
-        total_cycles = ((self.experiment_context.warming_ratio * ratio_coefficient)
-                        + (self.experiment_context.measurement_ratio * ratio_coefficient)) + 1
-        idx = self.experiment_context.idx
-        vanilla_parser = VanillaQemuArgParser(self.experiment_context, idx, total_cycles,
-                                              use_stdio=self.use_stdio)
-        partition_folder = self.experiment_context.get_partition_folder()
-
-        setup_commands = [
-            f"cd {partition_folder}",
-            f'echo "===== qflex idx {idx}: starting in {partition_folder} ====="',
-            f'rm -rf "snapshot_{idx}-flexus"',
-            f"mkdir snapshot_{idx}-flexus",
-            f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
-            f'rm -rf "result_{idx}"',
-            f'mkdir "result_{idx}"',
-        ]
+        total_cycles = ((exp.warming_ratio * ratio_coefficient)
+                        + (exp.measurement_ratio * ratio_coefficient)) + 1
+        idx = exp.idx
+        partition_folder = exp.get_partition_folder()
 
         output = ""
         log_banner = []
@@ -71,6 +64,33 @@ class RunIdxCommand(SimulationCommand):
                 f'echo "===== qflex idx {idx}: stdout =====" >> {self.get_log_file_address()}',
                 f'echo "===== qflex idx {idx}: stderr =====" >> {self.get_err_file_address()}',
             ]
+
+        # Phantom node: no Flexus, no checkpoint conversion — a plain parallel qemu that loads
+        # the per-idx snapshot and advances at the phantom IPC, pairing with the master over
+        # PDES until the master's idx exits.
+        if exp.all_phantom_cores:
+            parser = PhantomTimingArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
+            qemu_cmd = f"{parser.qemu_binary} {parser.get_qemu_base_args()} {output} < /dev/null"
+            return [
+                f"cd {partition_folder}",
+                f'echo "===== qflex idx {idx} (phantom): starting in {partition_folder} ====="',
+            ] + log_banner + [
+                "tick=$(($(date +%s%N) / 1000000))",
+                qemu_cmd,
+                "tock=$(($(date +%s%N) / 1000000))",
+                'echo "Elapsed: $((tock - tick)) ms"',
+            ]
+
+        vanilla_parser = VanillaQemuArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
+        setup_commands = [
+            f"cd {partition_folder}",
+            f'echo "===== qflex idx {idx}: starting in {partition_folder} ====="',
+            f'rm -rf "snapshot_{idx}-flexus"',
+            f"mkdir snapshot_{idx}-flexus",
+            f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
+            f'rm -rf "result_{idx}"',
+            f'mkdir "result_{idx}"',
+        ]
 
         # No gdb wrap. With vanilla-qemu's clean exit handshake the only way
         # qemu returns non-zero is a real crash — let it propagate up through

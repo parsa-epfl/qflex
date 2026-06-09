@@ -23,7 +23,11 @@ def wrap_with_gdb(qemu_invocation: str, use_gdb: bool,
 
 
 class QemuCommonArgParser:
-    def __init__(self, 
+    # Parallel/PDES qemu binary (FW, load, and a phantom node from FW onward).
+    # VanillaQemuArgParser overrides it with the timing binary.
+    qemu_binary = "./qemu-system-aarch64"
+
+    def __init__(self,
                  experiment_context: ExperimentContext,
                  use_stdio: bool = True):
         self.experiment_context = experiment_context
@@ -155,6 +159,16 @@ class QemuCommonArgParser:
         print(qemu_args)
         return qemu_args
 
+    def get_qemu_command(self) -> str:
+        """Full gdb-wrapped qemu invocation for this parser's binary. Polymorphic: the base
+        emits the parallel binary (used as the load-style command for a phantom node from FW
+        onward — no detail plugin), VanillaQemuArgParser emits the timing binary + args."""
+        return wrap_with_gdb(
+            f"{self.qemu_binary} {self.get_qemu_base_args()}",
+            self.experiment_context.use_gdb,
+            interactive_tmux=self.experiment_context.interactive_tmux,
+        )
+
     def quantum_args(self) -> str:
         # TODO move this to its own class
         check_period_quantum_coeff = self.simulation_context.check_period_quantum_coeff
@@ -171,6 +185,7 @@ class QemuCommonArgParser:
 
 
 class VanillaQemuArgParser(QemuCommonArgParser):
+    qemu_binary = "../vanilla-qemu-system-aarch64"
 
     def __init__(self,
                  experiment_context: ExperimentContext,
@@ -211,6 +226,28 @@ class VanillaQemuArgParser(QemuCommonArgParser):
         print("="*50+"QEMU command arguments:"+"="*50)
         print(qemu_args)
         return qemu_args
+
+
+class PhantomTimingArgParser(VanillaQemuArgParser):
+    """Timing-phase parser for a fully-phantom node. Loads the per-idx snapshot with the
+    parallel binary (it supports snapvm-external `-loadvm snapshot_N,on-demand`) and parallel
+    quantum, with no Flexus — i.e. the plain parallel command (no -singlestep / -libqflex),
+    advancing at the phantom IPC. run-idx runs from `partition_<P>/`, so the parallel binary
+    is one level up."""
+    qemu_binary = "../qemu-system-aarch64"
+
+    # get_base_image_arg / get_load_vm inherited from VanillaQemuArgParser: the per-idx snapshot
+    # via snapshot=on,tmp-snapshot-name=snapshot_<idx> + -loadvm snapshot_<idx>,on-demand. The
+    # parallel binary now supports tmp-snapshot-name (ported from the timing fork's block layer),
+    # so this loads the external checkpoint into a transient overlay (base image untouched).
+
+    def quantum_args(self) -> str:
+        # run-idx runs from partition_<P>/, but core_info.csv (the per-core IPC table the RR/icount
+        # path needs) lives in run/. Point the binary at it explicitly so it doesn't depend on cwd.
+        return QemuCommonArgParser.quantum_args(self).rstrip() + ",ipns_file=../core_info.csv "
+
+    def get_qemu_base_args(self) -> str:
+        return QemuCommonArgParser.get_qemu_base_args(self)
         
 
 

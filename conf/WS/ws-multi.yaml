@@ -1,4 +1,8 @@
 extends: WS_base
+_leaf_defaults:
+  population_seconds: 0.1
+  _target_: commands.config.create_experiment_context
+  sample_size: 100
 
 components:
   experiment_context:
@@ -29,6 +33,10 @@ components:
     latencies_ns_list: [100000]
     syncs_list: ["true"]
     wait_for_nodes: [0]
+    # Phantom-only node: from FW onward it runs a plain parallel qemu (no worm
+    # warming, no Flexus); every core advances at the phantom IPC via core_info.csv.
+    all_phantom_cores: true
+    phantom_cpu_ipc: 4
 
 # Boot relaxes the wire (high latency, sync off); other phases keep the per-leaf
 # defaults. Scoped to the per-leaf components so the unnamed group context

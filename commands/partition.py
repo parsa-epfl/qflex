@@ -41,9 +41,12 @@ class PartitionCommand(Executor):
             print(f"mv {self.experiment_folder}/run/partition_*/snapshot_* {self.experiment_folder}/run")
             print(f"rm -rf {self.experiment_folder}/run/partition_*")
             raise FileExistsError("Partitions already exist.")
+        # A fully-phantom node has normal qemu checkpoints only (no worm .uarch / .mem /
+        # Flexus configs), so tell partition.py to skip those.
+        phantom = " --phantom" if self.experiment_context.all_phantom_cores else ""
         return [
             f"cd {self.experiment_folder}",
-            f"{self.experiment_folder}/partition.py {self.partition_count}",
+            f"{self.experiment_folder}/partition.py {self.partition_count}{phantom}",
         ]
 
 
