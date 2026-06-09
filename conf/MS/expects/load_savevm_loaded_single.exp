@@ -1,9 +1,10 @@
 #!/usr/bin/env expect
-# SINGLE-NODE MS load. Loads from `booted`, brings up an in-guest detached tmux
-# session with 2 windows on ONE QEMU guest:
-#   window 0: cloudsuite/media-streaming:server (nginx in docker)
-#   window 1: xusine/media-streaming:client (hammar warm + hammar load)
-# Both communicate over the guest's 127.0.0.1 (docker --net host). Once the
+# SINGLE-NODE MS load. Loads from `booted`, runs two docker containers on ONE
+# QEMU guest:
+#   server: cloudsuite/media-streaming:server (nginx in docker)
+#   client: xusine/media-streaming:client (hammar warm + hammar load)
+# Both communicate over the guest's 127.0.0.1 (docker --net host). Each runs
+# backgrounded with output to a log we tail for its readiness marker; once the
 # hammar load reports tasks created, `savevm loaded` and quit.
 #
 # Wire into a YAML's `load:` section:
@@ -13,12 +14,9 @@
 #
 # Single-node guest has 2 vCPUs (core_count=1 × doubled_vcpu=true). run_server.sh
 # pins the server docker to host cpu 0 (--cpuset-cpus=0); the client's hammar is
-# taskset'd to cpu 1 (the doubled-vcpu phantom). The in-image scripts are NOT
-# rewritten here — guest qcow2 owns the canonical copies.
-#
-# tmux is assumed already installed in the qcow2. The script never attaches
-# into tmux — it drives the session entirely from the alpine shell via
-# `tmux send-keys` and reads window output via `tmux capture-pane -p`.
+# taskset'd to cpu 1 (the doubled-vcpu phantom). run_server.sh / run_client.sh are
+# rewritten here so the in-container commands run as the docker entrypoint
+# (the mounted entrypoint.sh for the server; ms_client_entry.sh for the client).
 #
 # TODO multi-node: hammar load currently pinned to core 1 (vCPU 1, the
 # doubled-vcpu phantom). Multi-node single-core-per-leaf will be core 0.
@@ -82,35 +80,6 @@ proc quit_qemu {monitor_port} {
     }
 }
 
-# Poll a tmux pane for a literal substring. Drives `tmux capture-pane -p` over
-# the alpine shell spawn, accumulates the response, and searches for the
-# needle. Wall-clock deadline (outer `set timeout` doesn't bound Tcl loops).
-# Fail-fasts if the pane shows a bash syntax error.
-proc wait_for_pane_substring {session window needle budget_seconds} {
-    global timeout
-    set saved_timeout $timeout
-    set deadline [expr {[clock seconds] + $budget_seconds}]
-    while {[clock seconds] < $deadline} {
-        send "tmux capture-pane -t ${session}:${window} -p\r"
-        set buf ""
-        set timeout 5
-        expect {
-            -re {.+} { append buf $expect_out(buffer); exp_continue }
-            timeout { }
-        }
-        if {[string first $needle $buf] >= 0} { set timeout $saved_timeout; return }
-        foreach err {"bash: syntax error" "syntax error near unexpected"} {
-            if {[string first $err $buf] >= 0} {
-                set timeout $saved_timeout
-                error "wait_for_pane_substring: bash error in $session:$window: '$err' (waiting for '$needle')"
-            }
-        }
-        sleep 2
-    }
-    set timeout $saved_timeout
-    error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
-}
-
 # --- 1. Connect serial + nudge for shell prompt (post-loadvm) ---------------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
@@ -139,90 +108,67 @@ expect {
     -re {[\$#] +}
 }
 
-# --- 3. Create detached tmux session with 2 windows -------------------------
+# --- 3. Server: nginx via /etc/entrypoint.sh (mounted) as the container entrypoint -
+# run_server.sh rewritten non-interactively (no tmux); the mounted entrypoint.sh
+# does openssl + sed + `nginx -g 'daemon off;'` (foreground), so the backgrounded
+# run is captured running by savevm. cpuset=0 keeps server work on core 0.
 
-send "tmux new-session -d -s ms\r"
-expect {
-    timeout { puts "ERROR: tmux new-session timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "tmux new-window -t ms:1\r"
-expect {
-    timeout { puts "ERROR: tmux new-window 1 timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
+send "cat > ./run_server.sh <<'WRITE_SERVER_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run --rm --net host --cpuset-cpus=0 \\\r"
+send "    -v \$(pwd)/videos:/videos \\\r"
+send "    -v \$(pwd)/entrypoint.sh:/etc/entrypoint.sh \\\r"
+send "    --entrypoint=/etc/entrypoint.sh \\\r"
+send "    cloudsuite/media-streaming:server\r"
+send "WRITE_SERVER_EOF\r"
+expect { timeout { puts "ERROR: writing run_server.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_server.sh\r"
+expect { timeout { puts "ERROR: chmod run_server.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 
-# --- 4. Window 0: server ----------------------------------------------------
-# run_server.sh: docker run -it --entrypoint=bash cloudsuite/media-streaming:server
-# Drops into root shell inside the server container.
-
-send "tmux send-keys -t ms:0 './run_server.sh' Enter\r"
+send "./run_server.sh > /tmp/ms_server.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: server launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "ms: server launched; tailing /tmp/ms_server.out for openssl cert footer '-----'..."
+send "tail -f /tmp/ms_server.out\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: dispatching run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    timeout { puts "ERROR: server didn't print openssl cert footer '-----'"; quit_qemu $monitor_port; exit 1 }
+    -re {-----}
 }
-puts "ms: window 0 (server) launched; waiting for 'root@qflex:/#'..."
-wait_for_pane_substring ms 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
-puts "ms: window 0 at root shell inside server container; dispatching ./etc/entrypoint.sh..."
-
-# entrypoint.sh: openssl + sed + nginx -g 'daemon off;' (foregrounded).
-# `-----` is the cert footer printed by openssl as its last output before the
-# silent seds and the nginx exec. After we see it we trust nginx is up.
-send "tmux send-keys -t ms:0 './etc/entrypoint.sh' Enter\r"
-expect {
-    timeout { puts "ERROR: dispatching entrypoint.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-puts "ms: entrypoint.sh dispatched; waiting for openssl cert footer '-----'..."
-wait_for_pane_substring ms 0 "-----" $BUDGET_WORKLOAD_INIT_S
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 puts "ms: server cert generated; nginx daemon should be up. Settling 5s..."
 sleep 5
 
-# --- 5. Window 1: client — attach so its output streams live to serial -----
-# Selecting ms:1 then `tmux attach -t ms` connects the serial spawn directly
-# to the client pane: typing goes to its stdin, its output streams once to
-# the expect log (no `capture-pane` polling = no repeated buffer dumps).
+# --- 4. Client: warm + hammar load via ms_client_entry.sh as the container entrypoint -
+# The entry's last line (hammar load) stays foreground so the backgrounded client
+# is captured running. taskset -c 1 keeps client work on core 1 (single-node).
 
-send "tmux select-window -t ms:1\r"
-expect {
-    timeout { puts "ERROR: tmux select-window timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "tmux attach -t ms\r"
-
-send "./run_client.sh\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: client container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-puts "ms: window 1 at root shell inside client container; sanity 'ls' for hammar..."
-
-send "ls\r"
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: ls didn't show hammar"; quit_qemu $monitor_port; exit 1 }
-    -re {hammar}
-}
-expect { timeout { } -re {root@qflex:/#} }
-puts "ms: hammar present; dispatching warm..."
-
-# Warm: pre-populates hammar's internal video state. Finishes with
-# 'Compressed history: <N>' then prompt.
+send "cat > ./ms_client_entry.sh <<'WRITE_CLIENT_ENTRY_EOF'\r"
+send "#!/bin/sh\r"
 send "taskset -c 1 ./hammar/target/release/warm ./videos 1\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: warm didn't print 'Compressed history:'"; quit_qemu $monitor_port; exit 1 }
-    -re {Compressed history:}
-}
-puts "ms: warm done; settling 5s before load..."
-sleep 5
-set timeout $BUDGET_PROMPT_S
-expect { timeout { } -re {root@qflex:/#} }
-
-# Load: 4 threads × 8 connections, no encryption. Prints 'All tasks are
-# created.' once per thread (4 total). Gate on all 4 before savevm.
 send "taskset -c 1 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
+send "WRITE_CLIENT_ENTRY_EOF\r"
+expect { timeout { puts "ERROR: writing ms_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./ms_client_entry.sh\r"
+expect { timeout { puts "ERROR: chmod ms_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+
+send "cat > ./run_client.sh <<'WRITE_CLIENT_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run --name media-streaming-client --network host \\\r"
+send "    -v \$(pwd)/videos:/videos \\\r"
+send "    -v \$(pwd)/ms_client_entry.sh:/ms_client_entry.sh \\\r"
+send "    --entrypoint=/ms_client_entry.sh \\\r"
+send "    xusine/media-streaming:client\r"
+send "WRITE_CLIENT_EOF\r"
+expect { timeout { puts "ERROR: writing run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_client.sh\r"
+expect { timeout { puts "ERROR: chmod run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+
+send "./run_client.sh > /tmp/ms_client.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: client launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "ms: client launched; tailing /tmp/ms_client.out for 'All tasks are created.' x4..."
+send "tail -f /tmp/ms_client.out\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 set tasks_created 0
 expect {
@@ -233,12 +179,10 @@ expect {
     }
 }
 puts "ms: tasks created; settling 5s host time before savevm..."
-sleep 5
-
-# Detach (Ctrl-B d) so closing the serial spawn doesn't kill an attached tmux client.
-send "\x02d"
+send "\003"
 set timeout $BUDGET_PROMPT_S
 expect { timeout { } -re {[\$#] +} }
+sleep 5
 
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}

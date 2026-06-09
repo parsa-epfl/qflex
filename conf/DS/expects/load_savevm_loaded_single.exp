@@ -1,9 +1,10 @@
 #!/usr/bin/env expect
-# SINGLE-NODE DS load. Loads from `booted`, brings up an in-guest detached tmux
-# session with 2 windows on ONE QEMU guest:
-#   window 0: abdu1998a/dataserving:server (Cassandra via docker-entrypoint.py)
-#   window 1: abdu1998a/dataserving:client (YCSB warmup + load)
-# Both communicate over the guest's 127.0.0.1 (docker --net host). Once the
+# SINGLE-NODE DS load. Loads from `booted`, runs two docker containers on ONE
+# QEMU guest:
+#   server: abdu1998a/dataserving:server (Cassandra via docker-entrypoint.py)
+#   client: abdu1998a/dataserving:client (YCSB warmup + load)
+# Both communicate over the guest's 127.0.0.1 (docker --net host). Each runs
+# backgrounded with output to a log we tail for its readiness marker; once the
 # YCSB load reports its first throughput line, `savevm loaded` and quit.
 #
 # Wire into a YAML's `load:` section:
@@ -11,9 +12,8 @@
 #     interaction_script: /home/dev/qflex/conf/DS/expects/load_savevm_loaded_single.exp
 #     loadvm_name:        booted
 #
-# Server window is driven headlessly via `tmux send-keys` + `tmux capture-pane`
-# polling. Client window is `tmux attach`ed so its output streams live to the
-# serial spawn (no capture-pane polling). YCSB workload swapped a->c in place.
+# Each container's command is its docker entrypoint (server: docker-entrypoint.py;
+# client: ds_client_entry.sh = warmup + load). YCSB workload swapped a->c in place.
 
 set timeout 900
 
@@ -73,35 +73,6 @@ proc quit_qemu {monitor_port} {
     }
 }
 
-# Poll a tmux pane for a literal substring. Drives `tmux capture-pane -p` over
-# the alpine shell spawn, accumulates the response, and searches for the
-# needle. Wall-clock deadline (outer `set timeout` doesn't bound Tcl loops).
-# Fail-fasts if the pane shows a bash syntax error.
-proc wait_for_pane_substring {session window needle budget_seconds} {
-    global timeout
-    set saved_timeout $timeout
-    set deadline [expr {[clock seconds] + $budget_seconds}]
-    while {[clock seconds] < $deadline} {
-        send "tmux capture-pane -t ${session}:${window} -p\r"
-        set buf ""
-        set timeout 5
-        expect {
-            -re {.+} { append buf $expect_out(buffer); exp_continue }
-            timeout { }
-        }
-        if {[string first $needle $buf] >= 0} { set timeout $saved_timeout; return }
-        foreach err {"bash: syntax error" "syntax error near unexpected"} {
-            if {[string first $err $buf] >= 0} {
-                set timeout $saved_timeout
-                error "wait_for_pane_substring: bash error in $session:$window: '$err' (waiting for '$needle')"
-            }
-        }
-        sleep 2
-    }
-    set timeout $saved_timeout
-    error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
-}
-
 # --- 1. Connect serial + nudge for shell prompt (post-loadvm) ---------------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
@@ -132,102 +103,72 @@ expect {
     -re {[\$#] +}
 }
 
-# --- 3. Create detached tmux session with 2 windows -------------------------
+# --- 3. Server: cassandra via docker-entrypoint.py as the container entrypoint --
+# run_server.sh rewritten non-interactively (no tmux); docker-entrypoint.py
+# execvp's `cassandra -R -f` (foreground), so the backgrounded run keeps the
+# server alive into savevm. cpuset=0 keeps server work on core 0.
 
-send "tmux new-session -d -s ds\r"
-expect {
-    timeout { puts "ERROR: tmux new-session timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "tmux new-window -t ds:1\r"
-expect {
-    timeout { puts "ERROR: tmux new-window 1 timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
+send "cat > ./run_server.sh <<'WRITE_SERVER_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run --cpuset-cpus=0 --net host --name cassandra \\\r"
+send "    --entrypoint=/docker-entrypoint.py \\\r"
+send "    abdu1998a/dataserving:server\r"
+send "WRITE_SERVER_EOF\r"
+expect { timeout { puts "ERROR: writing run_server.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_server.sh\r"
+expect { timeout { puts "ERROR: chmod run_server.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 
-# --- 4. Window 0: server ----------------------------------------------------
-# run_server.sh: docker run -it --cpuset-cpus=0 --net host --name cassandra
-#   --entrypoint bash abdu1998a/dataserving:server
-# Drops into root shell inside the server container.
-
-send "tmux send-keys -t ds:0 './run_server.sh' Enter\r"
+send "./run_server.sh > /tmp/ds_server.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: server launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "ds: server launched; tailing /tmp/ds_server.out for 'Startup complete'..."
+send "tail -f /tmp/ds_server.out\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: dispatching run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    timeout { puts "ERROR: Cassandra didn't print 'Startup complete'"; quit_qemu $monitor_port; exit 1 }
+    -re {Startup complete}
 }
-puts "ds: window 0 (server) launched; waiting for 'root@qflex:/#'..."
-wait_for_pane_substring ds 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
-puts "ds: window 0 at root shell inside server container; dispatching ./docker-entrypoint.py..."
-
-# docker-entrypoint.py rewrites cassandra.yaml/jvm options then execvp's
-# `cassandra -R -f` (foreground). Cassandra prints 'Startup complete' once the
-# node is up and accepting CQL — other log lines come before and after it.
-send "tmux send-keys -t ds:0 './docker-entrypoint.py' Enter\r"
-expect {
-    timeout { puts "ERROR: dispatching docker-entrypoint.py timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-puts "ds: docker-entrypoint.py dispatched; waiting for 'Startup complete'..."
-wait_for_pane_substring ds 0 "Startup complete" $BUDGET_WORKLOAD_INIT_S
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 puts "ds: Cassandra startup complete. Settling 5s..."
 sleep 5
 
-# --- 5. Window 1: client — attach so its output streams live to serial -----
-# Selecting ds:1 then `tmux attach -t ds` connects the serial spawn directly
-# to the client pane: typing goes to its stdin, its output streams once to
-# the expect log (no `capture-pane` polling = no repeated buffer dumps).
+# --- 4. Client: warmup + load via ds_client_entry.sh as the container entrypoint -
+# The entry's last line (./load.sh) stays foreground, so the backgrounded client
+# is captured running. workloada->c swap folded in. cpuset=1 keeps client on core 1.
 
-send "tmux select-window -t ds:1\r"
-expect {
-    timeout { puts "ERROR: tmux select-window timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "tmux attach -t ds\r"
-
-send "./run_client.sh\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: client container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-puts "ds: window 1 at root shell inside client container; running warmup..."
-
-# Warmup: fills Cassandra with 10M records (1KB each ~= 10GB), 16 threads.
-# Retries internally until the seed server accepts. Finishes with
-# 'Warm up is done.' then the prompt.
+send "cat > ./ds_client_entry.sh <<'WRITE_CLIENT_ENTRY_EOF'\r"
+send "#!/bin/sh\r"
 send "./warmup.sh 127.0.0.1 10000000 16\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: warmup didn't print 'Warm up is done.'"; quit_qemu $monitor_port; exit 1 }
-    -re {Warm up is done\.}
-}
-puts "ds: warmup done; waiting for the prompt before loading..."
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: warmup didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-
-# Measure workloadc (100% read); warmup stays stock workloada — ycsb load inserts the same records either way.
 send "sed -i 's#workloads/workloada#workloads/workloadc#' load.sh\r"
-expect {
-    timeout { puts "ERROR: sed load.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-
-# Load: 10M records, 5000 target rps, 16 threads. Starts emitting throughput
-# lines ('... current ops/sec; est completion in ...') ~10s in. Snapshot the
-# guest with the load actively running — FW resumes from this state.
 send "./load.sh 127.0.0.1 10000000 5000 16\r"
+send "WRITE_CLIENT_ENTRY_EOF\r"
+expect { timeout { puts "ERROR: writing ds_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./ds_client_entry.sh\r"
+expect { timeout { puts "ERROR: chmod ds_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+
+send "cat > ./run_client.sh <<'WRITE_CLIENT_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run --cpuset-cpus=1 --net host \\\r"
+send "    -v \$(pwd)/ds_client_entry.sh:/ds_client_entry.sh \\\r"
+send "    --entrypoint=/ds_client_entry.sh \\\r"
+send "    abdu1998a/dataserving:client\r"
+send "WRITE_CLIENT_EOF\r"
+expect { timeout { puts "ERROR: writing run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_client.sh\r"
+expect { timeout { puts "ERROR: chmod run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+
+send "./run_client.sh > /tmp/ds_client.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: client launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "ds: client launched; tailing /tmp/ds_client.out for first throughput line..."
+send "tail -f /tmp/ds_client.out\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: load didn't emit a throughput line"; quit_qemu $monitor_port; exit 1 }
     -re {current ops/sec; est completion in}
 }
 puts "ds: load running (first throughput line seen); savevm loaded now..."
-
-# Detach (Ctrl-B d) so closing the serial spawn doesn't kill an attached tmux client.
-send "\x02d"
+send "\003"
 set timeout $BUDGET_PROMPT_S
 expect { timeout { } -re {[\$#] +} }
 

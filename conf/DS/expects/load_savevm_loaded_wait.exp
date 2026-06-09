@@ -210,61 +210,45 @@ expect {
     -re {\$ +}
 }
 
-# --- 6. Client container on the serial spawn (live output) ------------------
-# run_client.sh drops into the client container's root shell (root@qflex:/#).
+# --- 6. Client: warmup + load via ds_client_entry.sh as the container entrypoint -
+# This leaf is -smp 1 (only CPU 0); pin the container to CPU 0 in the rewrite.
+# The entry's last line (./load.sh) stays foreground so the backgrounded client
+# is captured running. workloada->c swap folded in.
 
-# This leaf is -smp 1 (only CPU 0); run_client.sh pins the container to CPU 1
-# (--cpuset-cpus=1), which docker refuses here. Repin it to CPU 0.
-send "sed -i 's/--cpuset-cpus=1/--cpuset-cpus=0/' run_client.sh\r"
-expect {
-    timeout { puts "ERROR: sed run_client.sh cpuset didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-
-send "./run_client.sh\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: client container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-puts "follower: in client container; swapping YCSB workloada->workloadc in load.sh..."
-
-# Measure workloadc (100% read); warmup stays stock workloada — ycsb load inserts the same records either way.
-send "sed -i 's#workloads/workloada#workloads/workloadc#' load.sh\r"
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: sed load.sh didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-
-# --- 7. Warmup against the server over the wire (192.168.100.1) -------------
-# Fills Cassandra with 10M records, 16 threads. warmup.sh retries cqlsh until
-# the seed server accepts, then runs YCSB load. Finishes with 'Warm up is done.'
-
+send "cat > ./ds_client_entry.sh <<'WRITE_CLIENT_ENTRY_EOF'\r"
+send "#!/bin/sh\r"
 send "./warmup.sh 192.168.100.1 10000000 16\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: warmup didn't print 'Warm up is done.'"; quit_qemu $monitor_port; exit 1 }
-    -re {Warm up is done\.}
-}
-puts "follower: warmup done; waiting for the prompt before loading..."
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: warmup didn't return prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-
-# --- 8. Load against the server over the wire (192.168.100.1) ---------------
-# Starts emitting throughput lines ('... current ops/sec; est completion in ...')
-# ~10s in. Snapshot the guest with the load actively running.
-
+send "sed -i 's#workloads/workloada#workloads/workloadc#' load.sh\r"
 send "./load.sh 192.168.100.1 10000000 5000 16\r"
+send "WRITE_CLIENT_ENTRY_EOF\r"
+expect { timeout { puts "ERROR: writing ds_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./ds_client_entry.sh\r"
+expect { timeout { puts "ERROR: chmod ds_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+
+send "cat > ./run_client.sh <<'WRITE_CLIENT_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run --cpuset-cpus=0 --net host \\\r"
+send "    -v \$(pwd)/ds_client_entry.sh:/ds_client_entry.sh \\\r"
+send "    --entrypoint=/ds_client_entry.sh \\\r"
+send "    abdu1998a/dataserving:client\r"
+send "WRITE_CLIENT_EOF\r"
+expect { timeout { puts "ERROR: writing run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_client.sh\r"
+expect { timeout { puts "ERROR: chmod run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+
+send "./run_client.sh > /tmp/ds_client.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: client launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "follower: client launched; tailing /tmp/ds_client.out for first throughput line..."
+send "tail -f /tmp/ds_client.out\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: load didn't emit a throughput line"; quit_qemu $monitor_port; exit 1 }
     -re {current ops/sec; est completion in}
 }
 puts "follower: load running (first throughput line seen); signalling master to savevm."
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 
 if {[catch {set f [open $client_running_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $client_running_flag: $err"; quit_qemu $monitor_port; exit 1

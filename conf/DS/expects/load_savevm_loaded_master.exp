@@ -211,28 +211,33 @@ expect {
     -re {[\$#] +}
 }
 
-# --- 6. Server on the serial spawn (live output, no tmux/polling) -----------
-# run_server.sh: docker run -it --cpuset-cpus=0 --net host --name cassandra
-#   --entrypoint bash abdu1998a/dataserving:server -> root shell in container.
-# docker-entrypoint.py rewrites cassandra.yaml then execvp's `cassandra -R -f`
-# (foreground). Its log streams live to the serial; we wait for 'Startup
-# complete' on that stream. The server stays foreground on the serial through
-# savevm (we never close the serial), so the snapshot captures it running.
+# --- 6. Server: cassandra via docker-entrypoint.py entrypoint, backgrounded + tailed -
+# run_server.sh rewritten non-interactively (no tmux); docker-entrypoint.py
+# execvp's `cassandra -R -f` (foreground), so the backgrounded run is captured
+# running by savevm. cpuset=0 keeps server work on core 0.
 
-send "./run_server.sh\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: server container didn't reach root prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/#}
-}
-puts "ds: server container at root shell; dispatching ./docker-entrypoint.py..."
+send "cat > ./run_server.sh <<'WRITE_SERVER_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run --cpuset-cpus=0 --net host --name cassandra \\\r"
+send "    --entrypoint=/docker-entrypoint.py \\\r"
+send "    abdu1998a/dataserving:server\r"
+send "WRITE_SERVER_EOF\r"
+expect { timeout { puts "ERROR: writing run_server.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_server.sh\r"
+expect { timeout { puts "ERROR: chmod run_server.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 
-send "./docker-entrypoint.py\r"
+send "./run_server.sh > /tmp/ds_server.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: server launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "ds: server launched; tailing /tmp/ds_server.out for 'Startup complete'..."
+send "tail -f /tmp/ds_server.out\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: Cassandra didn't print 'Startup complete'"; quit_qemu $monitor_port; exit 1 }
     -re {Startup complete}
 }
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 puts "ds: Cassandra startup complete. Settling 5s..."
 sleep 5
 
@@ -248,9 +253,8 @@ puts "master: wrote $server_ready_flag; waiting for follower's YCSB load to star
 wait_for_file $client_running_flag $BUDGET_WORKLOAD_INIT_S
 puts "master: follower's load is running; proceeding to savevm loaded."
 
-# Keep the serial spawn open — cassandra runs foreground on it; closing it
-# could tear down the server before savevm captures it. savevm goes over the
-# separate monitor port.
+# Keep the serial spawn open; cassandra runs as the backgrounded docker job and
+# savevm goes over the separate monitor port.
 
 # --- 8. savevm loaded via the monitor ---------------------------------------
 

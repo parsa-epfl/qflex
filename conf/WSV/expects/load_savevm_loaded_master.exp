@@ -10,13 +10,15 @@
 #
 # === IN-IMAGE WORKLOAD SCRIPT REFERENCE ======================================
 # Three baked scripts live in /home/qflex/ inside the alpine guest. This expect
-# DRIVES them via `tmux send-keys` but ALSO REWRITES one (./run_server.sh) in
-# place before launch — see heredoc further down. If you need to change what
+# runs each as a detached docker container (no tmux) and REWRITES two
+# (./run_database.sh -> -dt; ./run_server.sh -> advertised addr 192.168.100.1)
+# in place before launch — see heredocs further down. If you need to change what
 # any of these do for this run, edit the heredoc HERE, not the in-image baked
 # file: the qcow2 owns the canonical copy and a fresh loadvm wipes any guest-
 # side edits to the baked files.
 #
-# ./run_database.sh   — NOT REWRITTEN.
+# ./run_database.sh   — REWRITTEN -it -> -dt in section 5 below (so MariaDB stays
+#   detached and the ALTER USER runs as a post-start docker exec). Baked version:
 #   #!/bin/sh
 #   docker run -it --net=host --rm --name=database_server \
 #       -v $(pwd)/backup:/backup \
@@ -35,7 +37,7 @@
 #   Same rationale as ./run_database.sh — local-only listener under --net=host
 #   is fine because web_server connects from the same alpine namespace.
 #
-# ./run_server.sh     — REWRITTEN by heredoc in section 6 below.
+# ./run_server.sh     — REWRITTEN by heredoc in section 7 below.
 #   Baked version (passes 127.0.0.1 as the http-server bind IP):
 #   #!/bin/sh
 #   docker run -dt --rm --net=host --name=web_server \
@@ -49,7 +51,7 @@
 #   alone makes browse/login work over the wire, but it does NOT change Elgg's
 #   site URL: the image bakes $CONFIG->wwwroot = https://127.0.0.1:8443/ in
 #   settings.php, and Elgg builds its login-redirect + notifications URLs from
-#   wwwroot. So a SEPARATE step (section 8b) rewrites settings.php's wwwroot to
+#   wwwroot. So a SEPARATE step (section 7b) rewrites settings.php's wwwroot to
 #   192.168.100.1 after the container starts, or every getNotifications fails
 #   (the follower chases its own 127.0.0.1). DB + memcache args (positions 1
 #   and 2) stay 127.0.0.1 — local to the master, no cross-wire reachability
@@ -150,32 +152,6 @@ proc wait_for_substring {path needle budget_seconds} {
     error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
 }
 
-# Poll a tmux pane for a literal substring, fail-fast on bash syntax errors.
-proc wait_for_pane_substring {session window needle budget_seconds} {
-    global timeout
-    set saved_timeout $timeout
-    set deadline [expr {[clock seconds] + $budget_seconds}]
-    while {[clock seconds] < $deadline} {
-        send "tmux capture-pane -t ${session}:${window} -p\r"
-        set buf ""
-        set timeout 5
-        expect {
-            -re {.+} { append buf $expect_out(buffer); exp_continue }
-            timeout { }
-        }
-        if {[string first $needle $buf] >= 0} { set timeout $saved_timeout; return }
-        foreach err {"bash: syntax error" "syntax error near unexpected"} {
-            if {[string first $err $buf] >= 0} {
-                set timeout $saved_timeout
-                error "wait_for_pane_substring: bash error in $session:$window: '$err' (waiting for '$needle')"
-            }
-        }
-        sleep 2
-    }
-    set timeout $saved_timeout
-    error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
-}
-
 # --- 1. Connect serial + nudge for post-loadvm prompt -----------------------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
@@ -273,35 +249,53 @@ expect { timeout { } -re {[\$#] +} }
 sleep 2
 puts "master: nc preflight passed; starting tmux + cloudsuite services."
 
-# --- 5. Create detached tmux session with 3 windows -------------------------
+# --- 5. Database: detached container, then ALTER USER via docker exec (retry) -
+# run_database.sh rewritten -it -> -dt (no tmux); MariaDB starts via the image
+# entrypoint. The ALTER retries until MariaDB accepts and echoes a marker.
+# cpuset=0 keeps server-side work on core 0.
 
-send "tmux new-session -d -s wsv\r";  expect -re {[\$#] +}
-send "tmux new-window -t wsv:1\r";    expect -re {[\$#] +}
-send "tmux new-window -t wsv:2\r";    expect -re {[\$#] +}
+send "cat > ./run_database.sh <<'WRITE_DB_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run -dt --net=host --rm --name=database_server \\\r"
+send "  -v \$(pwd)/backup:/backup \\\r"
+send "  -v \$(pwd)/db/entrypoint.sh:/etc/entrypoint.sh \\\r"
+send "  --cpuset-cpus=0 \\\r"
+send "  cloudsuite/web-serving:db_server\r"
+send "WRITE_DB_EOF\r"
+expect { timeout { puts "ERROR: writing run_database.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_database.sh\r"
+expect { timeout { puts "ERROR: chmod run_database.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "./run_database.sh\r"
+expect { timeout { puts "ERROR: launching database didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 
-# --- 6. Window 0: database --------------------------------------------------
+puts "wsv: database launched; running ALTER USER (retry until MariaDB accepts)..."
+# Foreground retry loop: docker exec runs the ALTER against the detached
+# container (which keeps running after the exec returns). The retry rides out
+# MariaDB's startup. Streams live to the serial; ends on the marker.
+send "until docker exec database_server mysql -u root -e \"ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD(''); FLUSH PRIVILEGES;\"; do sleep 5; done; echo WSV_DB_ALTERED\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: mysql ALTER USER never succeeded"; quit_qemu $monitor_port; exit 1 }
+    -re {WSV_DB_ALTERED}
+}
+set timeout $BUDGET_PROMPT_S
+send "\r"; expect { timeout { } -re {[\$#] +} }
+puts "wsv: mysql ALTER USER done."
 
-send "tmux send-keys -t wsv:0 './run_database.sh' Enter\r"
-expect -re {[\$#] +}
-puts "wsv: window 0 (database) launched; waiting for 'root@qflex:/#'..."
-wait_for_pane_substring wsv 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
-puts "wsv: window 0 at root shell; sending mysql ALTER USER..."
+# --- 6. Memcached: detached container (no tmux) -----------------------------
+# run_memcached.sh is already `docker run -dt` (cpuset=0), returns immediately.
 
-send "tmux send-keys -t wsv:0 \"mysql -u root -e \\\"ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD(''); FLUSH PRIVILEGES;\\\"\" Enter\r"
-expect -re {[\$#] +}
-sleep 5
-wait_for_pane_substring wsv 0 "root@qflex:/#" $BUDGET_PROMPT_S
-puts "wsv: mysql ALTER USER returned."
-
-# --- 7. Window 1: memcached (detached docker) -------------------------------
-
-send "tmux send-keys -t wsv:1 './run_memcached.sh && echo WSV_MEMCACHED_OK' Enter\r"
-expect -re {[\$#] +}
-puts "wsv: window 1 (memcached) launched; waiting for container-start confirmation..."
-wait_for_pane_substring wsv 1 "WSV_MEMCACHED_OK" $BUDGET_WORKLOAD_INIT_S
+send "./run_memcached.sh && echo WSV_MEMCACHED_OK\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: memcached didn't confirm start"; quit_qemu $monitor_port; exit 1 }
+    -re {WSV_MEMCACHED_OK}
+}
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 puts "wsv: memcached container started."
 
-# --- 8. Window 2: web_server (detached docker) ------------------------------
+# --- 7. Web_server: detached container (no tmux) ----------------------------
 # Rewrite ./run_server.sh so the web server's advertised address (3rd bootstrap
 # arg) is 192.168.100.1 — the address the follower's faban connects to. Was
 # 127.0.0.1 (loopback-only, unreachable from the wire); 0.0.0.0 connected at
@@ -327,20 +321,25 @@ expect {
 }
 sleep 5
 
-send "tmux send-keys -t wsv:2 './run_server.sh && echo WSV_SERVER_OK' Enter\r"
-expect -re {[\$#] +}
-puts "wsv: window 2 (web_server) launched; waiting for container-start confirmation..."
-wait_for_pane_substring wsv 2 "WSV_SERVER_OK" $BUDGET_WORKLOAD_INIT_S
+send "./run_server.sh && echo WSV_SERVER_OK\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: web_server didn't confirm start"; quit_qemu $monitor_port; exit 1 }
+    -re {WSV_SERVER_OK}
+}
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 puts "wsv: web_server container started."
 
-# --- 8b. Point Elgg's wwwroot at the master's wire IP -----------------------
+# --- 7b. Point Elgg's wwwroot at the master's wire IP -----------------------
 # The web_server image bakes $CONFIG->wwwroot = https://127.0.0.1:8443/ in
 # settings.php; Elgg builds its login-redirect + notifications URLs from it, so
 # the follower's faban would chase its own 127.0.0.1 and every getNotifications
 # would fail (browse works because it hits the target directly). Rewrite wwwroot
 # to 192.168.100.1 once Elgg has written settings.php, reload php-fpm, then wait
 # until nginx is actually listening on :8443 (don't signal the follower against a
-# not-yet-serving port). Single-node does NOT need this (client targets 127.0.0.1).
+# not-yet-serving port). The docker-exec fixups target the already-running
+# detached container, so they stay post-start (not the container entrypoint).
 send "cat > ./fix_wwwroot.sh <<'WSV_FIX_EOF'\r"
 send "#!/bin/sh\r"
 send "until docker exec web_server grep -q '127.0.0.1:8443' /usr/share/nginx/html/elgg/elgg-config/settings.php 2>/dev/null; do sleep 5; done\r"

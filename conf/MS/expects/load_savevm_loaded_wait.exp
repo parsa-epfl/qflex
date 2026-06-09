@@ -234,64 +234,45 @@ expect {
 set timeout $BUDGET_PROMPT_S
 send "\r"; expect { timeout { } -re {# +} }
 
-# --- 6. Client container (bash entrypoint, privileged) + DNS + tools --------
-# entrypoint bash so we can set up iptables inside; --privileged/--cap-add NET_ADMIN
-# for the nat table. Container prompt assumed root@<host># (Debian root bash).
-send "docker run -it --name media-streaming-client --entrypoint bash --network host --privileged --cap-add=NET_ADMIN -v \$(pwd)/videos:/videos xusine/media-streaming:client\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: client container didn't reach a bash prompt"; quit_qemu $monitor_port; exit 1 }
-    -re {root@}
-}
-set timeout $BUDGET_PROMPT_S
-send "\r"; expect { timeout { } -re {# +} }
-puts "follower: in client container; setting DNS + installing tools..."
-send "echo 'nameserver 8.8.8.8' > /etc/resolv.conf\r"; send "\r"; expect -re {# +}
-# Marker-gate apt: its progress bars contain '# ' and would false-match a bare prompt
-# regex. The PID marker can't appear in apt output or the typed echo (literal `$$`).
-send "apt-get update; printf 'APTDONE%s\\n' \"\$\$\"\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: apt-get update timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {APTDONE[0-9]+}
-}
-set timeout $BUDGET_PROMPT_S
-send "\r"; expect { timeout { } -re {# +} }
-send "apt-get install -y iptables iputils-ping netcat-openbsd; printf 'APTDONE%s\\n' \"\$\$\"\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: apt-get install timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {APTDONE[0-9]+}
-}
-set timeout $BUDGET_PROMPT_S
-send "\r"; expect { timeout { } -re {# +} }
+# --- 6. Client container: DNAT setup via ms_client_entry.sh, then stays alive --
+# Entry does DNS + apt + iptables DNAT (localhost -> master), echoes a marker, then
+# `sleep infinity` so the container (PID 1) survives for the docker-exec workload.
+# --privileged/--cap-add NET_ADMIN for the nat table; -v videos for hammar.
 
-# --- 7. DNAT localhost -> master (192.168.100.1) inside the container -------
-send "cat > fix.sh << 'EOF'\r"
+send "cat > ./ms_client_entry.sh <<'WRITE_CLIENT_ENTRY_EOF'\r"
 send "#!/bin/sh\r"
+send "echo 'nameserver 8.8.8.8' > /etc/resolv.conf\r"
+send "apt-get update\r"
+send "apt-get install -y iptables iputils-ping netcat-openbsd\r"
 send "sysctl -w net.ipv4.conf.all.route_localnet=1\r"
 send "iptables -t nat -A OUTPUT -d 127.0.0.1 -j DNAT --to-destination 192.168.100.1\r"
 send "iptables -t nat -A POSTROUTING -d 192.168.100.1 -j MASQUERADE\r"
-send "EOF\r"
-send "\r"
-expect { timeout { puts "ERROR: writing fix.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {# +} }
-send "chmod +x fix.sh\r"; send "\r"; expect -re {# +}
-send "./fix.sh\r"
+send "echo MS_CLIENT_READY\r"
+send "sleep infinity\r"
+send "WRITE_CLIENT_ENTRY_EOF\r"
+expect { timeout { puts "ERROR: writing ms_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {# +} }
+send "chmod +x ./ms_client_entry.sh\r"; send "\r"; expect { timeout { } -re {# +} }
+
+send "docker run -d --name media-streaming-client --network host --privileged --cap-add=NET_ADMIN \\\r"
+send "    -v \$(pwd)/videos:/videos \\\r"
+send "    -v \$(pwd)/ms_client_entry.sh:/ms_client_entry.sh \\\r"
+send "    --entrypoint=/ms_client_entry.sh \\\r"
+send "    xusine/media-streaming:client\r"
+set timeout $BUDGET_PROMPT_S
+send "\r"; expect { timeout { puts "ERROR: docker run -d didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {# +} }
+puts "follower: client container launched; tailing docker logs for MS_CLIENT_READY (apt+iptables)..."
+send "docker logs -f media-streaming-client\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: client setup didn't reach MS_CLIENT_READY (apt/iptables failed)"; quit_qemu $monitor_port; exit 1 }
+    -re {MS_CLIENT_READY}
+}
+send "\003"
 set timeout $BUDGET_PROMPT_S
 send "\r"; expect { timeout { } -re {# +} }
-# Re-add in the nft backend (the default 'iptables'); clear legacy-backend dupes first.
-send "iptables-legacy -t nat -F OUTPUT\r";      send "\r"; expect { timeout { } -re {# +} }
-send "iptables-legacy -t nat -F POSTROUTING\r"; send "\r"; expect { timeout { } -re {# +} }
-send "sysctl -w net.ipv4.conf.all.route_localnet=1\r"; send "\r"; expect -re {# +}
-send "iptables -t nat -A OUTPUT -d 127.0.0.1 -j DNAT --to-destination 192.168.100.1\r"; send "\r"; expect -re {# +}
-send "iptables -t nat -A POSTROUTING -d 192.168.100.1 -j MASQUERADE\r"; send "\r"; expect -re {# +}
-send "iptables -t nat -L OUTPUT -v -n\r";      send "\r"; expect -re {# +}
-send "iptables -t nat -L POSTROUTING -v -n\r"; send "\r"; expect -re {# +}
 
-# --- 8. Verify the remap: localhost must now traverse the wire (non-0 latency)
-# ping 127.0.0.1 -> DNAT -> master. A ~0.0ms result means it stayed on loopback
-# (DNAT not applied); require min latency above a small threshold.
-send "ping 127.0.0.1 -i 0.05 -W 100 -c 10\r"
+# --- 7. Verify the DNAT remap from inside the container (non-0 latency = wire) --
+send "docker exec media-streaming-client ping 127.0.0.1 -i 0.05 -W 100 -c 10\r"
 set timeout 150
 expect {
     timeout { puts "ERROR: ping 127.0.0.1 timed out"; quit_qemu $monitor_port; exit 1 }
@@ -312,7 +293,7 @@ expect {
 }
 set timeout $BUDGET_PROMPT_S
 send "\r"; expect { timeout { } -re {# +} }
-send "ping 192.168.100.1 -i 0.05 -W 100 -c 10\r"
+send "docker exec media-streaming-client ping 192.168.100.1 -i 0.05 -W 100 -c 10\r"
 set timeout 150
 expect {
     timeout { puts "ERROR: ping 192.168.100.1 timed out"; quit_qemu $monitor_port; exit 1 }
@@ -334,9 +315,9 @@ expect {
 set timeout $BUDGET_PROMPT_S
 send "\r"; expect { timeout { } -re {# +} }
 
-# --- 9. nc data-path on :444 (127.0.0.1 -> DNAT -> master) ------------------
+# --- 8. nc data-path on :444 (127.0.0.1 -> DNAT -> master) ------------------
 wait_for_file $nc_ready_flag $BUDGET_WORKLOAD_INIT_S
-send "echo 'hello world' | nc -w 10 127.0.0.1 444\r"
+send "docker exec media-streaming-client sh -c \"echo 'hello world' | nc -w 10 127.0.0.1 444\"\r"
 puts "follower: sent 'hello world' to 127.0.0.1:444 (DNAT->master); waiting for nc_ok..."
 wait_for_file $nc_ok_flag $BUDGET_WORKLOAD_INIT_S
 send "\003"
@@ -344,15 +325,10 @@ set timeout $BUDGET_PROMPT_S
 send "\r"; expect { timeout { } -re {# +} }
 puts "follower: master confirmed nc (nc_ok); starting warm/load."
 
-# --- 10. Warm + load (hammar; localhost -> DNAT -> master), pinned to cpu 0 -
-send "ls\r"
-set timeout $BUDGET_PROMPT_S
-expect {
-    timeout { puts "ERROR: ls didn't show hammar"; quit_qemu $monitor_port; exit 1 }
-    -re {hammar}
-}
-send "\r"; expect { timeout { } -re {# +} }
-send "taskset -c 0 ./hammar/target/release/warm ./videos 1\r"
+# --- 9. Warm + load (hammar; localhost -> DNAT -> master), pinned to cpu 0 ---
+# warm runs to completion via docker exec; the hammar load is backgrounded + tailed
+# so the container is captured running it. cpuset core 0 (single-core leaf).
+send "docker exec media-streaming-client taskset -c 0 ./hammar/target/release/warm ./videos 1\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: warm didn't print 'Compressed history:'"; quit_qemu $monitor_port; exit 1 }
@@ -363,7 +339,10 @@ sleep 5
 set timeout $BUDGET_PROMPT_S
 send "\r"; expect { timeout { } -re {# +} }
 # TODO this needs to be transferred to correctly use the load script instead of hardcoding the hammar command here. there is a current bug for 1 core in that script I think
-send "taskset -c 0 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
+send "docker exec media-streaming-client taskset -c 0 ./hammar/target/release/hammar ./videos/logs 4 8 false > /tmp/ms_workload.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: hammar load didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {# +} }
+puts "follower: load launched; tailing /tmp/ms_workload.out for 'All tasks are created.' x4..."
+send "tail -f /tmp/ms_workload.out\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 set tasks_created 0
 expect {
@@ -374,6 +353,9 @@ expect {
     }
 }
 puts "follower: all 4 tasks created; client load done."
+send "\003"
+set timeout $BUDGET_PROMPT_S
+send "\r"; expect { timeout { } -re {# +} }
 
 if {[catch {set f [open $client_done_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $client_done_flag: $err"; quit_qemu $monitor_port; exit 1

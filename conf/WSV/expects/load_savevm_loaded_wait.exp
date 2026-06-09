@@ -215,15 +215,27 @@ puts "follower: waiting for $server_ready_flag..."
 wait_for_file $server_ready_flag $BUDGET_WORKLOAD_INIT_S
 puts "follower: master's server-ready signal received; launching faban client."
 
-# --- 6. Rewrite ./run_client.sh so --cpuset-cpus=0 (was 1) — follower is -smp 1.
+# --- 6. faban client via wsv_faban_entry.sh as the container entrypoint ------
+# Rewrite ./run_client.sh: --cpuset-cpus=0 (follower is -smp 1) and mount the
+# entry as the container entrypoint (no interactive bash). The benchmark (steady)
+# stays foreground so the backgrounded container is captured running.
+
+send "cat > ./wsv_faban_entry.sh <<'WRITE_FABAN_ENTRY_EOF'\r"
+send "#!/bin/sh\r"
+send "./run/entrypoint.sh 192.168.100.1 4 --encryption=1 --ramp-up=120 --ramp-down=1800 --steady=86400 --oper=run --min=0 --max=0 --type=THINKTIME\r"
+send "WRITE_FABAN_ENTRY_EOF\r"
+expect { timeout { puts "ERROR: writing wsv_faban_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./wsv_faban_entry.sh\r"
+expect { timeout { puts "ERROR: chmod wsv_faban_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 
 send "cat > ./run_client.sh <<'WRITE_CLIENT_EOF'\r"
 send "#!/bin/sh\r"
 send "\r"
-send "docker run -it --net=host --rm --name=faban_client \\\r"
+send "docker run --net=host --rm --name=faban_client \\\r"
 send "    -v \$(pwd)/client/gen.test_server.py:/web20_benchmark/run/gen \\\r"
+send "    -v \$(pwd)/wsv_faban_entry.sh:/wsv_faban_entry.sh \\\r"
 send "    --cpuset-cpus=0 \\\r"
-send "    --entrypoint=bash \\\r"
+send "    --entrypoint=/wsv_faban_entry.sh \\\r"
 send "    cloudsuite/web-serving:faban_client\r"
 send "WRITE_CLIENT_EOF\r"
 expect {
@@ -237,21 +249,15 @@ expect {
 }
 sleep 5
 
-# --- 7. Run faban client on serial spawn (no tmux on follower) -------------
+# --- 7. Run faban (backgrounded), tail for a SUCCESSFUL client op ----------
 
-send "./run_client.sh\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: faban container prompt didn't arrive"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/web20_benchmark#}
-}
-puts "follower: faban container ready; dispatching entrypoint.sh..."
-
-send "./run/entrypoint.sh 192.168.100.1 4 --encryption=1 --ramp-up=120 --ramp-down=1800 --steady=86400 --oper=run --min=0 --max=0 --type=THINKTIME\r"
+send "./run_client.sh > /tmp/wsv_faban.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: faban launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "follower: faban launched; tailing /tmp/wsv_faban.out for a SUCCESSFUL client op (Successfully browsed Elgg)..."
+send "tail -f /tmp/wsv_faban.out\r"
 # 'Ramp up completed' is a TIMER, not proof of success — faban prints it even
 # when every request fails. The real proof the client did work is
 # 'Successfully browsed Elgg'. Gate on that FIRST; do not weaken this gate.
-puts "follower: entrypoint.sh dispatched; waiting for a SUCCESSFUL client op (Successfully browsed Elgg)..."
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: client never logged 'Successfully browsed Elgg' -- workload is broken (Ramp up completed alone is NOT success)"; quit_qemu $monitor_port; exit 1 }
@@ -262,6 +268,9 @@ expect {
     -re {Ramp up completed}
 }
 puts "follower: ramp-up complete WITH verified successful client ops; writing $ramp_up_done_flag."
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 
 if {[catch {set f [open $ramp_up_done_flag "w"]; close $f} err]} {
     puts "ERROR: could not write $ramp_up_done_flag: $err"; quit_qemu $monitor_port; exit 1

@@ -1,44 +1,34 @@
 #!/usr/bin/env expect
-# SINGLE-NODE WSV load. Loads from `booted`, brings up an in-guest detached tmux
-# session with 4 windows, runs the cloudsuite/web-serving stack across them
-# (database, memcached, web_server, faban_client), waits for the faban
-# benchmark's ramp-up, then `savevm loaded` over the monitor and quits.
+# SINGLE-NODE WSV load. Loads from `booted`, runs the cloudsuite/web-serving
+# stack as docker containers on ONE guest (database, memcached, web_server
+# detached; faban_client backgrounded with its output tailed), waits for the
+# faban benchmark's ramp-up, then `savevm loaded` over the monitor and quits.
 #
 # Wire into a YAML's `load:` section:
 #   experiment_context:
 #     interaction_script: /home/dev/qflex/conf/WSV/expects/load_savevm_loaded_single.exp
 #     loadvm_name:        booted
 #
-# Single-node guest has 2 vCPUs (core_count=1 × doubled_vcpu=true). The
-# in-image ./run_*.sh scripts already pin db/memcached/web_server to cpu 0 and
-# faban_client to cpu 1 — no rewrite needed.
-#
-# tmux is assumed already installed in the qcow2 (manually by the user). The
-# script never attaches into tmux — it drives the session entirely from the
-# alpine shell via `tmux send-keys` and reads window output via
-# `tmux capture-pane -p`. That keeps the serial spawn predictable and avoids
-# Ctrl-B escape sequences over telnet.
+# Single-node guest has 2 vCPUs (core_count=1 × doubled_vcpu=true): db/memcached/
+# web_server on cpu 0, faban_client on cpu 1.
 #
 # === IN-IMAGE WORKLOAD SCRIPT REFERENCE ======================================
-# Four baked scripts live in /home/qflex/ inside the alpine guest. Single-node
-# runs all four on ONE guest and they all communicate via 127.0.0.1; NONE are
-# rewritten here. If you need to change any of them for this run, you'd add a
-# heredoc-rewrite right before the corresponding tmux send-keys dispatch (same
-# pattern as the multi-node master/wait scripts). Don't edit the in-image
-# baked file directly — the qcow2 owns the canonical copy and a fresh loadvm
+# Four baked scripts live in /home/qflex/ inside the alpine guest, all
+# communicating via 127.0.0.1. If you need to change any of them for this run,
+# edit the heredoc HERE — the qcow2 owns the canonical copy and a fresh loadvm
 # wipes guest-side edits.
 #
-# ./run_database.sh   — NOT REWRITTEN. cpuset=0 fits -smp 2; mariadb listens on
-#   127.0.0.1; web_server connects to it locally.
-# ./run_memcached.sh  — NOT REWRITTEN. cpuset=0; memcached listens on 127.0.0.1.
-# ./run_server.sh     — NOT REWRITTEN. Baked bootstrap arg `127.0.0.1` is fine
-#   because faban_client connects via 127.0.0.1 too (same guest, same --net=host
-#   namespace). Multi-node DOES rewrite this — the web-server address arg
-#   becomes 192.168.100.1 (the master's PDES IP, == the follower's faban
-#   target). See load_savevm_loaded_master.exp for that variant.
-# ./run_client.sh     — NOT REWRITTEN. cpuset=1 works because -smp 2 has cpu 1.
-#   The faban benchmark is dispatched via `./run/entrypoint.sh 127.0.0.1 4 ...`
-#   (target IP = local) at the entrypoint.sh dispatch line below.
+# ./run_database.sh   — REWRITTEN to `docker run -dt` (was -it); MariaDB starts
+#   via the image entrypoint and the ALTER USER runs as a post-start docker exec.
+#   cpuset=0.
+# ./run_memcached.sh  — NOT REWRITTEN. cpuset=0; already `docker run -dt`.
+# ./run_server.sh     — NOT REWRITTEN. cpuset=0; already `docker run -dt`. Baked
+#   bootstrap arg `127.0.0.1` is fine (faban_client connects via 127.0.0.1 too,
+#   same --net=host namespace). Multi-node DOES rewrite this to 192.168.100.1
+#   (the master's PDES IP). See load_savevm_loaded_master.exp for that variant.
+# ./run_client.sh     — REWRITTEN to mount wsv_faban_entry.sh as the container
+#   entrypoint (no interactive bash). cpuset=1. The faban benchmark is launched
+#   by the entry script via `./run/entrypoint.sh 127.0.0.1 4 ...` (target = local).
 # =============================================================================
 
 set timeout 900
@@ -100,36 +90,6 @@ proc quit_qemu {monitor_port} {
     }
 }
 
-# Poll a tmux pane for a literal substring. Drives `tmux capture-pane -p` over
-# the alpine shell spawn, accumulates the response, and searches for the
-# needle. Wall-clock deadline (outer `set timeout` doesn't bound Tcl loops).
-# Fail-fasts if the pane shows a bash syntax error — a misquoted send-keys
-# would otherwise spin the loop until the workload-init budget expires.
-proc wait_for_pane_substring {session window needle budget_seconds} {
-    global timeout
-    set saved_timeout $timeout
-    set deadline [expr {[clock seconds] + $budget_seconds}]
-    while {[clock seconds] < $deadline} {
-        send "tmux capture-pane -t ${session}:${window} -p\r"
-        set buf ""
-        set timeout 5
-        expect {
-            -re {.+} { append buf $expect_out(buffer); exp_continue }
-            timeout { }
-        }
-        if {[string first $needle $buf] >= 0} { set timeout $saved_timeout; return }
-        foreach err {"bash: syntax error" "syntax error near unexpected"} {
-            if {[string first $err $buf] >= 0} {
-                set timeout $saved_timeout
-                error "wait_for_pane_substring: bash error in $session:$window: '$err' (waiting for '$needle')"
-            }
-        }
-        sleep 2
-    }
-    set timeout $saved_timeout
-    error "wait_for_pane_substring: '$needle' never in $session:$window within ${budget_seconds}s"
-}
-
 # --- 1. Connect serial + nudge for shell prompt (post-loadvm) ---------------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
@@ -155,79 +115,62 @@ send "docker rm \$(docker ps -a -q) 2>/dev/null\r"; send "\r"
 expect { timeout { puts "ERROR: docker rm didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 puts "wsv: cleared leftover containers; starting services fresh."
 
-# --- 2. Create detached tmux session with 4 windows -------------------------
+# --- 2. Database: detached container, then ALTER USER via docker exec (retry) -
+# run_database.sh rewritten -it -> -dt (no tmux); the ALTER retries until MariaDB
+# accepts and echoes a marker. cpuset=0 keeps server-side work on core 0.
 
-send "tmux new-session -d -s wsv\r"
-expect {
-    timeout { puts "ERROR: tmux new-session timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "tmux new-window -t wsv:1\r"
-expect {
-    timeout { puts "ERROR: tmux new-window 1 timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "tmux new-window -t wsv:2\r"
-expect {
-    timeout { puts "ERROR: tmux new-window 2 timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-send "tmux new-window -t wsv:3\r"
-expect {
-    timeout { puts "ERROR: tmux new-window 3 timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
+send "cat > ./run_database.sh <<'WRITE_DB_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run -dt --net=host --rm --name=database_server \\\r"
+send "  -v \$(pwd)/backup:/backup \\\r"
+send "  -v \$(pwd)/db/entrypoint.sh:/etc/entrypoint.sh \\\r"
+send "  --cpuset-cpus=0 \\\r"
+send "  cloudsuite/web-serving:db_server\r"
+send "WRITE_DB_EOF\r"
+expect { timeout { puts "ERROR: writing run_database.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_database.sh\r"
+expect { timeout { puts "ERROR: chmod run_database.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "./run_database.sh\r"
+expect { timeout { puts "ERROR: launching database didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 
-# --- 3. Window 0: database --------------------------------------------------
-# run_database.sh runs cloudsuite db_server with -it; after MariaDB starts the
-# container drops to a root shell prompt `root@qflex:/#`. We then run a mysql
-# ALTER USER over -e and wait for the next root prompt.
-
-send "tmux send-keys -t wsv:0 './run_database.sh' Enter\r"
+puts "wsv: database launched; running ALTER USER (retry until MariaDB accepts)..."
+# Foreground retry loop: docker exec runs the ALTER against the detached
+# container (which keeps running after the exec returns). The retry rides out
+# MariaDB's startup. Streams live to the serial; ends on the marker.
+send "until docker exec database_server mysql -u root -e \"ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD(''); FLUSH PRIVILEGES;\"; do sleep 5; done; echo WSV_DB_ALTERED\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: dispatching run_database.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    timeout { puts "ERROR: mysql ALTER USER never succeeded"; quit_qemu $monitor_port; exit 1 }
+    -re {WSV_DB_ALTERED}
 }
-puts "wsv: window 0 (database) launched; waiting for 'root@qflex:/#'..."
-wait_for_pane_substring wsv 0 "root@qflex:/#" $BUDGET_WORKLOAD_INIT_S
-puts "wsv: window 0 at root shell; sending mysql ALTER USER..."
+set timeout $BUDGET_PROMPT_S
+send "\r"; expect { timeout { } -re {[\$#] +} }
+puts "wsv: mysql ALTER USER done."
 
-send "tmux send-keys -t wsv:0 \"mysql -u root -e \\\"ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD(''); FLUSH PRIVILEGES;\\\"\" Enter\r"
+# --- 3. Memcached: detached container (no tmux) -----------------------------
+
+send "./run_memcached.sh && echo WSV_MEMCACHED_OK\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: dispatching mysql ALTER USER timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    timeout { puts "ERROR: memcached didn't confirm start"; quit_qemu $monitor_port; exit 1 }
+    -re {WSV_MEMCACHED_OK}
 }
-# Pane already shows the prompt before mysql was sent. Give the command time
-# to actually run before re-polling — otherwise we re-match the pre-command
-# prompt and proceed before mysql finished.
-sleep 5
-wait_for_pane_substring wsv 0 "root@qflex:/#" $BUDGET_PROMPT_S
-puts "wsv: mysql ALTER USER returned."
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
+puts "wsv: memcached container started."
 
-# --- 4. Window 1: memcached (detached docker) -------------------------------
+# --- 4. Web_server: detached container, then wait for Elgg bootstrap --------
+# run_server.sh is `docker run -dt` (baked, advertised addr 127.0.0.1 for single).
+# The Elgg-bootstrap wait targets the running container, so it stays docker exec.
 
-send "tmux send-keys -t wsv:1 './run_memcached.sh' Enter\r"
+send "./run_server.sh && echo WSV_SERVER_OK\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: dispatching run_memcached.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
+    timeout { puts "ERROR: web_server didn't confirm start"; quit_qemu $monitor_port; exit 1 }
+    -re {WSV_SERVER_OK}
 }
-puts "wsv: window 1 (memcached) dispatched; settling 1s host time..."
-sleep 1
-
-# --- 5. Window 2: web_server (detached docker) ------------------------------
-# Same readiness shape as DS (poll the server pane for a real marker) and the WSV
-# master: `&& echo WSV_SERVER_OK` gives a pane marker for container-start, then we
-# wait until Elgg has finished bootstrapping (it writes settings.php with the
-# baked 127.0.0.1:8443) — the actual "server is serving" signal. Both polls also
-# stream the server-side output into the log, so it shows the real thing.
-
-send "tmux send-keys -t wsv:2 './run_server.sh && echo WSV_SERVER_OK' Enter\r"
-expect {
-    timeout { puts "ERROR: dispatching run_server.sh timed out"; quit_qemu $monitor_port; exit 1 }
-    -re {[\$#] +}
-}
-puts "wsv: window 2 (web_server) launched; waiting for container-start (WSV_SERVER_OK)..."
-wait_for_pane_substring wsv 2 "WSV_SERVER_OK" $BUDGET_WORKLOAD_INIT_S
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 puts "wsv: web_server container started; waiting for Elgg to bootstrap (settings.php written)..."
 # PID marker so we match the loop's real output, not the typed command echo.
 send "until docker exec web_server grep -q '127.0.0.1:8443' /usr/share/nginx/html/elgg/elgg-config/settings.php 2>/dev/null; do sleep 5; done; printf 'ELGGUP%s\\n' \"\$\$\"\r"
@@ -239,25 +182,38 @@ expect {
 puts "wsv: Elgg bootstrapped. Settling ${BUDGET_SERVER_SETTLE_S}s before launching faban..."
 sleep $BUDGET_SERVER_SETTLE_S
 
-# --- 6. faban client — run it right here on the serial (no tmux, no polling) -
-# Same as the multi-node follower, which works: run_client.sh enters the faban
-# container, entrypoint.sh runs the benchmark, we read the markers live inline.
-# The serial is NOT closed before savevm, so the container keeps running into the
-# snapshot.
+# --- 5. faban client via wsv_faban_entry.sh as the container entrypoint ------
+# Rewrite run_client.sh to mount the entry + run it non-interactively (no tmux);
+# the benchmark (steady) stays foreground so the backgrounded container is captured
+# running. cpuset=1 keeps client work on core 1 (single-node).
 
-send "./run_client.sh\r"
-set timeout $BUDGET_WORKLOAD_INIT_S
-expect {
-    timeout { puts "ERROR: faban container prompt didn't arrive"; quit_qemu $monitor_port; exit 1 }
-    -re {root@qflex:/web20_benchmark#}
-}
-puts "wsv: faban container ready; dispatching entrypoint.sh..."
-
+send "cat > ./wsv_faban_entry.sh <<'WRITE_FABAN_ENTRY_EOF'\r"
+send "#!/bin/sh\r"
 send "./run/entrypoint.sh 127.0.0.1 4 --encryption=1 --ramp-up=120 --ramp-down=1800 --steady=86400 --oper=run --min=0 --max=0 --type=THINKTIME\r"
+send "WRITE_FABAN_ENTRY_EOF\r"
+expect { timeout { puts "ERROR: writing wsv_faban_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./wsv_faban_entry.sh\r"
+expect { timeout { puts "ERROR: chmod wsv_faban_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+
+send "cat > ./run_client.sh <<'WRITE_CLIENT_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run --net=host --rm --name=faban_client \\\r"
+send "    -v \$(pwd)/client/gen.test_server.py:/web20_benchmark/run/gen \\\r"
+send "    -v \$(pwd)/wsv_faban_entry.sh:/wsv_faban_entry.sh \\\r"
+send "    --cpuset-cpus=1 \\\r"
+send "    --entrypoint=/wsv_faban_entry.sh \\\r"
+send "    cloudsuite/web-serving:faban_client\r"
+send "WRITE_CLIENT_EOF\r"
+expect { timeout { puts "ERROR: writing run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_client.sh\r"
+expect { timeout { puts "ERROR: chmod run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+
+send "./run_client.sh > /tmp/wsv_faban.out 2>&1 < /dev/null &\r"
+expect { timeout { puts "ERROR: faban launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+puts "wsv: faban launched; tailing /tmp/wsv_faban.out for a SUCCESSFUL client op (Successfully browsed Elgg)..."
+send "tail -f /tmp/wsv_faban.out\r"
 # 'Ramp up completed' is a TIMER, not proof of success — faban prints it even
 # when every request fails. The real proof is 'Successfully browsed Elgg'.
-# Gate on that FIRST; do not weaken this gate.
-puts "wsv: entrypoint.sh dispatched; waiting for a SUCCESSFUL client op (Successfully browsed Elgg)..."
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
     timeout { puts "ERROR: client never logged 'Successfully browsed Elgg' -- workload broken"; quit_qemu $monitor_port; exit 1 }
@@ -269,9 +225,12 @@ expect {
     -re {Ramp up completed}
 }
 puts "wsv: ramp-up done WITH verified successful client ops; settling 5s before savevm..."
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
 sleep 5
 
-# Do NOT close the serial — faban keeps running so savevm snapshots the live workload.
+# faban keeps running in the background container so savevm snapshots the live workload.
 
 # --- 7. savevm loaded via the monitor ---------------------------------------
 
