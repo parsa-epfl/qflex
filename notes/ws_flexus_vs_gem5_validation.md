@@ -466,3 +466,132 @@ the outputs are copied out between runs.
    - uIPC when available
 6. Decide whether the two engines are in the same ballpark before deeper
    diagnosis.
+
+
+## Lazy `.gem` emission phase
+
+This phase established the intended contract for functional warming:
+
+- `fw` should be able to create a warm snapshot without emitting
+  `snapshot_0.gem/`
+- later, if gem5 conversion is needed, `convert-single` should materialize the
+  missing `.gem` bundle lazily from the saved snapshot
+
+### Contract and implementation work
+
+Two implementation pieces were required.
+
+1. Optional `.gem` emission on the warm path
+
+- `qflex fw` now accepts:
+  - `--emit-gem`
+- default behavior is now:
+  - do **not** emit `.gem` during `fw`
+- WormCache was updated so the warm snapshot path explicitly passes the
+  `generate_gem5_chkpt` boolean into the parallel-QEMU snapshot API
+
+2. Refresh + rebuild hook for experiment-local WormCache
+
+The first runtime attempt failed for a non-obvious reason:
+
+- `fw` rebuilt the experiment-local WormCache plugin
+- but it rebuilt stale source already sitting in:
+  - `<experiment>/lib/WormCacheQFlex`
+- so the old plugin still emitted `snapshot_0.gem/`
+
+The fix was to make the refresh/build hook explicit and shared.
+
+Current hook behavior:
+
+1. if `refresh_wormcache` is enabled, recopy:
+   - repo-root `WormCacheQFlex`
+   - into `<experiment>/lib/WormCacheQFlex`
+2. copy experiment `cfg/parameter.rs`
+3. rebuild there
+4. copy back:
+   - `libworm_cache.so`
+   - `checkpoint_conversion`
+
+This shared hook now applies consistently to:
+
+- `fw`
+- `init_warm`
+- `test_worm`
+
+### Successful lazy-emission validation
+
+After resetting `snapshot_0` from:
+
+- the qcow2 internal snapshot table
+- the experiment `run/` directory
+- the checkpoint directory
+
+the following command was run:
+
+```bash
+/home/dev/qflex_git/qflex fw   --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args   --refresh-wormcache   --loadvm-name init_warmed   --sample-size 1   --collect-gem5-bbl-btb
+```
+
+### Result
+
+The run completed successfully and created:
+
+- `snapshot_0` in the qcow2 image
+- `run/snapshot_0.loc`
+- `run/snapshot_0.state.zstd`
+- `run/snapshot_0.uarch/`
+
+Critically, it did **not** create:
+
+- `run/snapshot_0.gem/`
+
+So the `fw` half of the lazy `.gem` contract is now working as intended.
+
+### Current status at end of this phase
+
+What is now proven:
+
+- functional warming can create `snapshot_0` without pre-emitting `.gem`
+- the experiment-local WormCache refresh+rebuild path is now correct and shared
+
+What remains to validate next:
+
+- use the lazy `snapshot_0` lineage for the next gem5/Flexus comparison steps
+
+### Successful lazy conversion validation
+
+With `snapshot_0` present from `fw` and no preexisting `run/snapshot_0.gem/`, the following command was run:
+
+```bash
+/home/dev/qflex_git/qflex qpoints convert-single \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --snapshot snapshot_0 \
+  --overwrite
+```
+
+### Result
+
+The lazy conversion contract worked as intended:
+
+1. `convert-single` detected that `run/snapshot_0.gem/` was missing
+2. it materialized `snapshot_0.gem/` lazily from the saved snapshot
+3. it proceeded into the normal checkpoint conversion path
+
+Observed outputs included:
+
+- `run/snapshot_0.gem/`
+- `checkpoints/ws-image-fresh-8c/snapshot_0/snapshot_0.img`
+- `checkpoints/ws-image-fresh-8c/snapshot_0/m5.cpt`
+- `checkpoints/ws-image-fresh-8c/snapshot_0/machine_config.json`
+- `checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/`
+
+The later console output was the usual TLB-apply / VATranslator tail, not a failure of the lazy `.gem` contract itself.
+
+### Current state at end of lazy `.gem` validation
+
+The two-part contract is now validated end to end:
+
+1. `fw` can create `snapshot_0` without pre-emitting `.gem`
+2. `convert-single` can backfill `.gem` lazily and continue conversion
+
+This closes the lazy `.gem` validation phase.

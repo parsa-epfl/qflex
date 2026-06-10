@@ -112,6 +112,80 @@ def _resolve_tlb_geometry_from_sim_configs(
     return itb_size, dtb_size, have_large_asid_64
 
 
+def _resolve_llc_slice_count_from_sim_configs(
+    qpoints_root: Path,
+    default_sim_config_rel: str,
+    sim_config: Optional[str] = None,
+) -> int:
+    llc_slice_count = 1
+
+    config_paths = [qpoints_root / default_sim_config_rel]
+    if sim_config:
+        config_paths.append(Path(sim_config).expanduser().resolve())
+
+    for config_path in config_paths:
+        for arg in _load_sim_config_args(config_path):
+            if arg.startswith("--num-l2caches="):
+                value = arg.split("=", 1)[1]
+                if not re.fullmatch(r"[1-9][0-9]*", value):
+                    raise RuntimeError(
+                        f"Invalid --num-l2caches value in {config_path}: {value!r}"
+                    )
+                llc_slice_count = int(value)
+
+    return llc_slice_count
+
+
+def _default_sim_config_rel_for_ruby_protocol(ruby_protocol: str) -> str:
+    if ruby_protocol == "moesi_cmp_directory":
+        return DEFAULT_TIMING_RUBY_MOESI_SIM_CONFIG_REL
+    if ruby_protocol == "mesi_two_level":
+        return DEFAULT_TIMING_RUBY_MESI_SIM_CONFIG_REL
+    return DEFAULT_CLASSIC_SIM_CONFIG_REL
+
+
+def _load_protocol_uarch_manifest(
+    checkpoint_dir: Path,
+    ruby_protocol: str,
+) -> Optional[dict]:
+    manifest_path = checkpoint_dir / "gem5_uarch" / ruby_protocol / "manifest.json"
+    if not manifest_path.is_file():
+        return None
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _validate_staged_llc_slice_count(
+    checkpoint_dir: Path,
+    ruby_protocol: str,
+    runtime_llc_slice_count: int,
+) -> None:
+    manifest = _load_protocol_uarch_manifest(checkpoint_dir, ruby_protocol)
+    if not manifest:
+        return
+
+    staged_llc_slice_count = manifest.get("llc_slice_count")
+    if staged_llc_slice_count is None:
+        return
+
+    try:
+        staged_llc_slice_count = int(staged_llc_slice_count)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Invalid llc_slice_count in staged gem5_uarch manifest at "
+            f"{checkpoint_dir / 'gem5_uarch' / ruby_protocol / 'manifest.json'}: "
+            f"{staged_llc_slice_count!r}"
+        ) from exc
+
+    if staged_llc_slice_count != runtime_llc_slice_count:
+        raise RuntimeError(
+            "Staged gem5_uarch LLC slice count does not match the runtime "
+            f"sim-config for protocol {ruby_protocol}: staged "
+            f"{staged_llc_slice_count}, runtime {runtime_llc_slice_count}. "
+            "Re-run convert-single with the same sim-config that will be used "
+            "for run-gem5."
+        )
+
+
 def _refresh_qpoints_helper(
     qpoints_root: Path,
     run_dir: Path,
@@ -181,6 +255,7 @@ def _prepare_snapshot_gem5_uarch(
     gem5_ckp_dir: str,
     snapshot: str,
     ruby_protocol: str = "mesi_two_level",
+    llc_slice_count: int = 1,
 ) -> Optional[dict]:
     qflex_uarch_dir = Path(qflex_ckp_dir) / "run" / f"{snapshot}.uarch"
     if not qflex_uarch_dir.is_dir():
@@ -229,6 +304,8 @@ def _prepare_snapshot_gem5_uarch(
                     snapshot,
                     "--ruby-protocol",
                     protocol,
+                    "--llc-slice-count",
+                    str(llc_slice_count),
                     "--overwrite",
                 ],
                 text=True,
@@ -955,12 +1032,20 @@ def convert_single(
             f"Required checkpoint composer not found: {create_gem5_checkpoint}"
         )
     _prepare_qpoints_root(qpoints_root, ("scripts/uarch_restore/prepare_gem5_uarch.py",))
+    default_sim_config_rel = _default_sim_config_rel_for_ruby_protocol(
+        ruby_protocol
+    )
     resolved_itb_size, resolved_dtb_size, resolved_have_large_asid_64 = (
         _resolve_tlb_geometry_from_sim_configs(
             qpoints_root,
-            DEFAULT_CLASSIC_SIM_CONFIG_REL,
+            default_sim_config_rel,
             sim_config,
         )
+    )
+    resolved_llc_slice_count = _resolve_llc_slice_count_from_sim_configs(
+        qpoints_root,
+        default_sim_config_rel,
+        sim_config,
     )
     experiment_machine_config = _load_experiment_machine_config(qflex_ckp_dir)
     experiment_kernel_dir, experiment_kernel_path = _require_ready_experiment_kernel(
@@ -1133,7 +1218,12 @@ def convert_single(
 
         _check_cancelled()
         uarch_manifest = _prepare_snapshot_gem5_uarch(
-            qpoints_root, qflex_ckp_dir, gem5_ckp_dir, snapshot, ruby_protocol
+            qpoints_root,
+            qflex_ckp_dir,
+            gem5_ckp_dir,
+            snapshot,
+            ruby_protocol,
+            resolved_llc_slice_count,
         )
         print(f"[{snapshot}] applying gem5 uarch artifacts")
         _apply_snapshot_gem5_uarch(
@@ -1345,6 +1435,11 @@ def run_gem5(
             sim_config,
         )
     )
+    resolved_llc_slice_count = _resolve_llc_slice_count_from_sim_configs(
+        qpoints_root,
+        default_sim_config_rel,
+        sim_config,
+    )
     checkpoint_dir = Path(gem5_ckp_dir) / snapshot
     machine_config = _load_machine_config(checkpoint_dir / "machine_config.json")
     expected_kernel = _require_ready_checkpoint_kernel_contract(machine_config)
@@ -1360,6 +1455,12 @@ def run_gem5(
         dtb_size=resolved_dtb_size,
         have_large_asid_64=resolved_have_large_asid_64,
     )
+    if timing_ruby_moesi and cache_hierarchy_restore:
+        _validate_staged_llc_slice_count(
+            checkpoint_dir,
+            "moesi_cmp_directory",
+            resolved_llc_slice_count,
+        )
     run_gem5_sh = qpoints_root / "run_gem5.sh"
     args = [
         "bash",
