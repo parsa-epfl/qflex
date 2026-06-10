@@ -1,9 +1,5 @@
 extends: ../WS_base
 
-_leaf_defaults:
-  population_seconds: 0.1
-  _target_: commands.config.create_experiment_context
-  sample_size: 100
 
 components:
   experiment_context:
