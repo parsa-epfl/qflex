@@ -33,7 +33,7 @@ def _load_raw(path: Path) -> DictConfig:
     parent_name = cfg.pop("extends", None)
     if parent_name is None:
         return cfg
-    parent_path = path.parent / f"{parent_name}.yaml"
+    parent_path = (path.parent / f"{parent_name}.yaml").resolve()
     if not parent_path.exists():
         raise FileNotFoundError(
             f"{path.name} extends '{parent_name}' but {parent_path} does not exist"
