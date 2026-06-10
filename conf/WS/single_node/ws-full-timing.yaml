@@ -1,14 +1,11 @@
 extends: ws
 
-_leaf_defaults:
-  _target_: commands.config.create_experiment_context
-  doubled_vcpu: false
-  phantom_cpu_ipc: -4
-
 
 components:
   experiment_context:
     _base_: _leaf_defaults
     experiment_name: web-search-single-node-yaml-0-full-timing
+    doubled_vcpu: false
+    phantom_cpu_ipc: -4
     latencies_ns_list: [1000000]
     syncs_list: ["false"]

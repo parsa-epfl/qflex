@@ -5,6 +5,7 @@ components:
     _base_: _leaf_defaults
     experiment_name: web-search-single-node-yaml-0
     doubled_vcpu: true
+    phantom_cpu_ipc: 4
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
 
