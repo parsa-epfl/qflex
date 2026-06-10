@@ -61,7 +61,7 @@ class FunctionalWarming(Executor):
         print(f"Functional warming will start emitting snapshots at snapshot_{init_index}.")
         print("fw command:")
         print(fw_cmd)
-        return [
+        return self.experiment_context.get_wormcache_build_commands() + [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             fw_cmd,
             # TODO add the proper conditions to only create log and fp_gen_speed at the right time

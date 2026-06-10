@@ -42,23 +42,6 @@ class InitWarm(Executor):
             experiment_context=experiment_context,
         )
         self.flexus_script = self.flexus_script_loader.load_parameters()
-
-
-
-
-    def build_worm_cache(self) -> List[str]:
-        experiment_folder = self.experiment_context.get_experiment_folder_address()
-        return [
-            f"cp {self.worm_params_address} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",
-            f"cd {experiment_folder}/lib/WormCacheQFlex",
-            # TODO check if this needs to be debug
-            "cargo build --release",
-            f"cd {experiment_folder}/run",
-            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/",
-            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/checkpoint_conversion {self.experiment_context.get_experiment_folder_address()}/bin/checkpoint_conversion",
-            #  TODO check if all needed files are copied (check main file of replica plus necessary files declared in partition.py and result.py)
-        ]
-    
     def cmd(self) -> str:
         if self.fallback_cycles is not None and self.fallback_cycles < 0:
             raise ValueError("fallback_cycles must be a non-negative integer")
@@ -76,7 +59,7 @@ class InitWarm(Executor):
         """
 
 
-        return self.build_worm_cache() + [
+        return self.experiment_context.get_wormcache_build_commands() + [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             "ls",
             init_cmd
@@ -91,4 +74,3 @@ class InitWarm(Executor):
     
 
     
-
