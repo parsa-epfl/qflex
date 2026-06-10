@@ -367,6 +367,13 @@ def run_sample(
             help="Enable or disable gem5 LLC/L1 cache-hierarchy restore flags.",
         ),
     ] = True,
+    cleanup_conversion_artifacts: Annotated[
+        bool,
+        typer.Option(
+            "--cleanup-conversion-artifacts/--no-cleanup-conversion-artifacts",
+            help="Delete or keep derived gem5 conversion artifacts after each successful per-snapshot gem5 run.",
+        ),
+    ] = True,
     sim_config: Annotated[
         str | None,
         typer.Option(help="Optional QPoints/gem5 config args file to pass through to run_gem5.sh."),
@@ -413,6 +420,7 @@ def run_sample(
             timing_ruby=timing_ruby,
             timing_ruby_moesi=timing_ruby_moesi,
             cache_hierarchy_restore=cache_hierarchy_restore,
+            cleanup_conversion_artifacts=cleanup_conversion_artifacts,
             sim_config=sim_config,
         )
         return
@@ -424,6 +432,10 @@ def run_sample(
             )
         if sim_config:
             raise typer.BadParameter("--sim-config is currently gem5-only.")
+        if not cleanup_conversion_artifacts:
+            raise typer.BadParameter(
+                "--no-cleanup-conversion-artifacts is currently gem5-only."
+            )
         if measurement_cycles <= 0:
             raise typer.BadParameter(
                 "--measurement-cycles must be a positive integer."

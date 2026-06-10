@@ -1480,6 +1480,7 @@ def run_sample(
     timing_ruby_moesi: bool = False,
     cache_hierarchy_restore: bool = True,
     sim_config: Optional[str] = None,
+    cleanup_conversion_artifacts: bool = True,
 ) -> Path:
     if timing_ruby and timing_ruby_moesi:
         raise RuntimeError(
@@ -1533,11 +1534,12 @@ def run_sample(
             cache_hierarchy_restore=cache_hierarchy_restore,
             sim_config=sim_config,
         )
-        _cleanup_snapshot_gem5_artifacts(
-            qflex_ckp_dir=qflex_ckp_dir,
-            gem5_ckp_dir=gem5_ckp_dir,
-            snapshot=snapshot,
-        )
+        if cleanup_conversion_artifacts:
+            _cleanup_snapshot_gem5_artifacts(
+                qflex_ckp_dir=qflex_ckp_dir,
+                gem5_ckp_dir=gem5_ckp_dir,
+                snapshot=snapshot,
+            )
         summary_path = qpoints_root / "sim_outs" / experiment / snapshot / "uipc_summary.json"
         summaries.append(_load_uipc_summary(summary_path))
 

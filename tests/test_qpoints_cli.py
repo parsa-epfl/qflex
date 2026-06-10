@@ -484,6 +484,7 @@ def test_run_sample_converts_each_snapshot_before_running_gem5():
             timing_ruby_moesi=True,
             cache_hierarchy_restore=True,
             sim_config="/tmp/moesi.args",
+            cleanup_conversion_artifacts=True,
         )
 
     assert report == Path("/tmp/uipc_report.json")
@@ -508,6 +509,50 @@ def test_run_sample_converts_each_snapshot_before_running_gem5():
         assert call.kwargs["qflex_ckp_dir"] == "/tmp/experiment"
         assert call.kwargs["gem5_ckp_dir"] == "/tmp/checkpoints/exp"
     write_report_mock.assert_called_once()
+
+
+def test_run_sample_can_keep_conversion_artifacts():
+    module = _load_qpoints_commands_module()
+
+    with mock.patch.object(
+        module, "convert_single"
+    ) as convert_mock, mock.patch.object(
+        module, "run_gem5"
+    ) as run_gem5_mock, mock.patch.object(
+        module, "_cleanup_snapshot_gem5_artifacts"
+    ) as cleanup_mock, mock.patch.object(
+        module, "_load_uipc_summary",
+        return_value={
+            "engine": "gem5",
+            "cores": [{"core": 0, "ipc": 1.0, "uipc": 1.0}],
+            "aggregate": {"ipc": 1.0, "uipc": 1.0},
+        },
+    ), mock.patch.object(
+        module, "_write_uipc_report", return_value=Path("/tmp/uipc_report.json")
+    ):
+        module.run_sample(
+            qflex_ckp_dir="/tmp/experiment",
+            gem5_ckp_dir="/tmp/checkpoints/exp",
+            experiment="exp",
+            base="/tmp/experiment/root.qcow2",
+            first="snapshot_0",
+            last="snapshot_0",
+            core_count=8,
+            memory_gb=32,
+            bootloader="/tmp/boot.bin",
+            root_device="/dev/vda",
+            warmup_cycles=200000,
+            measurement_cycles=1000000,
+            timing_ruby=False,
+            timing_ruby_moesi=True,
+            cache_hierarchy_restore=True,
+            sim_config="/tmp/moesi.args",
+            cleanup_conversion_artifacts=False,
+        )
+
+    convert_mock.assert_called_once()
+    run_gem5_mock.assert_called_once()
+    cleanup_mock.assert_not_called()
 
 
 def test_prepare_snapshot_gem5_uarch_invokes_qpoints_postprocessor(tmp_path: Path):
