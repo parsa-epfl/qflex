@@ -260,6 +260,9 @@ def fw(
     collect_gem5_bbl_btb: Annotated[bool, typer.Option(
         help="Whether to collect the export-only gem5 BBL-BTB view alongside the live PC-indexed BTB during functional warming."
     )]=False,
+    emit_gem: Annotated[bool, typer.Option(
+        help="Whether to emit the .gem checkpoint bundle during functional warming. If omitted, convert-single can materialize it lazily later."
+    )]=False,
 ):
     """
     This command performs functional warming of the simulator.
@@ -269,6 +272,7 @@ def fw(
         experiment_context=experiment_context,
         sample_size=sample_size,
         collect_gem5_bbl_btb=collect_gem5_bbl_btb,
+        emit_gem=emit_gem,
     )
     functional_warm_executor.execute(to_stdio=True, run_in_background=False)
 

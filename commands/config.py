@@ -235,6 +235,47 @@ class ExperimentContext(BaseModel):
         return f'{self.get_experiment_folder_address()}/qemu-saved'
     def get_pflex_qemu_build_folder(self) -> str:
         return f'{self.get_experiment_folder_address()}/parallel-qemu-saved'
+
+    def get_repo_wormcache_dir(self) -> str:
+        wormcache_src = _repo_root() / "WormCacheQFlex"
+        if not wormcache_src.exists():
+            raise FileNotFoundError(f"WormCacheQFlex folder not found at {wormcache_src}.")
+        return str(wormcache_src)
+
+    def get_experiment_wormcache_dir(self) -> str:
+        return f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"
+
+    def get_wormcache_build_commands(self) -> list[str]:
+        experiment_folder = self.get_experiment_folder_address()
+        repo_root = str(_repo_root())
+        wormcache_src = self.get_repo_wormcache_dir()
+        wormcache_dest = self.get_experiment_wormcache_dir()
+        worm_params = f"{experiment_folder}/cfg/parameter.rs"
+        if not os.path.exists(worm_params):
+            raise FileNotFoundError(
+                f"Worm parameter file does not exist at {worm_params}, cannot build WormCacheQFlex."
+            )
+
+        commands = []
+        if self.refresh_wormcache:
+            commands.extend(
+                [
+                    f"rm -rf {wormcache_dest}",
+                    f"cp -a {wormcache_src} {wormcache_dest}",
+                ]
+            )
+
+        commands.extend(
+            [
+                f"cp {worm_params} {wormcache_dest}/src/parameter.rs",
+                f"cd {wormcache_dest}",
+                "cargo build --release",
+                f"cd {experiment_folder}/run",
+                f"cp {wormcache_dest}/target/release/libworm_cache.so {experiment_folder}/lib/",
+                f"cp {wormcache_dest}/target/release/checkpoint_conversion {experiment_folder}/bin/checkpoint_conversion",
+            ]
+        )
+        return commands
     
     def set_up_image(self):
 
@@ -338,11 +379,8 @@ class ExperimentContext(BaseModel):
                 os.system(f"cp -u {f} {link_address}")
         # TODO turn WormCacheQFlex address into a parameter
         # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        wormcache_src = os.path.join(repo_root, "WormCacheQFlex")
-        if not os.path.exists(wormcache_src):
-            raise FileNotFoundError(f"WormCacheQFlex folder not found at {wormcache_src}.")
-        wormcache_dest = f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"
+        wormcache_src = self.get_repo_wormcache_dir()
+        wormcache_dest = self.get_experiment_wormcache_dir()
         if not os.path.exists(wormcache_dest):
             shutil.copytree(wormcache_src, wormcache_dest, symlinks=True)
         elif self.refresh_wormcache:
@@ -350,6 +388,7 @@ class ExperimentContext(BaseModel):
             shutil.copytree(wormcache_src, wormcache_dest, symlinks=True)
 
         # Move files to lib
+        repo_root = str(_repo_root())
         lib_files = [
             "libknottykraken.so", 
             "libsemikraken.so"

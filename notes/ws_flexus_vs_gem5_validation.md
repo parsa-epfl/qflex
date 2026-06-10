@@ -1,0 +1,930 @@
+# Web-Search Flexus vs gem5 Validation Notes
+
+## Scope
+
+This note records the validation process for the new phase focused on
+comparing Flexus IPC against gem5 IPC for:
+
+- experiment: `ws-image-fresh-8c`
+- snapshot: `snapshot_0`
+
+The immediate question for this phase is:
+
+- are Flexus and gem5 in the same ballpark on this snapshot?
+
+This note is intended to be updated step by step as the validation proceeds.
+
+## Current comparison contract
+
+### Reference files
+
+Top-level experiment/checkpoint context:
+
+- `args/ws_image_fresh_8c_flexus_compare.qflex.args`
+
+gem5 simulated-machine reference:
+
+- `QPoints/configs/timing_ruby_moesi_ws_flexus_ref_8c.args`
+
+Flexus simulated-machine reference:
+
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/cfg/flexus_configuration.json`
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/cfg/timing.cfg`
+
+### Standard comparison window
+
+Use the same window for both engines:
+
+- snapshot: `snapshot_0`
+- cores: `8`
+- warmup: `200000` cycles
+- measurement: `1000000` cycles
+
+Rationale:
+
+- this window is already validated on the gem5 side for this lineage
+- Flexus requires 100k-aligned windows
+- it is more meaningful than the smaller earlier bring-up windows
+
+## Ownership model
+
+### Experiment/checkpoint context
+
+Owned by:
+
+- `args/ws_image_fresh_8c_flexus_compare.qflex.args`
+
+This file defines stable context such as:
+
+- experiment identity
+- checkpoint root context
+- core count
+- memory size
+- image / bootloader / root device
+
+### Simulated machine
+
+Owned separately per engine.
+
+gem5:
+
+- `QPoints/configs/timing_ruby_moesi_ws_flexus_ref_8c.args`
+
+Flexus:
+
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/cfg/flexus_configuration.json`
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/cfg/timing.cfg`
+
+This split is intentional:
+
+- CLI/run parameters control the experiment execution
+- engine-specific config files control the simulated machine
+
+## What is aligned today
+
+The current gem5 reference sim-config is aligned to the recorded Flexus
+machine as closely as the current path allows on:
+
+- 8 cores
+- L1I: `64kB`, 8-way
+- L1D: `64kB`, 8-way
+- LLC slice size: `1MB`
+- LLC associativity: `16`
+- LLC slice count: `8`
+- directory slice count: `8`
+- BTB: `4096 sets x 4 ways` -> `16384 entries`, `4 ways`
+- ITLB: `64`
+- DTLB: `64`
+- large ASID enabled
+- memory channels / ranks
+- restored BTB / TAGE / TLB state
+- major frontend/core knobs with direct gem5 counterparts:
+  - fetch/decode/rename/dispatch/issue/wb widths
+  - commit width
+  - fetch queue size
+  - ROB size
+  - store queue size
+
+## Known non-equivalences
+
+These are currently accepted mismatches and must be called out in any result
+discussion:
+
+1. Flexus LLC slice homing uses 4KB group interleaving; current gem5 Ruby
+   still cannot express that homing rule faithfully.
+
+So the comparison is:
+
+- closer than the generic gem5 path
+- still not fully structurally equivalent
+
+This is acceptable for the initial “same ballpark or not” question, but not
+for any stronger equivalence claim.
+
+## Phase target refinement
+
+Before running the main Flexus-vs-gem5 IPC comparison, this phase will try to
+reduce two structural mismatches that are feasible to address quickly:
+
+1. topology mismatch
+   - target: move the gem5 reference from Crossbar toward a mesh topology
+2. LLC slicing mismatch
+   - target: use a sliced gem5 LLC / directory configuration that matches the
+     recorded Flexus slice counts
+
+This phase will **not** attempt to fix LLC home assignment / slice homing.
+
+That means:
+
+- we do want gem5 to use a mesh-like network if the current path supports it
+- we do want gem5 to use an 8-slice LLC / 8-slice directory structure
+- we do **not** expect gem5 in this phase to match the Flexus 4KB
+  group-interleaved LLC home assignment rule
+
+So the intended comparison target for this phase is:
+
+- topology: closer
+- slice count: closer
+- home-assignment semantics: still knowingly different
+
+Any interpretation of the final IPC gap must preserve that caveat.
+
+## Initial gem5 sliced-LLC smoke result
+
+A short MOESI gem5 smoke was run on `snapshot_0` with the current 8-slice
+reference sim-config. Two cases were checked:
+
+1. sliced runtime with cache-hierarchy restore enabled
+2. sliced runtime with cache-hierarchy restore disabled
+
+### What passed
+
+The control run with cache-hierarchy restore disabled completed successfully.
+That establishes that the current gem5 path can:
+
+- restore and execute `snapshot_0`
+- use `MOESI_CMP_directory`
+- use `8` LLC slices
+- use `8` directory slices
+- use `1MB` per LLC slice
+
+So the intended runtime shape is viable:
+
+- LLC: `8 x 1MB = 8MB` total
+- directories: `8` slices
+
+### What failed
+
+The same smoke with LLC/L1 cache-hierarchy restore enabled failed immediately
+at gem5 bring-up with:
+
+- `fatal: --restore-llc-state currently supports only --num-l2caches=1; got 8 L2 caches.`
+
+### Current conclusion
+
+At this point the missing piece is not sliced MOESI execution itself.
+The missing piece is multi-slice LLC warm restore support.
+
+So for this phase, the state is:
+
+- sliced gem5 runtime: yes
+- sliced gem5 with checkpoint restore: yes
+- sliced gem5 with LLC/L1 cache-hierarchy warm restore: no
+
+That means any near-term gem5 vs Flexus comparison can proceed either:
+
+1. without cache-hierarchy restore, or
+2. after implementing multi-slice LLC restore support
+
+The first path is suitable for a ballpark runtime comparison. The second path
+is required for a closer warm-state comparison.
+
+## Follow-up tooling note
+
+Current `fw` behavior always emits the full warm snapshot bundle, including
+`*.gem`, alongside the other snapshot artifacts.
+
+That is acceptable for this phase, but it is heavier than necessary when the
+user only wants Flexus-side functional warming and does not plan to run gem5
+timing simulation.
+
+We should add a future `fw` mode that skips `*.gem` emission when gem5 timing
+artifacts are not needed.
+
+## Functional warming used for BTB regeneration
+
+To regenerate `snapshot_0` with gem5 BTB export enabled, the following command
+was used:
+
+```bash
+/home/dev/qflex_git/qflex fw \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --loadvm-name init_warmed \
+  --sample-size 1 \
+  --collect-gem5-bbl-btb
+```
+
+### Relevant args/config used by that run
+
+The `fw` run used:
+
+- args file:
+  - `args/ws_image_fresh_8c_flexus_compare.qflex.args`
+- load VM:
+  - `init_warmed`
+- sample size:
+  - `1`
+- gem5 BTB export:
+  - enabled via `--collect-gem5-bbl-btb`
+
+Relevant contents of the args file for this run:
+
+- `--core-count 8`
+- `--llc-size-per-tile-mb 1`
+- `--parallel`
+- `--network user`
+- `--memory-gb 32`
+- `--workload-name web-search`
+- `--population-seconds 0.1`
+- `--experiment-name ws-image-fresh-8c`
+- `--image-name root.qcow2`
+- `--image-folder /mnt/sdb/aansari/ws-image/web-search-fresh-8c`
+- `--bootloader /home/dev/qflex_git/QPoints/bin/m5/binaries/boot_v2_qemu_virt.arm64`
+- `--root-device /dev/vda`
+- `--mounting-folder /mnt/sdb/aansari`
+- `--check-period-quantum-coeff 53.0`
+- `--use-image-directly`
+
+### Output verified after regeneration
+
+The run regenerated:
+
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/run/snapshot_0.gem`
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/run/snapshot_0.loc`
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/run/snapshot_0.state.zstd`
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/run/snapshot_0.uarch`
+
+Most importantly, the new fetch-side source file:
+
+- `/mnt/sdb/aansari/experiments/ws-image-fresh-8c/run/snapshot_0.uarch/fetch.json.zstd`
+
+now contains:
+
+- `restore_export.bbl_btb`
+
+per core, which is the BTB export view expected by the gem5-side converter.
+
+## Conversion of regenerated snapshot_0
+
+After regenerating `snapshot_0`, the following conversion command was used:
+
+```bash
+/home/dev/qflex_git/qflex qpoints convert-single \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --snapshot snapshot_0 \
+  --overwrite
+```
+
+### Result
+
+The conversion completed successfully and rebuilt:
+
+- `/mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0`
+- `/mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0/m5.cpt`
+- `/mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/moesi_cmp_directory`
+
+Observed completion summary:
+
+- `convert-single completed in 174s`
+
+### Emitted BTB / TAGE restore artifacts
+
+The regenerated MOESI protocol directory now contains BTB restore files:
+
+- `btb_restore_addrs.core0.txt`
+- `btb_restore_addrs.core1.txt`
+- `btb_restore_addrs.core2.txt`
+- `btb_restore_addrs.core3.txt`
+- `btb_restore_addrs.core4.txt`
+- `btb_restore_addrs.core5.txt`
+- `btb_restore_addrs.core6.txt`
+- `btb_restore_addrs.core7.txt`
+
+and TAGE restore files:
+
+- `tage_restore_state.core0.json`
+- `tage_restore_state.core1.json`
+- `tage_restore_state.core2.json`
+- `tage_restore_state.core3.json`
+- `tage_restore_state.core4.json`
+- `tage_restore_state.core5.json`
+- `tage_restore_state.core6.json`
+- `tage_restore_state.core7.json`
+
+The MOESI manifest confirms that BTB restore is no longer empty:
+
+- `restorable_branch_candidates: 111142`
+- `line_count: 111142`
+
+So the regenerated `snapshot_0` fixed the original source-side BTB export
+problem, and conversion now stages both BTB and TAGE restore artifacts for the
+MOESI checkpoint path.
+
+## Fundamental restore layout fix
+
+### Contract
+
+Protocol-agnostic warm-state artifacts must live at top-level:
+
+- `snapshot_0/gem5_uarch/btb_restore_candidates.json`
+- `snapshot_0/gem5_uarch/btb_restore_addrs.coreN.txt`
+- `snapshot_0/gem5_uarch/tage_restore_candidates.json`
+- `snapshot_0/gem5_uarch/tage_restore_state.coreN.json`
+- `snapshot_0/gem5_uarch/mmu-cpuN.cpt`
+
+Only cache/coherence artifacts should remain protocol-scoped:
+
+- `snapshot_0/gem5_uarch/mesi_two_level/...`
+- `snapshot_0/gem5_uarch/moesi_cmp_directory/...`
+
+### Root cause
+
+The converter was writing BTB/TAGE restore files into the selected Ruby
+protocol directory, while timing-Ruby runtime discovery was correctly looking
+for BTB/TAGE at top-level `gem5_uarch/`.
+
+That meant:
+
+- conversion generated BTB/TAGE state
+- runtime failed to discover it
+- gem5 ran with cold BTB/TAGE even when the checkpoint carried valid restore
+  artifacts
+
+### Code fix
+
+Changed:
+
+- `/home/dev/qflex_git/QPoints/scripts/uarch_restore/prepare_gem5_uarch.py`
+
+Decision:
+
+- keep runtime discovery unchanged
+- keep protocol-specific LLC/L1/directory files under the Ruby protocol
+  subdirectory
+- move BTB/TAGE restore file emission to top-level `gem5_uarch/`
+
+No runtime script change was required for this fix.
+
+### Revalidated conversion output
+
+After the converter fix, the rebuilt checkpoint now has:
+
+- `/mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/btb_restore_addrs.core0.txt`
+- `/mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/tage_restore_state.core0.json`
+- `/mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/mmu-cpu0.cpt`
+
+while protocol-specific cache restore files remain under:
+
+- `/mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/moesi_cmp_directory/`
+
+The MOESI manifest now records BTB/TAGE restore paths at top-level
+`gem5_uarch/`, which matches the intended contract.
+
+### Runtime proof
+
+To isolate BTB/TAGE discovery from the separate multi-slice LLC restore
+limitation, the following timing-Ruby MOESI smoke was run with cache-hierarchy
+restore disabled:
+
+```bash
+/home/dev/qflex_git/qflex qpoints run-gem5 \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --snapshot snapshot_0 \
+  --warmup-cycles 0 \
+  --measurement-cycles 100000 \
+  --timing-ruby-moesi \
+  --sim-config /home/dev/qflex_git/QPoints/configs/timing_ruby_moesi_ws_flexus_ref_8c.args \
+  --no-cache-hierarchy-restore
+```
+
+gem5 confirmed that BTB and TAGE restore were consumed from top-level
+`gem5_uarch/` for all cores. Example runtime messages:
+
+- `system.cpu_cluster.cpus0.branchPred restored 16368 staged BTB entries from /mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/btb_restore_addrs.core0.txt`
+- `system.cpu_cluster.cpus0.branchPred.tage restored staged TAGE state from /mnt/sdb/aansari/checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/tage_restore_state.core0.json`
+
+So the restore-consumption issue is fixed at the layout level, not worked
+around at runtime.
+
+## Canonical commands
+
+### gem5 reference
+
+```bash
+/home/dev/qflex_git/qflex run_sample \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --first snapshot_0 \
+  --last snapshot_0 \
+  --warmup-cycles 200000 \
+  --measurement-cycles 1000000 \
+  --timing-engine gem5 \
+  --timing-ruby-moesi \
+  --sim-config /home/dev/qflex_git/QPoints/configs/timing_ruby_moesi_ws_flexus_ref_8c.args
+```
+
+### Flexus reference
+
+```bash
+/home/dev/qflex_git/qflex run_sample \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --first snapshot_0 \
+  --last snapshot_0 \
+  --warmup-cycles 200000 \
+  --measurement-cycles 1000000 \
+  --timing-engine flexus
+```
+
+## Operational caveat
+
+Both engines currently write canonical reports under:
+
+- `QPoints/sim_outs/ws-image-fresh-8c/`
+
+So running them back to back will overwrite the canonical report path unless
+the outputs are copied out between runs.
+
+## Planned validation sequence
+
+1. Run gem5 with the MOESI reference sim-config.
+2. Copy gem5 report artifacts to a comparison staging location.
+3. Run Flexus with the same args and timing window.
+4. Copy Flexus report artifacts to the same staging location.
+5. Compare:
+   - aggregate IPC
+   - average IPC
+   - per-core IPC
+   - uIPC when available
+6. Decide whether the two engines are in the same ballpark before deeper
+   diagnosis.
+
+
+## Lazy `.gem` emission phase
+
+This phase established the intended contract for functional warming:
+
+- `fw` should be able to create a warm snapshot without emitting
+  `snapshot_0.gem/`
+- later, if gem5 conversion is needed, `convert-single` should materialize the
+  missing `.gem` bundle lazily from the saved snapshot
+
+### Contract and implementation work
+
+Two implementation pieces were required.
+
+1. Optional `.gem` emission on the warm path
+
+- `qflex fw` now accepts:
+  - `--emit-gem`
+- default behavior is now:
+  - do **not** emit `.gem` during `fw`
+- WormCache was updated so the warm snapshot path explicitly passes the
+  `generate_gem5_chkpt` boolean into the parallel-QEMU snapshot API
+
+2. Refresh + rebuild hook for experiment-local WormCache
+
+The first runtime attempt failed for a non-obvious reason:
+
+- `fw` rebuilt the experiment-local WormCache plugin
+- but it rebuilt stale source already sitting in:
+  - `<experiment>/lib/WormCacheQFlex`
+- so the old plugin still emitted `snapshot_0.gem/`
+
+The fix was to make the refresh/build hook explicit and shared.
+
+Current hook behavior:
+
+1. if `refresh_wormcache` is enabled, recopy:
+   - repo-root `WormCacheQFlex`
+   - into `<experiment>/lib/WormCacheQFlex`
+2. copy experiment `cfg/parameter.rs`
+3. rebuild there
+4. copy back:
+   - `libworm_cache.so`
+   - `checkpoint_conversion`
+
+This shared hook now applies consistently to:
+
+- `fw`
+- `init_warm`
+- `test_worm`
+
+### Successful lazy-emission validation
+
+After resetting `snapshot_0` from:
+
+- the qcow2 internal snapshot table
+- the experiment `run/` directory
+- the checkpoint directory
+
+the following command was run:
+
+```bash
+/home/dev/qflex_git/qflex fw   --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args   --refresh-wormcache   --loadvm-name init_warmed   --sample-size 1   --collect-gem5-bbl-btb
+```
+
+### Result
+
+The run completed successfully and created:
+
+- `snapshot_0` in the qcow2 image
+- `run/snapshot_0.loc`
+- `run/snapshot_0.state.zstd`
+- `run/snapshot_0.uarch/`
+
+Critically, it did **not** create:
+
+- `run/snapshot_0.gem/`
+
+So the `fw` half of the lazy `.gem` contract is now working as intended.
+
+### Current status at end of this phase
+
+What is now proven:
+
+- functional warming can create `snapshot_0` without pre-emitting `.gem`
+- the experiment-local WormCache refresh+rebuild path is now correct and shared
+
+What remains to validate next:
+
+- use the lazy `snapshot_0` lineage for the next gem5/Flexus comparison steps
+
+### Successful lazy conversion validation
+
+With `snapshot_0` present from `fw` and no preexisting `run/snapshot_0.gem/`, the following command was run:
+
+```bash
+/home/dev/qflex_git/qflex qpoints convert-single \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --snapshot snapshot_0 \
+  --overwrite
+```
+
+### Result
+
+The lazy conversion contract worked as intended:
+
+1. `convert-single` detected that `run/snapshot_0.gem/` was missing
+2. it materialized `snapshot_0.gem/` lazily from the saved snapshot
+3. it proceeded into the normal checkpoint conversion path
+
+Observed outputs included:
+
+- `run/snapshot_0.gem/`
+- `checkpoints/ws-image-fresh-8c/snapshot_0/snapshot_0.img`
+- `checkpoints/ws-image-fresh-8c/snapshot_0/m5.cpt`
+- `checkpoints/ws-image-fresh-8c/snapshot_0/machine_config.json`
+- `checkpoints/ws-image-fresh-8c/snapshot_0/gem5_uarch/`
+
+The later console output was the usual TLB-apply / VATranslator tail, not a failure of the lazy `.gem` contract itself.
+
+### Current state at end of lazy `.gem` validation
+
+The two-part contract is now validated end to end:
+
+1. `fw` can create `snapshot_0` without pre-emitting `.gem`
+2. `convert-single` can backfill `.gem` lazily and continue conversion
+
+This closes the lazy `.gem` validation phase.
+
+## Mesh comparison findings
+
+This section records what the actual Flexus mesh does, what gem5 currently
+does, what now matches with higher confidence, and what still differs.
+
+### Flexus `BuildMesh`
+
+From:
+
+- `/home/dev/qflex_git/flexus/components/NetShim/netcontainer.cpp`
+- `/home/dev/qflex_git/flexus/components/SplitDestinationMapper/SplitDestinationMapperImpl.cpp`
+- `/home/dev/qflex_git/flexus/components/SplitDestinationMapper/SplitDestinationMapper.hpp`
+
+The Flexus mesh for this phase is not just a generic mesh. It has a specific
+tile structure:
+
+- `numSwitches = systemWidth()`
+- `numNodes = numSwitches * 3`
+- `switchPorts = 7`
+
+So for this `8`-core run:
+
+- routers / tiles: `8`
+- local endpoints: `24`
+- per router:
+  - `3` local ports
+  - `4` mesh ports: up / down / left / right
+
+The local tile ports are:
+
+- `CACHE_PORT = 0`
+- `DIR_PORT = 1`
+- `MEM_PORT = 2`
+
+With the checked `timing.cfg`, the default placement becomes:
+
+- one cache endpoint per tile
+- one directory endpoint per tile
+- one memory-controller endpoint only at tile `0`
+
+because:
+
+- directories are `Distributed`
+- memory controller count is `1`
+- `MemLocation = 0`
+
+### Flexus mesh dimensions
+
+`BuildMesh` computes a rectangular mesh shape from `numSwitches`.
+
+For `numSwitches = 8`, the implementation resolves to:
+
+- rows: `2`
+- columns: `4`
+
+So the current gem5 mesh configuration:
+
+- `Mesh_XY`
+- `mesh_rows = 2`
+
+matches the Flexus `BuildMesh` shape for this `8`-tile case.
+
+This part is no longer an assumption.
+
+### Flexus routing behavior
+
+From `netcontainer.cpp`, Flexus installs two route families:
+
+- VC `0`: X-then-Y
+- VC `1`: Y-then-X
+
+From `netswitch.cpp`, the switch can choose among valid route entries based on
+available output buffering.
+
+So Flexus is not a strict deterministic-XY mesh. It has both XY and YX route
+choices available in the routing table.
+
+### Flexus latency / bandwidth model
+
+The built-in `BuildMesh` path hardcodes:
+
+- `channelLatency = 3`
+- `channelLatencyData = 4`
+- `channelLatencyControl = 1`
+- `switchBandwidth = 4`
+- input / output / internal VC buffers = `6`
+
+The network also marks local tile attachments with local-delay handling via
+`setLocalDelayOnly(...)`.
+
+So Flexus is using a more explicit per-message network cost model than the
+current gem5 `SimpleNetwork` path.
+
+### gem5 mesh as currently implemented
+
+Current gem5 reference path for the mesh variant:
+
+- `/home/dev/qflex_git/QPoints/configs/timing_ruby_moesi_ws_flexus_mesh_ref_8c.args`
+- topology:
+  - `Mesh_XY`
+  - `mesh_rows = 2`
+
+Current gem5 topology behavior:
+
+- the mesh shape is now aligned to Flexus at `2 x 4`
+- routing is deterministic XY through weighted links
+- this is a generic Ruby mesh, not a tile-specialized `cache/dir/mem` mesh
+
+### gem5 controller placement under MOESI
+
+From:
+
+- `/home/dev/qflex_git/QPoints/gem5/configs/ruby/MOESI_CMP_directory.py`
+- `/home/dev/qflex_git/QPoints/gem5/configs/topologies/Mesh_XY.py`
+
+The MOESI controller list is built in this order:
+
+1. all L1 controllers
+2. all L2 controllers
+3. all directory controllers
+4. DMA / tail controllers
+
+`Mesh_XY` then stripes controllers router-by-router in list order.
+
+For the first `24` controllers in this `8`-tile setup, that effectively gives
+each router one:
+
+- L1 controller
+- L2 controller
+- directory controller
+
+That is structurally much closer to the Flexus per-tile organization than the
+earlier Crossbar setup.
+
+### What now matches with higher confidence
+
+The following mesh properties are now grounded in source inspection, not guess:
+
+1. mesh dimensions
+   - Flexus `BuildMesh` for `8` tiles is `2 x 4`
+   - current gem5 mesh uses `mesh_rows = 2`, which matches
+
+2. tile count
+   - both are using `8` routers / tiles in this experiment
+
+3. tile-local L1 / LLC-slice / directory structure
+   - Flexus has tile-local cache, directory, and optional memory endpoint ports
+   - gem5 MOESI placement now effectively gives each router:
+     - one L1
+     - one L2 slice
+     - one directory controller
+
+So the mesh structure is now substantially closer than:
+
+- gem5 Crossbar
+- or a mesh interpretation with unknown dimensions
+
+### What still differs
+
+The following are still real mismatches:
+
+1. routing policy
+   - Flexus supports both XY and YX route families
+   - gem5 `Mesh_XY` is deterministic XY
+
+2. network model
+   - Flexus `BuildMesh` has its own explicit latency / bandwidth / buffering
+     model
+   - current gem5 path is still on Ruby `SimpleNetwork`
+
+3. memory endpoint semantics
+   - Flexus places the single memory controller explicitly at tile `0`
+   - gem5 MOESI memory / directory plumbing is not equivalent to that tile-level
+     endpoint model
+
+4. LLC home assignment
+   - still the major known mismatch
+   - this phase has not tried to match Flexus home assignment semantics
+
+### Practical conclusion
+
+For this phase, the most defensible statement is:
+
+- current gem5 mesh is meaningfully closer to Flexus mesh than the earlier
+  Crossbar setup
+- the `2 x 4` mesh shape is now justified directly from Flexus source
+- gem5 controller placement is also closer to the Flexus tile structure than
+  initially assumed
+
+But we should still avoid claiming mesh equivalence, because:
+
+- route choice differs
+- the network cost model differs
+- memory endpoint behavior differs
+- LLC home assignment still differs
+
+### Measured mesh vs crossbar baseline
+
+After the mesh bring-up was committed, the following gem5 mesh baseline was
+run:
+
+```bash
+/home/dev/qflex_git/qflex run_sample \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --first snapshot_0 \
+  --last snapshot_0 \
+  --warmup-cycles 200000 \
+  --measurement-cycles 1000000 \
+  --timing-engine gem5 \
+  --timing-ruby-moesi \
+  --sim-config /home/dev/qflex_git/QPoints/configs/timing_ruby_moesi_ws_flexus_mesh_ref_8c.args
+```
+
+Mesh results:
+
+- aggregate IPC: `7.256014`
+- aggregate uIPC: `6.297251`
+- average IPC: `0.90700175`
+- average uIPC: `0.787156375`
+
+Earlier crossbar baseline:
+
+- aggregate IPC: `7.205109`
+- aggregate uIPC: `6.247511`
+- average IPC: `0.900638625`
+- average uIPC: `0.780938875`
+
+Difference, mesh relative to crossbar:
+
+- aggregate IPC: `+0.050905` (`+0.71%`)
+- aggregate uIPC: `+0.049740` (`+0.80%`)
+- average IPC: `+0.006363125`
+- average uIPC: `+0.0062175`
+
+Per-core IPC / uIPC, crossbar -> mesh:
+
+- core 0: `0.00013 / 0.0` -> `0.00014 / 0.0`
+- core 1: `2.397459 / 2.397459` -> `2.412755 / 2.412755`
+- core 2: `1.336649 / 0.779552` -> `1.342581 / 0.785483`
+- core 3: `0.381317 / 0.0` -> `0.382471 / 0.0`
+- core 4: `0.0001 / 0.0` -> `0.0001 / 0.0`
+- core 5: `0.00576 / 0.0` -> `0.00576 / 0.0`
+- core 6: `0.004 / 0.0` -> `0.004 / 0.0`
+- core 7: `3.079694 / 3.0705` -> `3.108207 / 3.099013`
+
+Practical interpretation:
+
+- the committed mesh path is stable for the full `200k / 1M` window
+- the mesh result is very close to the crossbar result on this snapshot
+- for this case, moving from the current crossbar path to the current mesh path
+  changes aggregate IPC by less than `1%`
+
+## Current Flexus vs gem5 behavior
+
+With the mesh-aligned gem5 baseline in place, the matching Flexus run was
+executed with the same:
+
+- args file
+- snapshot (`snapshot_0`)
+- warmup window (`200000` cycles)
+- measurement window (`1000000` cycles)
+
+Flexus command:
+
+```bash
+/home/dev/qflex_git/qflex run_sample \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --first snapshot_0 \
+  --last snapshot_0 \
+  --warmup-cycles 200000 \
+  --measurement-cycles 1000000 \
+  --timing-engine flexus
+```
+
+The gem5 mesh baseline used for comparison was staged separately before the
+Flexus run:
+
+- `/home/dev/qflex_git/QPoints/sim_outs/ws-image-fresh-8c_compare/gem5_mesh_snapshot0/uipc_report.json`
+- `/home/dev/qflex_git/QPoints/sim_outs/ws-image-fresh-8c_compare/gem5_mesh_snapshot0/uipc_summary.json`
+
+### Flexus result
+
+- aggregate IPC: `11.832173`
+- aggregate uIPC: `11.821928`
+- average IPC: `1.479021625`
+- average uIPC: `1.477741`
+
+Per-core IPC / uIPC:
+
+- core 0: `0.0 / 0.0`
+- core 1: `2.970507 / 2.970507`
+- core 2: `2.996689 / 2.996681`
+- core 3: `2.862803 / 2.862803`
+- core 4: `0.0 / 0.0`
+- core 5: `0.0 / 0.0`
+- core 6: `0.0 / 0.0`
+- core 7: `3.002174 / 2.991937`
+
+### Direct comparison against gem5 mesh
+
+gem5 mesh baseline:
+
+- aggregate IPC: `7.256014`
+- aggregate uIPC: `6.297251`
+
+Difference, Flexus relative to gem5 mesh:
+
+- aggregate IPC: `+4.576159` (`+63.1%`)
+- aggregate uIPC: `+5.524677` (`+87.7%`)
+
+Per-core IPC, gem5 mesh -> Flexus:
+
+- core 0: `0.00014 -> 0.0`
+- core 1: `2.412755 -> 2.970507`
+- core 2: `1.342581 -> 2.996689`
+- core 3: `0.382471 -> 2.862803`
+- core 4: `0.0001 -> 0.0`
+- core 5: `0.00576 -> 0.0`
+- core 6: `0.004 -> 0.0`
+- core 7: `3.108207 -> 3.002174`
+
+### Current interpretation
+
+At the current state of the project:
+
+- Flexus and gem5 are **not** in the same ballpark on this snapshot/window
+- the gap is not limited to a small topology effect
+- the largest behavioral differences are on cores `2` and `3`
+- both runs keep cores `4` through `6` effectively idle in this window
+
+This means the current discrepancy is now large enough to justify a focused
+debugging phase rather than further minor structural alignment work.

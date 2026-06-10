@@ -58,17 +58,6 @@ class TestWorm(Executor):
         )
         self.flexus_script = self.flexus_script_loader.load_parameters()
 
-    def build_worm_cache(self) -> List[str]:
-        experiment_folder = self.experiment_context.get_experiment_folder_address()
-        return [
-            f"cp {self.worm_params_address} {experiment_folder}/lib/WormCacheQFlex/src/parameter.rs",
-            f"cd {experiment_folder}/lib/WormCacheQFlex",
-            "cargo build --release",
-            f"cd {experiment_folder}/run",
-            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/libworm_cache.so {self.experiment_context.get_experiment_folder_address()}/lib/",
-            f"cp {experiment_folder}/lib/WormCacheQFlex/target/release/checkpoint_conversion {self.experiment_context.get_experiment_folder_address()}/bin/checkpoint_conversion",
-        ]
-
     def cmd(self) -> str:
         branch_trace_opt = ""
         if self.branch_trace:
@@ -90,7 +79,7 @@ class TestWorm(Executor):
         -plugin ../lib/libworm_cache.so,mode=normal{branch_trace_opt}{tage_decision_trace_opt}{collect_gem5_bbl_btb_opt}
         """
 
-        return self.build_worm_cache() + [
+        return self.experiment_context.get_wormcache_build_commands() + [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             "ls",
             test_cmd

@@ -15,12 +15,14 @@ class FunctionalWarming(Executor):
     def __init__(self,
                  experiment_context: ExperimentContext,
                  sample_size: int,
-                 collect_gem5_bbl_btb: bool = False):
+                 collect_gem5_bbl_btb: bool = False,
+                 emit_gem: bool = False):
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
         self.sample_size = sample_size
         self.collect_gem5_bbl_btb = collect_gem5_bbl_btb
+        self.emit_gem = emit_gem
         self.sampling_interval = math.ceil(
             (self.experiment_context.workload.population + self.sample_size - 1) / self.sample_size
         )
@@ -47,6 +49,8 @@ class FunctionalWarming(Executor):
         ]
         if self.collect_gem5_bbl_btb:
             plugin_args.append("collect_gem5_bbl_btb=1")
+        if self.emit_gem:
+            plugin_args.append("emit_gem=1")
         plugin_arg_string = ",".join(plugin_args)
         fw_cmd = f"""
             ./qemu-system-aarch64 \
@@ -57,7 +61,7 @@ class FunctionalWarming(Executor):
         print(f"Functional warming will start emitting snapshots at snapshot_{init_index}.")
         print("fw command:")
         print(fw_cmd)
-        return [
+        return self.experiment_context.get_wormcache_build_commands() + [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
             fw_cmd,
             # TODO add the proper conditions to only create log and fp_gen_speed at the right time
