@@ -41,9 +41,12 @@ class PartitionCommand(Executor):
             print(f"mv {self.experiment_folder}/run/partition_*/snapshot_* {self.experiment_folder}/run")
             print(f"rm -rf {self.experiment_folder}/run/partition_*")
             raise FileExistsError("Partitions already exist.")
-        # A fully-phantom node has normal qemu checkpoints only (no worm .uarch / .mem /
-        # Flexus configs), so tell partition.py to skip those.
-        phantom = " --phantom" if self.experiment_context.all_phantom_cores else ""
+        # A multi-fidelity phantom node has plain qemu checkpoints only (no worm .uarch / .mem /
+        # Flexus configs), so tell partition.py to skip those. The uniform phantom node keeps the
+        # worm plugin (warm-zero), so it has the normal checkpoint layout — partition it like the
+        # master, no --phantom.
+        exp = self.experiment_context
+        phantom = " --phantom" if (exp.all_phantom_cores and exp.multi_modal) else ""
         return [
             f"cd {self.experiment_folder}",
             f"{self.experiment_folder}/partition.py {self.partition_count}{phantom}",

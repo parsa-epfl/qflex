@@ -2,7 +2,7 @@ import contextlib
 
 from commands import SimulationCommand
 from .config import ExperimentContext
-from commands.qemu import VanillaQemuArgParser, PhantomTimingArgParser
+from commands.qemu import VanillaQemuArgParser, PhantomTimingArgParser, PhantomUniformTimingArgParser
 from .executer import _is_dry_run
 
 
@@ -15,9 +15,11 @@ class RunIdxCommand(SimulationCommand):
 
     @property
     def NEEDS_PDES_PEER_KILL(self) -> bool:
-        # vanilla-qemu's PDES exit handshake is clean → no peer-kill. A phantom node runs the
-        # parallel binary (PDES exit-hang bug) and the master won't kill it, so it needs one.
-        return self.experiment_context.all_phantom_cores
+        # vanilla-qemu's PDES exit handshake is clean → no peer-kill. A multi-fidelity phantom node
+        # runs the parallel binary (PDES exit-hang bug) and the master won't kill it, so it needs
+        # one. The uniform phantom node runs vanilla+Flexus (clean exit) → no peer-kill.
+        exp = self.experiment_context
+        return exp.all_phantom_cores and exp.multi_modal
 
     def execute(self, to_stdio: bool = True, run_in_background: bool = False,
                 dry_run: bool = False, *, sentinel_dir: str = None,
@@ -65,10 +67,11 @@ class RunIdxCommand(SimulationCommand):
                 f'echo "===== qflex idx {idx}: stderr =====" >> {self.get_err_file_address()}',
             ]
 
-        # Phantom node: no Flexus, no checkpoint conversion — a plain parallel qemu that loads
-        # the per-idx snapshot and advances at the phantom IPC, pairing with the master over
-        # PDES until the master's idx exits.
-        if exp.all_phantom_cores:
+        # Multi-fidelity phantom node: no Flexus, no checkpoint conversion — a plain parallel qemu
+        # that loads the per-idx snapshot and advances at the phantom IPC, pairing with the master
+        # over PDES until the master's idx exits. (The uniform phantom node falls through to the
+        # master path below, only swapping the Flexus target for libphantomkraken.)
+        if exp.all_phantom_cores and exp.multi_modal:
             parser = PhantomTimingArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
             qemu_cmd = f"{parser.qemu_binary} {parser.get_qemu_base_args()} {output} < /dev/null"
             return [
@@ -81,7 +84,13 @@ class RunIdxCommand(SimulationCommand):
                 'echo "Elapsed: $((tock - tick)) ms"',
             ]
 
-        vanilla_parser = VanillaQemuArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
+        # Uniform phantom node (all_phantom_cores and not multi_modal): identical to the master
+        # timing leaf — same vanilla binary, checkpoint_conversion, per-idx snapshot — only the
+        # Flexus target differs (libphantomkraken, all cores phantom).
+        if exp.all_phantom_cores:
+            vanilla_parser = PhantomUniformTimingArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
+        else:
+            vanilla_parser = VanillaQemuArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
         setup_commands = [
             f"cd {partition_folder}",
             f'echo "===== qflex idx {idx}: starting in {partition_folder} ====="',

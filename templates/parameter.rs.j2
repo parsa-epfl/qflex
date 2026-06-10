@@ -39,23 +39,26 @@ use rustc_hash::FxHashMap;
  *
  * Number of vCPUs of QEMU.
  */
-pub const CORE_COUNT: usize = {{ (CORE_COUNT * 2) if DOUBLED_VCPU else CORE_COUNT }};
+pub const CORE_COUNT: usize = {% if ALL_PHANTOM_CORES and not MULTI_MODAL %}{{ CORE_COUNT }}{% else %}{{ (CORE_COUNT * 2) if DOUBLED_VCPU else CORE_COUNT }}{% endif %};
 
 /**
- * CACHE_HIERARCHY_FOR_HALF_OF_CORES
+ * REAL_CORE_COUNT
  *
- * Whether to use the cache hierarchy and the vtime calculation for half of the cores [0, CORE_COUNT/2)
+ * The phantom/real split — the SINGLE knob. Cores [0, REAL_CORE_COUNT) are real: warmed by the cache
+ * hierarchy + branch predictor, and serialised into the checkpoint. Cores [REAL_CORE_COUNT, CORE_COUNT)
+ * are phantom — modelled by nothing. This one value sizes the warming structures (so it drives the
+ * checkpoint content) AND gates the warming callbacks, so the two can never diverge.
  *
- * This option is specially for profiling online services images.
- *
- * TODO: This is not the best way to implement this feature. We should use a more flexible way to specify the cores.
- *
- * This option impact both the cache hierarchy component and the branch predictor component.
+ *   == CORE_COUNT      -> every core real (default).
+ *   == CORE_COUNT / 2  -> half real / half phantom (doubled vCPU, online-services profiling).
+ *   == 0               -> all phantom (a uniform all-phantom node warms / serialises nothing).
  */
-pub const MEASURE_HALF_OF_CORES: bool = {{ "true" if DOUBLED_VCPU else "false" }};
+{# The python CORE_COUNT (simulation_context.core_count) is the real-core count in BOTH modes — doubling
+   only inflates the rust CORE_COUNT const / -smp (total vCPUs), not the number of real cores. So real
+   cores == {{ CORE_COUNT }} whether or not doubled; only an all-phantom node has zero. #}
+pub const REAL_CORE_COUNT: usize = {% if ALL_PHANTOM_CORES and not MULTI_MODAL %}0{% else %}{{ CORE_COUNT }}{% endif %};
 
-// An assertion checker to make sure the CORE_COUNT is even if we use the CACHE_HIERARCHY_FOR_HALF_OF_CORES.
-static_assertions::const_assert!(!MEASURE_HALF_OF_CORES || CORE_COUNT % 2 == 0);
+static_assertions::const_assert!(REAL_CORE_COUNT <= CORE_COUNT);
 
 /**
  * CACHE_LINE_SIZE

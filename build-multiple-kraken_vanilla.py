@@ -7,7 +7,8 @@ MEMORY_CONTROLLER = [1]
 
 TARGETS = [
     "knottykraken",
-    "semikraken"
+    "semikraken",
+    "phantomkraken"
 ]
 
 

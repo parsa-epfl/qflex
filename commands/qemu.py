@@ -39,6 +39,12 @@ class QemuCommonArgParser:
         self.core_coeff = 1
         if self.double_cores:
             self.core_coeff = 2
+        # Uniform all-phantom node (multi_modal=False): no real cores to double — every core is
+        # phantom, so -smp == core_count (and the worm CORE_COUNT must match). Guarded so normal
+        # and multi-fidelity runs are untouched.
+        assert not (self.double_cores and self.experiment_context.all_phantom_cores), "Error: double_cores and all_phantom_cores cannot both be true — uniform phantom nodes have no real cores to double."
+        if self.experiment_context.all_phantom_cores and not self.experiment_context.multi_modal:
+            self.core_coeff = 1
 
         self.use_stdio = use_stdio
         self.node_number = self.experiment_context.node_number
@@ -198,6 +204,9 @@ class VanillaQemuArgParser(QemuCommonArgParser):
 
 
 
+    def lib_name(self) -> str:
+        return "libsemikraken" if self.double_cores else "libknottykraken"
+
     def get_load_vm(self):
         return f"""-loadvm snapshot_{self.idx},on-demand"""
     
@@ -215,8 +224,7 @@ class VanillaQemuArgParser(QemuCommonArgParser):
         single_step_command = f""" -singlestep -d nochain """
         log_command = f""" -D "qemu-timing.log" """
         lib_qflex_command = f""" -libqflex """
-        lib_name = "libsemikraken" if self.double_cores else "libknottykraken"
-        mode_command = f""" mode=timing,lib-path=../../lib/"{lib_name}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:100000,debug=crit,ckpt-path=./snapshot_{self.idx}-flexus,freq={int(self.experiment_context.workload.IPC_info.machine_freq_ghz)} """
+        mode_command = f""" mode=timing,lib-path=../../lib/"{self.lib_name()}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:100000,debug=crit,ckpt-path=./snapshot_{self.idx}-flexus,freq={int(self.experiment_context.workload.IPC_info.machine_freq_ghz)} """
 
         qemu_args = base_args + \
         single_step_command + \
@@ -248,6 +256,16 @@ class PhantomTimingArgParser(VanillaQemuArgParser):
 
     def get_qemu_base_args(self) -> str:
         return QemuCommonArgParser.get_qemu_base_args(self)
+
+
+class PhantomUniformTimingArgParser(VanillaQemuArgParser):
+    """Uniform-path timing parser for an all-phantom node (multi_modal=False): the SAME vanilla
+    binary + libqflex + per-idx snapshot load as the master, only the Flexus target differs —
+    libphantomkraken (PhantomCPU only, all cores phantom). -smp is already un-doubled via the
+    base parser's all_phantom_cores/not multi_modal guard."""
+
+    def lib_name(self) -> str:
+        return "libphantomkraken"
         
 
 

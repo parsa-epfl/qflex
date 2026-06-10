@@ -16,10 +16,13 @@ class FunctionalWarming(SimulationCommand):
     def cmd(self) -> str:
         self._assert_syncs_true()
         exp = self.experiment_context
-        # Phantom node: no detailed warming — run a plain parallel qemu like load (no worm
-        # plugin). It feeds PDES and advances at the phantom IPC; the master's distributed
+        # Multi-fidelity phantom node: no detailed warming — run a plain parallel qemu like load
+        # (no worm plugin). It feeds PDES and advances at the phantom IPC; the master's distributed
         # savevm still persists this node's per-idx checkpoints (without microarch state).
-        if exp.all_phantom_cores:
+        # The uniform phantom node (not multi_modal) falls through to the normal worm command below
+        # — it keeps the plugin loaded but warms zero cores (REAL_CORE_COUNT=0 in its recompiled
+        # parameter.rs), so its checkpoints have the same (empty) .uarch layout as a normal node.
+        if exp.all_phantom_cores and exp.multi_modal:
             return [
                 f"cd {exp.get_experiment_folder_address()}/run",
                 QemuCommonArgParser(exp).get_qemu_command(),

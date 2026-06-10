@@ -73,8 +73,10 @@ ifndef MODE
 endif
 	conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of ./out -b missing && \
 	conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of ./out -b missing && \
+	conan build flexus -pr flexus/target/_profile/${MODE} --name=phantomkraken -of ./out -b missing && \
 	conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of ./out && \
 	conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of ./out && \
+	conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=phantomkraken -of ./out && \
 	make build-kraken
 
 flexus-clean-build:

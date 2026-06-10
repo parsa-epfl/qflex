@@ -19,4 +19,6 @@ class WormConfigLoader(ParameterLoader):
             "DIRECTORY_WAY": self.experiment_context.simulation_context.directory_way,
             "DOUBLED_VCPU": self.experiment_context.simulation_context.doubled_vcpu,
             "CORE_COUNT": self.experiment_context.simulation_context.core_count,
+            "ALL_PHANTOM_CORES": self.experiment_context.all_phantom_cores,
+            "MULTI_MODAL": self.experiment_context.multi_modal,
         }

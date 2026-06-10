@@ -113,7 +113,8 @@ class ExperimentContext(BaseModel):
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     seed_image_address: str = Field(default="", description="Full address of the seed image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
-    all_phantom_cores: bool = Field(default=False, description="If True, this whole node is simulated as phantom only: from FW onward it runs a plain parallel qemu (no worm warming, no Flexus timing); every core uses the phantom IPNS so its virtual time tracks the phantom IPC.")
+    all_phantom_cores: bool = Field(default=False, description="If True, this whole node has zero detailed-modeled cores: every core advances at the phantom IPC instead of being warmed/timed. How it's realized depends on multi_modal.")
+    multi_modal: bool = Field(default=True, description="Only meaningful when all_phantom_cores. True (default) = multi-fidelity: the phantom node runs a different binary (parallel qemu) with plugins dropped. False = uniform: the phantom node runs the same binary+plugins as every node, with all cores phantom (libphantomkraken in timing, worm warming zero cores in FW).")
     node_number: int = Field(default=-1, description="Node number in multi-node setup, -1 means single node. 0 is the master node.")
 
     neighbor_node_list: List[int] = Field(default=[], description="List of neighbor node numbers in multi-node setup.")
@@ -353,19 +354,29 @@ class ExperimentContext(BaseModel):
         # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
         if not os.path.exists(f"./WormCacheQFlex"):
             raise FileNotFoundError("WormCacheQFlex folder not found in the working directory.")
-        if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"):
-            os.system(f"cp -r ./WormCacheQFlex {self.get_experiment_folder_address()}/lib/WormCacheQFlex")
+        worm_dest = f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"
+        if not os.path.exists(worm_dest):
+            os.system(f"cp -r ./WormCacheQFlex {worm_dest}")
+        else:
+            # Refresh the plugin source each run so host edits propagate into a reused experiment
+            # folder (otherwise the components stay stale while init_warm regenerates parameter.rs,
+            # causing const mismatches). Host has no target/, so `/.` overwrites only source files
+            # and leaves the per-experiment cargo build cache (target/) intact.
+            os.system(f"cp -r ./WormCacheQFlex/. {worm_dest}/")
 
         # Move files to lib
         lib_files = [
-            "libknottykraken.so", 
-            "libsemikraken.so"
+            "libknottykraken.so",
+            "libsemikraken.so",
+            "libphantomkraken.so"
         ]
         for f in lib_files:
             if not os.path.exists(f"/home/dev/qflex/kraken_out/{f}"):
                 raise FileNotFoundError(f"Error: {f} not found in ./home/dev/qflex/kraken_out/")
-            if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/{f}"):
-                os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
+            # cp -u: refresh when kraken_out has a newer build so a rebuilt lib reaches a REUSED
+            # experiment (the old `if not exists` only copied once, leaving a stale .so). -u skips the
+            # copy when unchanged — these libs are ~200 MB, so don't re-copy needlessly.
+            os.system(f"cp -u /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
 
         
     def shm_clean_up(self):
@@ -441,10 +452,14 @@ class ExperimentContext(BaseModel):
                     dev = f" -device virtio-net-pci,netdev=net{i},bus=pcie.0,addr=0x{pci_addr:02x},{mac_address},rx_queue_size=1024,tx_queue_size=256 "
                 else:
                     raise ValueError(f"Unsupported network device {net_dev} for neighbor {self.neighbor_node_list[i]}. Supported devices are 'e1000' and 'virtio-net-pci'.")
-                # Timing-phase phantom leaf runs plain parallel qemu with no Flexus: tell the PDES
-                # engine so it announces CTRL_READY immediately and exits on the master's CTRL_CLEANUP
-                # (the master's vanilla leaf won't peer-kill it). idx>=0 scopes this to the timing run.
-                phantom_opt = ",phantom=on" if (self.all_phantom_cores and self.idx >= 0) else ""
+                # phantom = a phantom node produces no measurement output, so it should exit as soon as
+                # the master is done rather than on a self-driven budget. The PDES engine seeds self_ready
+                # at creation (CTRL_READY immediately, then rides the master's CTRL_CLEANUP), so the master
+                # never blocks on it in ANY phase. Set for EVERY phantom node — including uniform timing:
+                # there libphantomkraken still advances all cores at the estimated IPC the whole run
+                # (Flexus doCycle keeps ticking until terminate), and the master only sends CLEANUP after
+                # ITS own measurement budget, so the phantom serves the full window and is never cut short.
+                phantom_opt = ",phantom=on" if self.all_phantom_cores else ""
                 nic_command = nic_command + f"""  -netdev pdes,id=net{i},shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()}{phantom_opt} {dev} """
 
         internet_pci_addr = 0x10 + self.get_neighbor_count()
@@ -581,7 +596,8 @@ def create_experiment_context(
     use_cd_rom: Annotated[bool, Field(description="Whether to use a CD-ROM for initial setup.")] = False,
     machine_freq_ghz: Annotated[float, Field(description="Machine frequency in GHz.")] = 2.0,
     include_affinity: Annotated[bool, Field(description="Whether or not to generate affinity index in core_info.csv.")] = False,
-    all_phantom_cores: Annotated[bool, Field(description="If True, this whole node is simulated as phantom only: from FW onward it runs a plain parallel qemu (no worm warming, no Flexus timing); every core uses the phantom IPNS so its virtual time tracks the phantom IPC.")] = False,
+    all_phantom_cores: Annotated[bool, Field(description="If True, this whole node has zero detailed-modeled cores: every core advances at the phantom IPC instead of being warmed/timed. How it's realized depends on multi_modal.")] = False,
+    multi_modal: Annotated[bool, Field(description="Only meaningful when all_phantom_cores. True (default) = multi-fidelity: the phantom node runs a different binary (parallel qemu) with plugins dropped. False = uniform: same binary+plugins as every node, all cores phantom (libphantomkraken in timing, worm warming zero cores in FW).")] = True,
     # Multi-node parameters
     node_number: Annotated[int, Field(description="Node number in multi-node setup, -1 means single node. 0 is the master node.")] = -1,
     neighbor_node_list: Annotated[Optional[List[int]], Field(description="List of neighbor node numbers in multi-node setup, only used if node_number is not -1.")] = None,
@@ -697,6 +713,7 @@ def create_experiment_context(
         use_gdb=use_gdb,
         include_affinity=include_affinity,
         all_phantom_cores=all_phantom_cores,
+        multi_modal=multi_modal,
         node_number=node_number,
         neighbor_node_list=neighbor_node_list,
         latencies_ns_list=latencies_ns_list,
