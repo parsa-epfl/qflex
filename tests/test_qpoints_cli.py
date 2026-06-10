@@ -246,6 +246,16 @@ def test_prepare_snapshot_gem5_uarch_invokes_qpoints_postprocessor(tmp_path: Pat
     gem5_ckp_dir = tmp_path / "checkpoints"
     gem5_ckp_dir.mkdir()
 
+    (qpoints_root / "configs").mkdir(parents=True)
+    (qpoints_root / "configs" / "timing_ruby_gem5.args").write_text(
+        "--num-l2caches=1\n",
+        encoding="utf-8",
+    )
+    (qpoints_root / "configs" / "timing_ruby_moesi_gem5.args").write_text(
+        "--num-l2caches=8\n",
+        encoding="utf-8",
+    )
+
     with mock.patch.object(module.shutil, "which", return_value="/usr/bin/zstd"), \
          mock.patch.object(module.subprocess, "run") as run_mock:
         module._prepare_snapshot_gem5_uarch(
@@ -256,7 +266,8 @@ def test_prepare_snapshot_gem5_uarch_invokes_qpoints_postprocessor(tmp_path: Pat
             ruby_protocol="moesi_cmp_directory",
         )
 
-    run_mock.assert_called_once_with(
+    assert run_mock.call_count == 2
+    assert run_mock.call_args_list[0] == mock.call(
         [
             module.sys.executable,
             str(script_path),
@@ -268,6 +279,27 @@ def test_prepare_snapshot_gem5_uarch_invokes_qpoints_postprocessor(tmp_path: Pat
             "snapshot_0",
             "--ruby-protocol",
             "moesi_cmp_directory",
+            "--llc-slice-count",
+            "8",
+            "--overwrite",
+        ],
+        text=True,
+        check=True,
+    )
+    assert run_mock.call_args_list[1] == mock.call(
+        [
+            module.sys.executable,
+            str(script_path),
+            "--qflex-run-dir",
+            str(qflex_ckp_dir / "run"),
+            "--gem5-workload-root",
+            str(gem5_ckp_dir),
+            "--snapshot",
+            "snapshot_0",
+            "--ruby-protocol",
+            "mesi_two_level",
+            "--llc-slice-count",
+            "1",
             "--overwrite",
         ],
         text=True,
@@ -317,6 +349,15 @@ def test_prepare_snapshot_gem5_uarch_continues_when_postprocessor_fails(
     (qflex_ckp_dir / "run" / "snapshot_0.uarch").mkdir(parents=True)
     gem5_ckp_dir = tmp_path / "checkpoints"
     gem5_ckp_dir.mkdir()
+    (qpoints_root / "configs").mkdir(parents=True)
+    (qpoints_root / "configs" / "timing_ruby_gem5.args").write_text(
+        "--num-l2caches=1\n",
+        encoding="utf-8",
+    )
+    (qpoints_root / "configs" / "timing_ruby_moesi_gem5.args").write_text(
+        "--num-l2caches=1\n",
+        encoding="utf-8",
+    )
 
     with mock.patch.object(module.shutil, "which", return_value="/usr/bin/zstd"), \
          mock.patch.object(

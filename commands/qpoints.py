@@ -255,7 +255,7 @@ def _prepare_snapshot_gem5_uarch(
     gem5_ckp_dir: str,
     snapshot: str,
     ruby_protocol: str = "mesi_two_level",
-    llc_slice_count: int = 1,
+    sim_config: Optional[str] = None,
 ) -> Optional[dict]:
     qflex_uarch_dir = Path(qflex_ckp_dir) / "run" / f"{snapshot}.uarch"
     if not qflex_uarch_dir.is_dir():
@@ -292,6 +292,15 @@ def _prepare_snapshot_gem5_uarch(
     ]
     try:
         for protocol in protocol_order:
+            default_sim_config_rel = _default_sim_config_rel_for_ruby_protocol(
+                protocol
+            )
+            protocol_sim_config = sim_config if protocol == ruby_protocol else None
+            llc_slice_count = _resolve_llc_slice_count_from_sim_configs(
+                qpoints_root,
+                default_sim_config_rel,
+                protocol_sim_config,
+            )
             subprocess.run(
                 [
                     sys.executable,
@@ -1042,11 +1051,6 @@ def convert_single(
             sim_config,
         )
     )
-    resolved_llc_slice_count = _resolve_llc_slice_count_from_sim_configs(
-        qpoints_root,
-        default_sim_config_rel,
-        sim_config,
-    )
     experiment_machine_config = _load_experiment_machine_config(qflex_ckp_dir)
     experiment_kernel_dir, experiment_kernel_path = _require_ready_experiment_kernel(
         experiment_machine_config
@@ -1223,7 +1227,7 @@ def convert_single(
             gem5_ckp_dir,
             snapshot,
             ruby_protocol,
-            resolved_llc_slice_count,
+            sim_config,
         )
         print(f"[{snapshot}] applying gem5 uarch artifacts")
         _apply_snapshot_gem5_uarch(
