@@ -376,6 +376,61 @@ def test_prepare_snapshot_gem5_uarch_continues_when_postprocessor_fails(
     assert "continuing without gem5 uarch artifacts" in capsys.readouterr().err
 
 
+def test_prepare_snapshot_gem5_uarch_keeps_target_manifest_when_auxiliary_fails(
+    tmp_path: Path, capsys
+):
+    module = _load_qpoints_commands_module()
+
+    qpoints_root = tmp_path / "QPoints"
+    script_path = qpoints_root / "scripts" / "uarch_restore" / "prepare_gem5_uarch.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("#!/usr/bin/env python3\n")
+
+    qflex_ckp_dir = tmp_path / "qflex-ckpts"
+    (qflex_ckp_dir / "run" / "snapshot_0.uarch").mkdir(parents=True)
+    gem5_ckp_dir = tmp_path / "checkpoints"
+    (gem5_ckp_dir / "snapshot_0" / "gem5_uarch" / "moesi_cmp_directory").mkdir(
+        parents=True
+    )
+    (qpoints_root / "configs").mkdir(parents=True)
+    (qpoints_root / "configs" / "timing_ruby_gem5.args").write_text(
+        "--num-l2caches=1\n",
+        encoding="utf-8",
+    )
+    (qpoints_root / "configs" / "timing_ruby_moesi_gem5.args").write_text(
+        "--num-l2caches=8\n",
+        encoding="utf-8",
+    )
+    manifest_path = (
+        gem5_ckp_dir
+        / "snapshot_0"
+        / "gem5_uarch"
+        / "moesi_cmp_directory"
+        / "manifest.json"
+    )
+    manifest_path.write_text('{"components":{"tlb":{"source_files":{"0":"cpu0.json"}}}}')
+
+    side_effects = [
+        None,
+        subprocess.CalledProcessError(1, ["python3"]),
+    ]
+
+    with mock.patch.object(module.shutil, "which", return_value="/usr/bin/zstd"), \
+         mock.patch.object(module.subprocess, "run", side_effect=side_effects):
+        manifest = module._prepare_snapshot_gem5_uarch(
+            qpoints_root=qpoints_root,
+            qflex_ckp_dir=str(qflex_ckp_dir),
+            gem5_ckp_dir=str(gem5_ckp_dir),
+            snapshot="snapshot_0",
+            ruby_protocol="moesi_cmp_directory",
+        )
+
+    assert manifest == {"components": {"tlb": {"source_files": {"0": "cpu0.json"}}}}
+    assert "auxiliary gem5 uarch preparation failed for protocol mesi_two_level" in (
+        capsys.readouterr().err
+    )
+
+
 def test_prepare_snapshot_gem5_uarch_skips_when_postprocessor_script_missing(
     tmp_path: Path, capsys
 ):
