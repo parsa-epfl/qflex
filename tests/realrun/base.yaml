@@ -17,5 +17,4 @@ _leaf_defaults:
   image_folder: /mnt/sdc/testing/
   mounting_folder: /mnt/sdc/testing/
   image_name: root-single-node.qcow2
-  keep_experiment_unique: false
   use_image_directly: true

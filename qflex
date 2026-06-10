@@ -14,6 +14,7 @@ from commands.run_idx import RunIdxCommand
 from commands.run_single_partition import RunSinglePartitionCommand
 from commands.result import RunResultCommand
 from commands.duplicate_experiment import DuplicateExperiment
+from commands.remove_experiment import RemoveExperiment
 from commands.statistical_sample import StatisticalSampleCommand
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -247,15 +248,21 @@ def get_experiment_folder(
 
     Use this when you need the folder before tailing logs / inspecting
     artifacts, instead of hand-deriving `<mounting>/experiments/<name>/`.
-
-    NOTE: when `keep_experiment_unique: true` is set on the context, the path
-    includes a timestamp computed at THIS invocation — a fresh call will give
-    a fresh folder name. For deterministic test YAMLs (which set
-    `keep_experiment_unique: false`) the printed path matches the run's.
     """
     typer.echo(experiment_context.get_experiment_folder_address())
     for sub in experiment_context.sub_experiments or []:
         typer.echo(sub.get_experiment_folder_address())
+
+@app.command(name="remove-experiment")
+@data_class_wrap(create_experiment_context, name="experiment_context")
+def remove_experiment(
+    experiment_context: ExperimentContext,
+):
+    """
+    Remove the experiment folder(s) this config (-c / flags) resolves to: the
+    group folder plus each per-node sub-experiment folder. Errors if none exist.
+    """
+    RemoveExperiment(target=experiment_context).execute(to_stdio=True, run_in_background=False)
 
 @app.command(name="duplicate-experiment")
 @data_class_wrap(create_experiment_context, name="experiment_context")
@@ -277,9 +284,6 @@ def duplicate_experiment(
     the same hierarchy (single-node, or multi-node with the same node numbers).
     Errors if a destination folder already exists, unless --overwrite (copy on
     top) or --replace (delete first, then copy) is passed.
-
-    NOTE: `keep_experiment_unique: true` stamps a fresh timestamp into the
-    names at THIS invocation — use deterministic names on both configs.
     """
     if target_yaml is None:
         raise typer.BadParameter("--target-yaml is required.")

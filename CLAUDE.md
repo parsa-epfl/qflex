@@ -370,7 +370,7 @@ Adding a new pipeline step almost always means: add a class that subclasses `Exe
 - Hard-codes the kraken libs path to `/home/dev/qflex/kraken_out/lib{knotty,semi}kraken.so` ([commands/config.py:323](commands/config.py#L323)) — this matches the in-container layout but will fail on a host build.
 - Copies [partition.py](partition.py) and [result.py](result.py) into the experiment folder. These are run from inside the experiment dir, not the repo root.
 
-If `keep_experiment_unique=True` (default), a `-YYYYMMDD-HHMMSS` suffix is appended; otherwise repeated runs reuse the directory.
+The experiment folder path is deterministic (`<mounting>/experiments/<experiment_name>`); repeated runs reuse the directory.
 
 ### Multi-node specifics
 

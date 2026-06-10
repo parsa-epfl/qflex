@@ -17,7 +17,6 @@ _leaf_defaults:
   image_folder: /mnt/sdb/multi-node-experiments/image-1c/ws/
   mounting_folder: /mnt/sdb/multi-node-experiments/
   image_name: root.qcow2
-  keep_experiment_unique: false
   use_image_directly: true
   sample_size: 1000
   warming_ratio: 2

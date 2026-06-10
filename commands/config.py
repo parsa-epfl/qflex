@@ -7,7 +7,6 @@ import pandas
 
 from .host import Host, SMTHost, HOSTS, HostType
 from .workload import Workload, create_workload
-import datetime
 
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
@@ -106,11 +105,11 @@ class ExperimentContext(BaseModel):
     host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
     mounting_folder: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
-    keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     use_gdb: bool = Field(default=False, description="Wrap the qemu invocation in `gdb -ex run --args ...`. Defaults to False so leaves run qemu directly and don't depend on gdb's interactive prompt handling on segfault; opt in (e.g. in a debug YAML) when you actually want the gdb wrap.")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
+    copy_image_per_node: bool = Field(default=True, description="Whether to copy+rename the image to a per-node -node<N> file. The factory sets this False on a leaf that brought its own distinct image_name, so that image is used directly instead of being overwritten by the -node<N> copy.")
     seed_image_address: str = Field(default="", description="Full address of the seed image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
     all_phantom_cores: bool = Field(default=False, description="If True, this whole node has zero detailed-modeled cores: every core advances at the phantom IPC instead of being warmed/timed. How it's realized depends on multi_modal.")
@@ -256,7 +255,7 @@ class ExperimentContext(BaseModel):
             experimage_image_exists = os.path.exists(self.get_local_image_address())
 
             if not experiment_folder_for_images_exists:
-                os.makedirs(self.get_experiment_folder_address(), exist_ok=not self.keep_experiment_unique)
+                os.makedirs(self.get_experiment_folder_address(), exist_ok=True)
 
             if experimage_image_exists:
                 print(f"Experiment image {self.get_local_image_address()} already exists.")
@@ -268,7 +267,7 @@ class ExperimentContext(BaseModel):
                 # create folder in image folder
                 if not os.path.exists(f"{self.image_folder}/experiments"):
                     os.makedirs(f"{self.image_folder}/experiments", exist_ok=False)
-                os.makedirs(f"{self.image_folder}/experiments/{self.experiment_name}", exist_ok=not self.keep_experiment_unique)
+                os.makedirs(f"{self.image_folder}/experiments/{self.experiment_name}", exist_ok=True)
                 print("created folder in images folder for this experiment, copying image...")
                 # Copy file to the new folder
                 print(f"cp {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
@@ -279,7 +278,7 @@ class ExperimentContext(BaseModel):
                 os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
                 print(f"Linked image to")
             
-        if self.node_number >=0:
+        if self.node_number >=0 and self.copy_image_per_node:
             self.image_address, self.image_name = self.copy_image_for_node(self.image_folder, self.image_name)
             if self.seed_image_name is not None and len(self.seed_image_name) > 0:
                 self.seed_image_address, self.seed_image_name = self.copy_image_for_node(self.image_folder, self.seed_image_name)
@@ -302,7 +301,7 @@ class ExperimentContext(BaseModel):
 
 
         for subfolder in ["bin", "cfg", "flags", "lib", "run", "scripts", "images"]:
-            os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=not self.keep_experiment_unique)
+            os.makedirs(f"{self.get_experiment_folder_address()}/{subfolder}", exist_ok=True)
         self.get_ipns_csv()
 
         if not os.path.exists(f"{self.get_experiment_folder_address()}/run/{self.image_name}"):
@@ -587,7 +586,6 @@ def create_experiment_context(
     image_folder: Annotated[str, Field(description="Folder where images are stored.")] = "./images",
     experiment_name: Annotated[str, Field(description="Name of the experiment. Used for organizing output files.")] = "default-experiment",
     image_name: Annotated[str, Field(description="Name of the image file to load.")] = "root.qcow2",
-    keep_experiment_unique: Annotated[bool, Field(description="Whether to keep the experiment folder unique by adding a timestamp.")] = False,
     use_image_directly: Annotated[bool, Field(description="Whether to use the image directly from the image folder or copy it to the experiment folder.")] = False,
     loadvm_name: Annotated[str, Field(description="Name of the loadvm to use in QEMU, optional.")] = "",
     use_gdb: Annotated[bool, Field(description="Wrap the qemu invocation in `gdb -ex run --args ...`. Defaults to False — qemu runs directly; opt in when you actually want the gdb wrap.")] = False,
@@ -666,17 +664,20 @@ def create_experiment_context(
 
     if experiment_name is None:
         experiment_name: str = 'default-experiment'
-    
-    if keep_experiment_unique:
-        # Add date time to prevent overwriting
-        experiment_name = experiment_name + '-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    # Stamp this group's name onto every sub leaf so they share an shm namespace.
+    # Stamp this group's name onto every sub leaf so they share an shm namespace. A leaf with
+    # its own image_name (distinct from the parent's) uses it directly; one without falls back
+    # to the parent's image_name and gets the per-node -node<N> copy.
     if is_group:
-        sub_experiments = [
-            s.model_copy(update={"experiment_group_name": experiment_name})
-            for s in sub_experiments
-        ]
+        new_subs = []
+        for s in sub_experiments:
+            updates = {"experiment_group_name": experiment_name}
+            if s.image_name and s.image_name != image_name:
+                updates["copy_image_per_node"] = False
+            else:
+                updates["image_name"] = image_name
+            new_subs.append(s.model_copy(update=updates))
+        sub_experiments = new_subs
 
     simulation_context = create_simulation_context(
         core_count=core_count,
@@ -702,7 +703,6 @@ def create_experiment_context(
         experiment_name=experiment_name,
         image_folder=image_folder,
         image_name=image_name,
-        keep_experiment_unique=keep_experiment_unique,
         simulation_context=simulation_context,
         host=host,
         workload=workload,

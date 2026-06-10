@@ -8,6 +8,7 @@ components:
     phantom_cpu_ipc: 4
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
+    image_name: root-single-node.qcow2
 
 
 boot:

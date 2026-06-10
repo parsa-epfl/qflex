@@ -23,6 +23,8 @@ components:
     pdes_net_devs: ["virtio-net-pci"]
     latencies_ns_list: [100000]
     syncs_list: ["true"]
+    copy_image_per_node: false
+    image_name: root-single-multi-node-0.qcow2
 
   experiment_context_node_1:
     _base_: _leaf_defaults
@@ -39,6 +41,8 @@ components:
     all_phantom_cores: true
     multi_modal: false
     phantom_cpu_ipc: 4
+    copy_image_per_node: false
+    image_name: root-single-multi-node-1.qcow2
 
 # Boot relaxes the wire (high latency, sync off); other phases keep the per-leaf
 # defaults. Scoped to the per-leaf components so the unnamed group context

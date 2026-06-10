@@ -32,7 +32,6 @@ _leaf_defaults:
   image_folder: {mf}
   mounting_folder: {mf}
   image_name: root-single-node.qcow2
-  keep_experiment_unique: false
   use_image_directly: true
 """
 
