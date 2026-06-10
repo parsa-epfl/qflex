@@ -247,10 +247,13 @@ def _is_checkpoint_ready_for_request(
             dtb_size=dtb_size,
             have_large_asid_64=have_large_asid_64,
         )
-    except RuntimeError:
+    except (RuntimeError, ValueError, json.JSONDecodeError):
         return False
 
-    manifest = _load_protocol_uarch_manifest(checkpoint_dir, ruby_protocol)
+    try:
+        manifest = _load_protocol_uarch_manifest(checkpoint_dir, ruby_protocol)
+    except (ValueError, json.JSONDecodeError):
+        return False
     if not manifest:
         return False
     if runtime_llc_slice_count is not None:
