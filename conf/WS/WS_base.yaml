@@ -23,6 +23,7 @@ _leaf_defaults:
   warming_ratio: 2
   measurement_ratio: 1
   partition_count: 16
+  phantom_cpu_ipc: 4
 
 
 
