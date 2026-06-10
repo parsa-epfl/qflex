@@ -186,6 +186,96 @@ def _validate_staged_llc_slice_count(
         )
 
 
+def _is_gem_bundle_ready(run_dir: Path, snapshot: str) -> bool:
+    gem_dir = run_dir / f"{snapshot}.gem"
+    required_files = (
+        gem_dir / "register-info.json",
+        gem_dir / "dev.info",
+        gem_dir / "system.physmem.store1.pmem",
+    )
+    return all(path.is_file() for path in required_files)
+
+
+def _is_checkpoint_ready(
+    gem5_ckp_dir: str,
+    snapshot: str,
+    ruby_protocol: str,
+) -> bool:
+    checkpoint_dir = Path(gem5_ckp_dir) / snapshot
+    required_files = (
+        checkpoint_dir / "machine_config.json",
+        checkpoint_dir / "m5.cpt",
+        checkpoint_dir / f"{snapshot}.img",
+        checkpoint_dir / "system.physmem.store0.pmem",
+        checkpoint_dir / "system.physmem.store1.pmem",
+        checkpoint_dir / "register-info.json",
+        checkpoint_dir / "dev.info",
+        checkpoint_dir / "gem5_uarch" / ruby_protocol / "manifest.json",
+    )
+    return all(path.exists() for path in required_files)
+
+
+def _is_checkpoint_ready_for_request(
+    gem5_ckp_dir: str,
+    snapshot: str,
+    ruby_protocol: str,
+    *,
+    core_count: int,
+    memory_gb: int,
+    kernel: str,
+    bootloader: str,
+    root_device: str,
+    itb_size: int,
+    dtb_size: int,
+    have_large_asid_64: bool,
+) -> bool:
+    if not _is_checkpoint_ready(gem5_ckp_dir, snapshot, ruby_protocol):
+        return False
+
+    checkpoint_dir = Path(gem5_ckp_dir) / snapshot
+    try:
+        machine_config = _load_machine_config(checkpoint_dir / "machine_config.json")
+        _validate_machine_config(
+            machine_config,
+            core_count=core_count,
+            memory_gb=memory_gb,
+            kernel=kernel,
+            bootloader=bootloader,
+            root_device=root_device,
+            itb_size=itb_size,
+            dtb_size=dtb_size,
+            have_large_asid_64=have_large_asid_64,
+        )
+    except RuntimeError:
+        return False
+
+    manifest = _load_protocol_uarch_manifest(checkpoint_dir, ruby_protocol)
+    if not manifest:
+        return False
+
+    tlb_source_files = (
+        manifest.get("components", {})
+        .get("tlb", {})
+        .get("source_files", {})
+    )
+    gem5_uarch_dir = checkpoint_dir / "gem5_uarch"
+    for cpu_str in tlb_source_files:
+        mmu_cpt = gem5_uarch_dir / f"mmu-cpu{cpu_str}.cpt"
+        if not mmu_cpt.is_file():
+            return False
+
+    return True
+
+
+def _cleanup_snapshot_gem5_artifacts(
+    qflex_ckp_dir: str,
+    gem5_ckp_dir: str,
+    snapshot: str,
+) -> None:
+    _remove_path(Path(qflex_ckp_dir) / "run" / f"{snapshot}.gem")
+    _remove_path(Path(gem5_ckp_dir) / snapshot)
+
+
 def _refresh_qpoints_helper(
     qpoints_root: Path,
     run_dir: Path,
@@ -1035,7 +1125,7 @@ def convert_single(
     kernel: Optional[str],
     bootloader: Optional[str],
     root_device: str,
-    base: str,
+    base: Optional[str],
     snapshot: str,
     sim_config: Optional[str] = None,
     ssh_host: str = "127.0.0.1",
@@ -1071,6 +1161,12 @@ def convert_single(
     experiment_kernel_dir, experiment_kernel_path = _require_ready_experiment_kernel(
         experiment_machine_config
     )
+    if not base:
+        image_path = experiment_machine_config.get("image_path", "")
+        if image_path:
+            base = str(Path(image_path).expanduser().resolve())
+    if not base:
+        raise RuntimeError("Base image path is not available for convert-single.")
     Path(gem5_ckp_dir).mkdir(parents=True, exist_ok=True)
     checkpoint_kernel_dir = _ensure_checkpoint_kernel_link(
         Path(gem5_ckp_dir), experiment_kernel_dir
@@ -1088,8 +1184,24 @@ def convert_single(
     register_info = qemu_gem5_dump_dir / "register-info.json"
     dev_info = qemu_gem5_dump_dir / "dev.info"
     physmem = qemu_gem5_dump_dir / "system.physmem.store1.pmem"
-    checkpoint_files_exist = (
-        register_info.is_file() and dev_info.is_file() and physmem.is_file()
+    gem_bundle_ready = _is_gem_bundle_ready(run_dir, snapshot)
+    resolved_bootloader = (
+        str(Path(bootloader).expanduser().resolve())
+        if bootloader
+        else get_default_bootloader_path()
+    )
+    checkpoint_ready = _is_checkpoint_ready_for_request(
+        gem5_ckp_dir,
+        snapshot,
+        ruby_protocol,
+        core_count=core_count,
+        memory_gb=memory_gb,
+        kernel=checkpoint_kernel_path,
+        bootloader=resolved_bootloader,
+        root_device=root_device,
+        itb_size=resolved_itb_size,
+        dtb_size=resolved_dtb_size,
+        have_large_asid_64=resolved_have_large_asid_64,
     )
 
     qemu_bin = run_dir / "qemu-system-aarch64"
@@ -1111,9 +1223,18 @@ def convert_single(
             raise RuntimeError(f"[{snapshot}] conversion cancelled")
     try:
         _check_cancelled()
+        if checkpoint_ready and not overwrite:
+            print(f"[{snapshot}] checkpoint already ready; skipping conversion")
+            return
+
         if img_dest_dir.exists():
             if overwrite:
                 _remove_path(img_dest_dir)
+            elif not checkpoint_ready:
+                print(
+                    f"[{snapshot}] checkpoint exists but is incomplete; "
+                    "continuing conversion"
+                )
             elif sys.stdin.isatty():
                 resp = input(
                     f"Destination directory already exists: {img_dest_dir}\n"
@@ -1128,7 +1249,7 @@ def convert_single(
                     "Re-run with --overwrite to remove it."
                 )
 
-        if not checkpoint_files_exist:
+        if not gem_bundle_ready:
             print(f"[{snapshot}] generating .gem checkpoint bundle")
             qemu_cpu = resolve_qemu_cpu()
             with qemu_log.open("w") as log_file:
@@ -1154,8 +1275,9 @@ def convert_single(
                     text=True,
                     check=True,
                 )
+            gem_bundle_ready = _is_gem_bundle_ready(run_dir, snapshot)
 
-        if not qemu_gem5_dump_dir.is_dir():
+        if not gem_bundle_ready or not qemu_gem5_dump_dir.is_dir():
             raise RuntimeError(
                 f"[{snapshot}] expected .gem producer bundle not found: "
                 f"{qemu_gem5_dump_dir}.{_tail_file(qemu_log)}"
@@ -1342,8 +1464,10 @@ def convert_multi(
 
 
 def run_sample(
+    qflex_ckp_dir: str,
     gem5_ckp_dir: str,
     experiment: str,
+    base: str,
     first: str,
     last: str,
     core_count: int,
@@ -1376,6 +1500,23 @@ def run_sample(
     summaries = []
 
     for snapshot in snapshots:
+        ruby_protocol = "mesi_two_level"
+        if timing_ruby_moesi:
+            ruby_protocol = "moesi_cmp_directory"
+        convert_single(
+            qflex_ckp_dir=qflex_ckp_dir,
+            gem5_ckp_dir=gem5_ckp_dir,
+            core_count=core_count,
+            memory_gb=memory_gb,
+            kernel=None,
+            bootloader=bootloader,
+            root_device=root_device,
+            base=base,
+            snapshot=snapshot,
+            sim_config=sim_config,
+            overwrite=False,
+            ruby_protocol=ruby_protocol,
+        )
         run_gem5(
             gem5_ckp_dir=gem5_ckp_dir,
             experiment=experiment,
@@ -1391,6 +1532,11 @@ def run_sample(
             timing_ruby_moesi=timing_ruby_moesi,
             cache_hierarchy_restore=cache_hierarchy_restore,
             sim_config=sim_config,
+        )
+        _cleanup_snapshot_gem5_artifacts(
+            qflex_ckp_dir=qflex_ckp_dir,
+            gem5_ckp_dir=gem5_ckp_dir,
+            snapshot=snapshot,
         )
         summary_path = qpoints_root / "sim_outs" / experiment / snapshot / "uipc_summary.json"
         summaries.append(_load_uipc_summary(summary_path))

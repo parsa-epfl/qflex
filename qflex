@@ -398,8 +398,10 @@ def run_sample(
                 "--warmup-cycles must be non-negative."
             )
         qpoints_run_sample(
+            qflex_ckp_dir=experiment_context.get_experiment_folder_address(),
             gem5_ckp_dir=resolved_gem5_ckp_dir,
             experiment=experiment,
+            base=experiment_context.get_local_image_address(),
             first=first,
             last=last,
             core_count=core_count,
