@@ -791,3 +791,140 @@ But we should still avoid claiming mesh equivalence, because:
 - the network cost model differs
 - memory endpoint behavior differs
 - LLC home assignment still differs
+
+### Measured mesh vs crossbar baseline
+
+After the mesh bring-up was committed, the following gem5 mesh baseline was
+run:
+
+```bash
+/home/dev/qflex_git/qflex run_sample \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --first snapshot_0 \
+  --last snapshot_0 \
+  --warmup-cycles 200000 \
+  --measurement-cycles 1000000 \
+  --timing-engine gem5 \
+  --timing-ruby-moesi \
+  --sim-config /home/dev/qflex_git/QPoints/configs/timing_ruby_moesi_ws_flexus_mesh_ref_8c.args
+```
+
+Mesh results:
+
+- aggregate IPC: `7.256014`
+- aggregate uIPC: `6.297251`
+- average IPC: `0.90700175`
+- average uIPC: `0.787156375`
+
+Earlier crossbar baseline:
+
+- aggregate IPC: `7.205109`
+- aggregate uIPC: `6.247511`
+- average IPC: `0.900638625`
+- average uIPC: `0.780938875`
+
+Difference, mesh relative to crossbar:
+
+- aggregate IPC: `+0.050905` (`+0.71%`)
+- aggregate uIPC: `+0.049740` (`+0.80%`)
+- average IPC: `+0.006363125`
+- average uIPC: `+0.0062175`
+
+Per-core IPC / uIPC, crossbar -> mesh:
+
+- core 0: `0.00013 / 0.0` -> `0.00014 / 0.0`
+- core 1: `2.397459 / 2.397459` -> `2.412755 / 2.412755`
+- core 2: `1.336649 / 0.779552` -> `1.342581 / 0.785483`
+- core 3: `0.381317 / 0.0` -> `0.382471 / 0.0`
+- core 4: `0.0001 / 0.0` -> `0.0001 / 0.0`
+- core 5: `0.00576 / 0.0` -> `0.00576 / 0.0`
+- core 6: `0.004 / 0.0` -> `0.004 / 0.0`
+- core 7: `3.079694 / 3.0705` -> `3.108207 / 3.099013`
+
+Practical interpretation:
+
+- the committed mesh path is stable for the full `200k / 1M` window
+- the mesh result is very close to the crossbar result on this snapshot
+- for this case, moving from the current crossbar path to the current mesh path
+  changes aggregate IPC by less than `1%`
+
+## Current Flexus vs gem5 behavior
+
+With the mesh-aligned gem5 baseline in place, the matching Flexus run was
+executed with the same:
+
+- args file
+- snapshot (`snapshot_0`)
+- warmup window (`200000` cycles)
+- measurement window (`1000000` cycles)
+
+Flexus command:
+
+```bash
+/home/dev/qflex_git/qflex run_sample \
+  --args-file /home/dev/qflex_git/args/ws_image_fresh_8c_flexus_compare.qflex.args \
+  --first snapshot_0 \
+  --last snapshot_0 \
+  --warmup-cycles 200000 \
+  --measurement-cycles 1000000 \
+  --timing-engine flexus
+```
+
+The gem5 mesh baseline used for comparison was staged separately before the
+Flexus run:
+
+- `/home/dev/qflex_git/QPoints/sim_outs/ws-image-fresh-8c_compare/gem5_mesh_snapshot0/uipc_report.json`
+- `/home/dev/qflex_git/QPoints/sim_outs/ws-image-fresh-8c_compare/gem5_mesh_snapshot0/uipc_summary.json`
+
+### Flexus result
+
+- aggregate IPC: `11.832173`
+- aggregate uIPC: `11.821928`
+- average IPC: `1.479021625`
+- average uIPC: `1.477741`
+
+Per-core IPC / uIPC:
+
+- core 0: `0.0 / 0.0`
+- core 1: `2.970507 / 2.970507`
+- core 2: `2.996689 / 2.996681`
+- core 3: `2.862803 / 2.862803`
+- core 4: `0.0 / 0.0`
+- core 5: `0.0 / 0.0`
+- core 6: `0.0 / 0.0`
+- core 7: `3.002174 / 2.991937`
+
+### Direct comparison against gem5 mesh
+
+gem5 mesh baseline:
+
+- aggregate IPC: `7.256014`
+- aggregate uIPC: `6.297251`
+
+Difference, Flexus relative to gem5 mesh:
+
+- aggregate IPC: `+4.576159` (`+63.1%`)
+- aggregate uIPC: `+5.524677` (`+87.7%`)
+
+Per-core IPC, gem5 mesh -> Flexus:
+
+- core 0: `0.00014 -> 0.0`
+- core 1: `2.412755 -> 2.970507`
+- core 2: `1.342581 -> 2.996689`
+- core 3: `0.382471 -> 2.862803`
+- core 4: `0.0001 -> 0.0`
+- core 5: `0.00576 -> 0.0`
+- core 6: `0.004 -> 0.0`
+- core 7: `3.108207 -> 3.002174`
+
+### Current interpretation
+
+At the current state of the project:
+
+- Flexus and gem5 are **not** in the same ballpark on this snapshot/window
+- the gap is not limited to a small topology effect
+- the largest behavioral differences are on cores `2` and `3`
+- both runs keep cores `4` through `6` effectively idle in this window
+
+This means the current discrepancy is now large enough to justify a focused
+debugging phase rather than further minor structural alignment work.
