@@ -109,7 +109,9 @@ class ExperimentContext(BaseModel):
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     use_gdb: bool = Field(default=False, description="Wrap the qemu invocation in `gdb -ex run --args ...`. Defaults to False so leaves run qemu directly and don't depend on gdb's interactive prompt handling on segfault; opt in (e.g. in a debug YAML) when you actually want the gdb wrap.")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
+    # TODO these two variables are a bit overkill, see if it can be simplified later
     copy_image_per_node: bool = Field(default=True, description="Whether to copy+rename the image to a per-node -node<N> file. The factory sets this False on a leaf that brought its own distinct image_name, so that image is used directly instead of being overwritten by the -node<N> copy.")
+    parent_image_name: str = Field(default="", description="Parent (group) image_name, stamped onto an own-image leaf by the factory. Used as the source to copy into the leaf's own image_name when that per-node image file doesn't exist yet.")
     seed_image_address: str = Field(default="", description="Full address of the seed image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
     all_phantom_cores: bool = Field(default=False, description="If True, this whole node has zero detailed-modeled cores: every core advances at the phantom IPC instead of being warmed/timed. How it's realized depends on multi_modal.")
@@ -236,7 +238,7 @@ class ExperimentContext(BaseModel):
 
         if not os.path.exists(new_address):
             print(f"Creating node specific file for node {self.node_number} at {new_address}...")
-            os.system(f"cp -u {old_address} {new_address}")
+            os.system(f"rsync -ah --info=progress2 {old_address} {new_address}")
 
         return new_address, new_file_name
 
@@ -278,10 +280,17 @@ class ExperimentContext(BaseModel):
                 os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
                 print(f"Linked image to")
             
-        if self.node_number >=0 and self.copy_image_per_node:
-            self.image_address, self.image_name = self.copy_image_for_node(self.image_folder, self.image_name)
-            if self.seed_image_name is not None and len(self.seed_image_name) > 0:
-                self.seed_image_address, self.seed_image_name = self.copy_image_for_node(self.image_folder, self.seed_image_name)
+        if self.node_number >= 0:
+            if self.copy_image_per_node:
+                self.image_address, self.image_name = self.copy_image_for_node(self.image_folder, self.image_name)
+                if self.seed_image_name is not None and len(self.seed_image_name) > 0:
+                    self.seed_image_address, self.seed_image_name = self.copy_image_for_node(self.image_folder, self.seed_image_name)
+            else:
+                own_path = f"{self.image_folder}/{self.image_name}"
+                if not os.path.exists(own_path):
+                    print(f"Per-node image {own_path} missing; copying parent {self.parent_image_name} into it...")
+                    os.system(f"rsync -ah --info=progress2 {self.image_folder}/{self.parent_image_name} {own_path}")
+                self.image_address = own_path
 
             
 
@@ -674,6 +683,7 @@ def create_experiment_context(
             updates = {"experiment_group_name": experiment_name}
             if s.image_name and s.image_name != image_name:
                 updates["copy_image_per_node"] = False
+                updates["parent_image_name"] = image_name
             else:
                 updates["image_name"] = image_name
             new_subs.append(s.model_copy(update=updates))

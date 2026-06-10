@@ -41,6 +41,7 @@ RUN apt install -y --no-install-recommends zstd
 RUN apt install -y --no-install-recommends vim
 RUN apt install -y --no-install-recommends tmux
 RUN apt install -y --no-install-recommends htop
+RUN apt install -y --no-install-recommends rsync
 RUN apt-get install -y expect telnet
 
 RUN apt-get update && apt-get install -y \
