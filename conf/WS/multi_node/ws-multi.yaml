@@ -1,4 +1,5 @@
-extends: WS_base
+extends: ../WS_base
+
 _leaf_defaults:
   population_seconds: 0.1
   _target_: commands.config.create_experiment_context

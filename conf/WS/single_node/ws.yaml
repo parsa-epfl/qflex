@@ -1,4 +1,4 @@
-extends: WS_base
+extends: ../WS_base
 
 components:
   experiment_context:
