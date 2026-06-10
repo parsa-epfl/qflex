@@ -595,3 +595,199 @@ The two-part contract is now validated end to end:
 2. `convert-single` can backfill `.gem` lazily and continue conversion
 
 This closes the lazy `.gem` validation phase.
+
+## Mesh comparison findings
+
+This section records what the actual Flexus mesh does, what gem5 currently
+does, what now matches with higher confidence, and what still differs.
+
+### Flexus `BuildMesh`
+
+From:
+
+- `/home/dev/qflex_git/flexus/components/NetShim/netcontainer.cpp`
+- `/home/dev/qflex_git/flexus/components/SplitDestinationMapper/SplitDestinationMapperImpl.cpp`
+- `/home/dev/qflex_git/flexus/components/SplitDestinationMapper/SplitDestinationMapper.hpp`
+
+The Flexus mesh for this phase is not just a generic mesh. It has a specific
+tile structure:
+
+- `numSwitches = systemWidth()`
+- `numNodes = numSwitches * 3`
+- `switchPorts = 7`
+
+So for this `8`-core run:
+
+- routers / tiles: `8`
+- local endpoints: `24`
+- per router:
+  - `3` local ports
+  - `4` mesh ports: up / down / left / right
+
+The local tile ports are:
+
+- `CACHE_PORT = 0`
+- `DIR_PORT = 1`
+- `MEM_PORT = 2`
+
+With the checked `timing.cfg`, the default placement becomes:
+
+- one cache endpoint per tile
+- one directory endpoint per tile
+- one memory-controller endpoint only at tile `0`
+
+because:
+
+- directories are `Distributed`
+- memory controller count is `1`
+- `MemLocation = 0`
+
+### Flexus mesh dimensions
+
+`BuildMesh` computes a rectangular mesh shape from `numSwitches`.
+
+For `numSwitches = 8`, the implementation resolves to:
+
+- rows: `2`
+- columns: `4`
+
+So the current gem5 mesh configuration:
+
+- `Mesh_XY`
+- `mesh_rows = 2`
+
+matches the Flexus `BuildMesh` shape for this `8`-tile case.
+
+This part is no longer an assumption.
+
+### Flexus routing behavior
+
+From `netcontainer.cpp`, Flexus installs two route families:
+
+- VC `0`: X-then-Y
+- VC `1`: Y-then-X
+
+From `netswitch.cpp`, the switch can choose among valid route entries based on
+available output buffering.
+
+So Flexus is not a strict deterministic-XY mesh. It has both XY and YX route
+choices available in the routing table.
+
+### Flexus latency / bandwidth model
+
+The built-in `BuildMesh` path hardcodes:
+
+- `channelLatency = 3`
+- `channelLatencyData = 4`
+- `channelLatencyControl = 1`
+- `switchBandwidth = 4`
+- input / output / internal VC buffers = `6`
+
+The network also marks local tile attachments with local-delay handling via
+`setLocalDelayOnly(...)`.
+
+So Flexus is using a more explicit per-message network cost model than the
+current gem5 `SimpleNetwork` path.
+
+### gem5 mesh as currently implemented
+
+Current gem5 reference path for the mesh variant:
+
+- `/home/dev/qflex_git/QPoints/configs/timing_ruby_moesi_ws_flexus_mesh_ref_8c.args`
+- topology:
+  - `Mesh_XY`
+  - `mesh_rows = 2`
+
+Current gem5 topology behavior:
+
+- the mesh shape is now aligned to Flexus at `2 x 4`
+- routing is deterministic XY through weighted links
+- this is a generic Ruby mesh, not a tile-specialized `cache/dir/mem` mesh
+
+### gem5 controller placement under MOESI
+
+From:
+
+- `/home/dev/qflex_git/QPoints/gem5/configs/ruby/MOESI_CMP_directory.py`
+- `/home/dev/qflex_git/QPoints/gem5/configs/topologies/Mesh_XY.py`
+
+The MOESI controller list is built in this order:
+
+1. all L1 controllers
+2. all L2 controllers
+3. all directory controllers
+4. DMA / tail controllers
+
+`Mesh_XY` then stripes controllers router-by-router in list order.
+
+For the first `24` controllers in this `8`-tile setup, that effectively gives
+each router one:
+
+- L1 controller
+- L2 controller
+- directory controller
+
+That is structurally much closer to the Flexus per-tile organization than the
+earlier Crossbar setup.
+
+### What now matches with higher confidence
+
+The following mesh properties are now grounded in source inspection, not guess:
+
+1. mesh dimensions
+   - Flexus `BuildMesh` for `8` tiles is `2 x 4`
+   - current gem5 mesh uses `mesh_rows = 2`, which matches
+
+2. tile count
+   - both are using `8` routers / tiles in this experiment
+
+3. tile-local L1 / LLC-slice / directory structure
+   - Flexus has tile-local cache, directory, and optional memory endpoint ports
+   - gem5 MOESI placement now effectively gives each router:
+     - one L1
+     - one L2 slice
+     - one directory controller
+
+So the mesh structure is now substantially closer than:
+
+- gem5 Crossbar
+- or a mesh interpretation with unknown dimensions
+
+### What still differs
+
+The following are still real mismatches:
+
+1. routing policy
+   - Flexus supports both XY and YX route families
+   - gem5 `Mesh_XY` is deterministic XY
+
+2. network model
+   - Flexus `BuildMesh` has its own explicit latency / bandwidth / buffering
+     model
+   - current gem5 path is still on Ruby `SimpleNetwork`
+
+3. memory endpoint semantics
+   - Flexus places the single memory controller explicitly at tile `0`
+   - gem5 MOESI memory / directory plumbing is not equivalent to that tile-level
+     endpoint model
+
+4. LLC home assignment
+   - still the major known mismatch
+   - this phase has not tried to match Flexus home assignment semantics
+
+### Practical conclusion
+
+For this phase, the most defensible statement is:
+
+- current gem5 mesh is meaningfully closer to Flexus mesh than the earlier
+  Crossbar setup
+- the `2 x 4` mesh shape is now justified directly from Flexus source
+- gem5 controller placement is also closer to the Flexus tile structure than
+  initially assumed
+
+But we should still avoid claiming mesh equivalence, because:
+
+- route choice differs
+- the network cost model differs
+- memory endpoint behavior differs
+- LLC home assignment still differs
