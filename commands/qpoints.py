@@ -236,6 +236,8 @@ def _is_checkpoint_ready_for_request(
     checkpoint_dir = Path(gem5_ckp_dir) / snapshot
     try:
         machine_config = _load_machine_config(checkpoint_dir / "machine_config.json")
+        if not isinstance(machine_config, dict):
+            return False
         _validate_machine_config(
             machine_config,
             core_count=core_count,

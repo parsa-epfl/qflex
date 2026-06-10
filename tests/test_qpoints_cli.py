@@ -559,6 +559,53 @@ def test_is_checkpoint_ready_for_request_treats_corrupt_metadata_as_not_ready(
     )
 
 
+def test_is_checkpoint_ready_for_request_treats_non_object_machine_config_as_not_ready(
+    tmp_path: Path,
+):
+    module = _load_qpoints_commands_module()
+
+    checkpoint_dir = tmp_path / "snapshot_0"
+    protocol_dir = checkpoint_dir / "gem5_uarch" / "moesi_cmp_directory"
+    protocol_dir.mkdir(parents=True)
+    (checkpoint_dir / "machine_config.json").write_text(
+        "[]\n",
+        encoding="utf-8",
+    )
+    for relative in (
+        "m5.cpt",
+        "snapshot_0.img",
+        "system.physmem.store0.pmem",
+        "system.physmem.store1.pmem",
+        "register-info.json",
+        "dev.info",
+    ):
+        path = checkpoint_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8")
+    (protocol_dir / "manifest.json").write_text(
+        __import__("json").dumps({"llc_slice_count": 8}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        module._is_checkpoint_ready_for_request(
+            str(tmp_path),
+            "snapshot_0",
+            "moesi_cmp_directory",
+            runtime_llc_slice_count=8,
+            core_count=8,
+            memory_gb=32,
+            kernel="/tmp/kernel",
+            bootloader="/tmp/boot.bin",
+            root_device="/dev/vda",
+            itb_size=64,
+            dtb_size=64,
+            have_large_asid_64=True,
+        )
+        is False
+    )
+
+
 def test_run_sample_converts_each_snapshot_before_running_gem5():
     module = _load_qpoints_commands_module()
 
