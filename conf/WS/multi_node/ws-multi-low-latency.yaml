@@ -19,6 +19,7 @@ components:
     pdes_net_devs: ["virtio-net-pci"]
     latencies_ns_list: [10000]
     syncs_list: ["true"]
+    copy_image_per_node: false
     image_name: root-single-multi-node-0-low-latency.qcow2
 
   experiment_context_node_1:
@@ -30,5 +31,6 @@ components:
     pdes_net_devs: ["virtio-net-pci"]
     latencies_ns_list: [10000]
     syncs_list: ["true"]
+    copy_image_per_node: false
     image_name: root-single-multi-node-1-low-latency.qcow2
     wait_for_nodes: [0]
