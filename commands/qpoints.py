@@ -220,6 +220,7 @@ def _is_checkpoint_ready_for_request(
     snapshot: str,
     ruby_protocol: str,
     *,
+    runtime_llc_slice_count: Optional[int],
     core_count: int,
     memory_gb: int,
     kernel: str,
@@ -252,6 +253,16 @@ def _is_checkpoint_ready_for_request(
     manifest = _load_protocol_uarch_manifest(checkpoint_dir, ruby_protocol)
     if not manifest:
         return False
+    if runtime_llc_slice_count is not None:
+        staged_llc_slice_count = manifest.get("llc_slice_count")
+        if staged_llc_slice_count is None:
+            return False
+        try:
+            staged_llc_slice_count = int(staged_llc_slice_count)
+        except (TypeError, ValueError):
+            return False
+        if staged_llc_slice_count != runtime_llc_slice_count:
+            return False
 
     tlb_source_files = (
         manifest.get("components", {})
@@ -1190,10 +1201,16 @@ def convert_single(
         if bootloader
         else get_default_bootloader_path()
     )
+    resolved_llc_slice_count = _resolve_llc_slice_count_from_sim_configs(
+        qpoints_root,
+        _default_sim_config_rel_for_ruby_protocol(ruby_protocol),
+        sim_config,
+    )
     checkpoint_ready = _is_checkpoint_ready_for_request(
         gem5_ckp_dir,
         snapshot,
         ruby_protocol,
+        runtime_llc_slice_count=resolved_llc_slice_count,
         core_count=core_count,
         memory_gb=memory_gb,
         kernel=checkpoint_kernel_path,
