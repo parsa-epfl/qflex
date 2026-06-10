@@ -563,7 +563,12 @@ def plot_u_ipc_distribution(
         interval_ipc_data_u, axis=1
     )  # Sum across cores for each snapshot
     # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
-    valid_u_ipc_data = [x for x in snapshot_total_u_ipc if not math.isnan(x) and x != 0]
+    valid_u_ipc_data = [x for x in snapshot_total_u_ipc if not math.isnan(x)]
+    unvalid_count = len(snapshot_total_u_ipc) - len(valid_u_ipc_data)
+    if unvalid_count > 0:
+        console.print(
+            f"[yellow]Warning: Dropped {unvalid_count} snapshots with NaN or zero U-IPC (idle or invalid data)[/yellow]"
+        )
 
     if len(valid_u_ipc_data) > 0:
         # make sure all U-IPC is larger than 0.
@@ -909,7 +914,12 @@ def analyze_sampling_unit(
             )  # Shape: [snapshots]
 
             # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
-            valid_data = [x for x in snapshot_group_u_ipc if not math.isnan(x) and x != 0]
+            valid_data = [x for x in snapshot_group_u_ipc if not math.isnan(x)]
+            unvalid_count = len(snapshot_group_u_ipc) - len(valid_data)
+            if unvalid_count > 0:
+                console.print(
+                    f"[yellow]Warning: Dropped {unvalid_count} snapshots with NaN or zero U-IPC (idle or invalid data) for this group[/yellow]"
+                )
 
             if len(valid_data) == 0:
                 console.print(

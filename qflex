@@ -13,6 +13,7 @@ from commands.run_partition import RunPartitionCommand
 from commands.run_idx import RunIdxCommand
 from commands.run_single_partition import RunSinglePartitionCommand
 from commands.result import RunResultCommand
+from commands.duplicate_experiment import DuplicateExperiment
 from commands.statistical_sample import StatisticalSampleCommand
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -255,6 +256,42 @@ def get_experiment_folder(
     typer.echo(experiment_context.get_experiment_folder_address())
     for sub in experiment_context.sub_experiments or []:
         typer.echo(sub.get_experiment_folder_address())
+
+@app.command(name="duplicate-experiment")
+@data_class_wrap(create_experiment_context, name="experiment_context")
+def duplicate_experiment(
+    experiment_context: ExperimentContext,
+    target_yaml: Annotated[str, typer.Option(
+        help="YAML of the source experiment whose folders are copied."
+    )] = None,
+    overwrite: Annotated[bool, typer.Option(
+        help="Copy over existing destination folders, overwriting files."
+    )] = False,
+    replace: Annotated[bool, typer.Option(
+        help="Delete existing destination folders first, then copy."
+    )] = False,
+):
+    """
+    Duplicate the experiment folders of --target-yaml under the names this
+    invocation's context (-c / flags) resolves to. Both configs must describe
+    the same hierarchy (single-node, or multi-node with the same node numbers).
+    Errors if a destination folder already exists, unless --overwrite (copy on
+    top) or --replace (delete first, then copy) is passed.
+
+    NOTE: `keep_experiment_unique: true` stamps a fresh timestamp into the
+    names at THIS invocation — use deterministic names on both configs.
+    """
+    if target_yaml is None:
+        raise typer.BadParameter("--target-yaml is required.")
+    if overwrite and replace:
+        raise typer.BadParameter("--overwrite and --replace are mutually exclusive.")
+    from dep_injection.builder import build_experiment_context
+    DuplicateExperiment(
+        destination=experiment_context,
+        source=build_experiment_context(target_yaml),
+        overwrite=overwrite,
+        replace=replace,
+    ).execute(to_stdio=True, run_in_background=False)
 
 
 from commands.multinode import Multi

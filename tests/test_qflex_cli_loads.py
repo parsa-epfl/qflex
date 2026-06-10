@@ -41,6 +41,7 @@ def test_qflex_script_imports_cleanly():
     "result",
     "statistical-sample",
     "get-experiment-folder",
+    "duplicate-experiment",
     "multi",
     "create-base-image",
 ])
