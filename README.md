@@ -4,55 +4,71 @@
   <br/>
   <img width="600" alt="QFlex" src="docs/readme-assets/qflex_logo.svg"/>
   <br/>
-  <b><a href="https://parsa-epfl.github.io/qflex/quickstart/">Documentation</a></b> | <b><a href="https://github.com/parsa-epfl/qflex">GitHub</a></b> | <b><a href="https://qflex.epfl.ch">Website</a></b>
+  <b><a href="https://github.com/parsa-epfl/qflex">GitHub</a></b> | <b><a href="https://qflex.epfl.ch">Website</a></b>
   <br/><br/>
 </p>
 
-## [🎯 Features](#features)
+## Overview
 
-* 🚀 **Fast**. First class support for statistical sampling. Near-GIPS full-system server simulation.
-* 🕰 **Timing-First**. 70 KIPS cycle-accurate simulation.
-* 🗂️ **Components-based**. Create custom components.
-* ✨ **Free**. QFlex is completely free and open source.
+This repository is the top-level entrypoint for the qflex workflow.
 
+In the current project organization, users should normally drive the system
+through the `qflex` CLI rather than through lower-level QPoints helpers or
+legacy scripts. The maintained user-facing documentation for the gem5
+conversion and timing flow lives under:
 
-## [🚀 Getting started](#getting-started)
+- [docs/gem5_conversion/project_progress.md](docs/gem5_conversion/project_progress.md)
+- [docs/gem5_conversion/qflex_cli_guide.md](docs/gem5_conversion/qflex_cli_guide.md)
 
-More information regarding the build system and other subsystem of
-QFlex can be found in the [documentation](https://parsa-epfl.github.io/qflex/quickstart/).
+These two documents are the current starting point for:
 
-### 1. Tools
+- what this project phase delivered
+- what remains for future work
+- how to use the current qflex CLI workflow from boot through timing runs
 
-The following tools should be installed to start QFlex
+## Current direction
 
-- [Python, pip](https://www.python.org/) >= 3.9
-- [docker](https://www.docker.com/)
+The current project direction is:
 
-### 2. Clone repositories
+- qflex as the primary user-facing entrypoint
+- BXKraken-based functional warming and statistical sampling on the source side
+- Flexus and gem5 as timing-engine options under the same broader workflow
+- validation records tracked in `QPoints/validation_records`
+
+For the gem5 path specifically, the maintained workflow is documented in:
+
+- [docs/gem5_conversion/qflex_cli_guide.md](docs/gem5_conversion/qflex_cli_guide.md)
+
+For the project-level status and validated scope, use:
+
+- [docs/gem5_conversion/project_progress.md](docs/gem5_conversion/project_progress.md)
+
+## Basic setup
+
+### 1. Clone repositories
+
 ```sh
 git clone --recursive git@github.com:parsa-epfl/qflex.git
 ```
 
-### 3. Build the python requirements
+### 2. Install Python requirements
+
 ```sh
 cd qflex
 pip install -r requirements.txt
 ```
 
+### 3. Inspect the CLI surface
 
-### 4. Start the docker image
-
-```sh
-./dep --start-docker --worm
-```
-
-### 5. Show the help from QFlex cli inside the docker image
 ```sh
 ./qflex --help
 ```
 
-### 6. Follow the quick start guide
-Follow the quick start on our documentation page: [Quick Start Guide](https://parsa-epfl.github.io/qflex/quickstart/). The guide will help you start your workload and study it using QFlex. It will also help you understand how statistical sampling helps with both accuracy and speed and how to use it within QFlex.
+Container bring-up and Docker organization are still in flux. The current
+container surface exists, but it is not yet the clean long-term contract for
+the project. See:
+
+- [docs/gem5_conversion/project_progress.md](docs/gem5_conversion/project_progress.md)
 
 
 ## [🏆 Contributors](#contributors)

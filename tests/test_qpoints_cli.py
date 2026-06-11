@@ -43,6 +43,21 @@ def _load_qpoints_commands_module():
             sys.path.pop(0)
 
 
+def _load_commands_module(module_name: str):
+    repo_root = Path(__file__).resolve().parents[1]
+    repo_root_str = str(repo_root)
+    inserted_repo_root = False
+    if repo_root_str not in sys.path:
+        sys.path.insert(0, repo_root_str)
+        inserted_repo_root = True
+    try:
+        module = __import__(f"commands.{module_name}", fromlist=[module_name])
+        return module
+    finally:
+        if inserted_repo_root and sys.path and sys.path[0] == repo_root_str:
+            sys.path.pop(0)
+
+
 def test_qflex_qpoints_run_gem5_help_exposes_tracing_options():
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "qflex"
@@ -95,6 +110,48 @@ def test_qpoints_run_gem5_forwards_tracing_options():
         timing_ruby_moesi=False,
         sim_config="/tmp/override.args",
     )
+
+
+def test_initialize_forwards_collect_gem5_bbl_btb():
+    module = _load_qflex_module()
+    executor = mock.Mock()
+    executor.execute = mock.Mock()
+    with mock.patch.object(module, "InitWarm", return_value=executor) as init_warm_cls:
+        module.initialize.__wrapped__(
+            experiment_context=mock.sentinel.experiment_context,
+            skip_generate_cfg=False,
+            collect_gem5_bbl_btb=True,
+            fallback_cycles=1234,
+        )
+
+    init_warm_cls.assert_called_once_with(
+        experiment_context=mock.sentinel.experiment_context,
+        skip_generate_cfg=False,
+        fallback_cycles=1234,
+        collect_gem5_bbl_btb=True,
+    )
+    executor.execute.assert_called_once_with(to_stdio=True, run_in_background=False)
+
+
+def test_fw_forwards_collect_gem5_bbl_btb():
+    module = _load_qflex_module()
+    executor = mock.Mock()
+    executor.execute = mock.Mock()
+    with mock.patch.object(module, "FunctionalWarming", return_value=executor) as fw_cls:
+        module.fw.__wrapped__(
+            experiment_context=mock.sentinel.experiment_context,
+            sample_size=2,
+            collect_gem5_bbl_btb=True,
+            emit_gem=False,
+        )
+
+    fw_cls.assert_called_once_with(
+        experiment_context=mock.sentinel.experiment_context,
+        sample_size=2,
+        collect_gem5_bbl_btb=True,
+        emit_gem=False,
+    )
+    executor.execute.assert_called_once_with(to_stdio=True, run_in_background=False)
 
 
 def test_qpoints_run_gem5_rejects_cache_dump_without_ruby():
@@ -231,6 +288,46 @@ def test_prepare_snapshot_gem5_uarch_skips_when_qflex_uarch_missing(capsys):
 
     run_mock.assert_not_called()
     assert "skipping gem5 uarch preparation" in capsys.readouterr().out
+
+
+class _FakeExperimentContext:
+    def __init__(self, root: Path, loadvm_name: str = ""):
+        self._root = root
+        self.loadvm_name = loadvm_name
+
+    def get_experiment_folder_address(self) -> str:
+        return str(self._root)
+
+
+def test_init_warmed_bbl_btb_policy_round_trip(tmp_path: Path):
+    module = _load_commands_module("gem5_bbl_btb")
+    ctx = _FakeExperimentContext(tmp_path)
+
+    assert module.read_init_warmed_bbl_btb_policy(ctx) is None
+
+    module.record_init_warmed_bbl_btb_policy(ctx, True)
+
+    assert module.read_init_warmed_bbl_btb_policy(ctx) is True
+
+
+def test_fw_warns_when_init_enabled_but_fw_disabled(tmp_path: Path, capsys):
+    module = _load_commands_module("gem5_bbl_btb")
+    ctx = _FakeExperimentContext(tmp_path, loadvm_name="init_warmed")
+    module.record_init_warmed_bbl_btb_policy(ctx, True)
+
+    module.warn_if_init_warmed_bbl_btb_policy_mismatches(ctx, False)
+
+    assert "init_warmed was created with gem5 BBL-BTB collection enabled" in capsys.readouterr().out
+
+
+def test_fw_warns_when_init_disabled_but_fw_enabled(tmp_path: Path, capsys):
+    module = _load_commands_module("gem5_bbl_btb")
+    ctx = _FakeExperimentContext(tmp_path, loadvm_name="init_warmed")
+    module.record_init_warmed_bbl_btb_policy(ctx, False)
+
+    module.warn_if_init_warmed_bbl_btb_policy_mismatches(ctx, True)
+
+    assert "init_warmed was created without gem5 BBL-BTB collection" in capsys.readouterr().out
 
 
 def test_is_gem_bundle_ready_requires_expected_files(tmp_path: Path):

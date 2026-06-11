@@ -190,6 +190,9 @@ def initialize(
     skip_generate_cfg: Annotated[bool, typer.Option(
         help="Whether to skip generating configuration files."
     )]=False,
+    collect_gem5_bbl_btb: Annotated[bool, typer.Option(
+        help="Whether to collect the export-only gem5 BBL-BTB view during initialize so init_warmed carries frontend export continuity into later functional warming."
+    )]=False,
     fallback_cycles: Annotated[int | None, typer.Option(
         min=0,
         help="Optional cycle threshold to trigger init_warmed snapshot creation when LLC warmup does not complete."
@@ -203,6 +206,7 @@ def initialize(
         experiment_context=experiment_context,
         skip_generate_cfg=skip_generate_cfg,
         fallback_cycles=fallback_cycles,
+        collect_gem5_bbl_btb=collect_gem5_bbl_btb,
     )
     init_warm_executor.execute(to_stdio=True, run_in_background=False)
 
