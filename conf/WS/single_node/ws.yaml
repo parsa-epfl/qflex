@@ -3,23 +3,23 @@ extends: ../WS_base
 components:
   experiment_context:
     _base_: _leaf_defaults
-    experiment_name: web-search-single-node-yaml-0
+    experiment_name: web-search-single-node-0
     doubled_vcpu: true
     phantom_cpu_ipc: 4
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
-    image_name: root-single-node.qcow2
+    image_name: root.qcow2
 
 
 boot:
   components:
     experiment_context:
-      interaction_script: /home/dev/qflex/conf/WS/expects/boot_savevm_booted_single.exp
+      interaction_script: /home/dev/qflex/conf/WS/single_node/expects/boot_savevm_booted_single.exp
 
 load:
   components:
     experiment_context:
-      interaction_script: /home/dev/qflex/conf/WS/expects/load_savevm_loaded_single.exp
+      interaction_script: /home/dev/qflex/conf/WS/single_node/expects/load_savevm_loaded_single.exp
       loadvm_name: booted
 
 initialize:

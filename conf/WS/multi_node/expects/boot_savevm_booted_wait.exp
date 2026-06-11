@@ -23,6 +23,20 @@ set exp_folder   $env(EXP_FOLDER)
 catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
 
+# Bidirectional boot login barrier. group folder is shared between leaves. Each leaf writes its own
+# login sentinel once at the shell prompt and waits for the peer's, so the master's `savevm booted`
+# only fires after every node is logged-in/consistent — boot runs sync=false, so without this the
+# nodes' clocks drift and the master can snapshot a peer mid-boot. Each leaf clears its OWN flag at
+# startup so re-runs don't see stale signals.
+if {[info exists env(GROUP_EXP_FOLDER)]} {
+    set group_folder $env(GROUP_EXP_FOLDER)
+} else {
+    set group_folder [file dirname $exp_folder]
+}
+set master_login_flag "$group_folder/ws_boot_master_login.flag"
+set wait_login_flag   "$group_folder/ws_boot_wait_login.flag"
+catch {file delete -force $wait_login_flag}
+
 proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
     set saved_timeout $timeout
@@ -84,6 +98,17 @@ proc wait_for_substring {path needle budget_seconds} {
     error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
 }
 
+# Poll for a peer's sentinel file with a wall-clock budget (the outer `set timeout` doesn't bound
+# bare Tcl while/sleep loops). Used for the boot readiness barrier between leaves.
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
+}
+
 # --- 1. Connect serial + login as qflex/qflex --------------------------------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
@@ -117,6 +142,14 @@ expect {
 }
 
 sleep 5
+
+# --- Login barrier: announce we're at shell, wait for master before it savevms ----
+if {[catch {set f [open $wait_login_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $wait_login_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "follower: wrote $wait_login_flag; waiting for master at $master_login_flag..."
+wait_for_file $master_login_flag $BUDGET_BOOT_LOGIN_S
+puts "follower: master at shell; now waiting for our own savevm to finalise."
 
 # --- 2. Wait for our OWN per-node savevm to finalise -------------------------
 #

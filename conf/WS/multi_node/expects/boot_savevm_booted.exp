@@ -1,10 +1,11 @@
 #!/usr/bin/env expect
-# Reusable single-node boot template. Waits for Alpine login, logs in as
-# qflex/qflex, runs whatever you put in the INSERT YOUR SETUP HERE block, then
-# `savevm booted` — the load phase loads from this name.
+# MULTI-NODE MASTER (node_number == 0) WS boot. Boots Alpine, logs in as qflex/qflex, writes the
+# master-login sentinel, waits for the follower's login sentinel, then `savevm booted` via the
+# monitor and quits — the load phase loads from this name.
 #
-# Wire into a YAML's `boot:` section as:
-#   interaction_script: sample_scripts/useful_expects/boot_savevm_booted.exp
+# Pair with conf/WS/multi_node/expects/boot_savevm_booted_wait.exp on every non-master leaf. PDES
+# `savevm` is a distributed snapshot; we just need the follower at the shell prompt before we trigger
+# it so neither leaf saves a half-initialised guest (boot runs sync=false, so the clocks drift).
 
 set timeout 900
 
@@ -20,6 +21,20 @@ set exp_folder   $env(EXP_FOLDER)
 
 catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
+
+# Bidirectional boot login barrier. group folder is shared between leaves. Each leaf writes its own
+# login sentinel once at the shell prompt and waits for the peer's, so this master's `savevm booted`
+# only fires after every node is logged-in/consistent — boot runs sync=false, so without this the
+# nodes' clocks drift and we could snapshot a peer mid-boot. Each leaf clears its OWN flag at
+# startup so re-runs don't see stale signals.
+if {[info exists env(GROUP_EXP_FOLDER)]} {
+    set group_folder $env(GROUP_EXP_FOLDER)
+} else {
+    set group_folder [file dirname $exp_folder]
+}
+set master_login_flag "$group_folder/ws_boot_master_login.flag"
+set wait_login_flag   "$group_folder/ws_boot_wait_login.flag"
+catch {file delete -force $master_login_flag}
 
 proc connect_telnet {host port {budget_seconds 5}} {
     global timeout
@@ -62,6 +77,17 @@ proc quit_qemu {monitor_port} {
             catch {expect -i $sid eof}
         }
     }
+}
+
+# Poll for a peer's sentinel file with a wall-clock budget (the outer `set timeout` doesn't bound
+# bare Tcl while/sleep loops). Used for the boot readiness barrier between leaves.
+proc wait_for_file {path budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} { return }
+        sleep 2
+    }
+    error "wait_for_file: $path never appeared within ${budget_seconds}s"
 }
 
 # --- 1. Connect serial + login as qflex/qflex --------------------------------
@@ -125,6 +151,14 @@ sleep 5
 
 catch {close -i $serial_sid}
 catch {wait -i $serial_sid}
+
+# --- Login barrier: announce we're at shell, wait for follower(s) before savevm ----
+if {[catch {set f [open $master_login_flag "w"]; close $f} err]} {
+    puts "ERROR: could not write $master_login_flag: $err"; quit_qemu $monitor_port; exit 1
+}
+puts "master: wrote $master_login_flag; waiting for follower at $wait_login_flag..."
+wait_for_file $wait_login_flag $BUDGET_BOOT_LOGIN_S
+puts "master: follower at shell; proceeding to savevm booted."
 
 # --- 2. savevm booted via the monitor ----------------------------------------
 
