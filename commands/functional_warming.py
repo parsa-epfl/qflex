@@ -4,6 +4,7 @@ from pathlib import Path
 
 from commands import Executor
 from .config import ExperimentContext
+from .gem5_bbl_btb import warn_if_init_warmed_bbl_btb_policy_mismatches
 from commands.qemu import QemuCommonArgParser
 
 
@@ -69,3 +70,10 @@ class FunctionalWarming(Executor):
             "mkdir fp_gen_speed",
             "mv *.log ./fp_gen_speed",
         ]
+
+    def execute(self, to_stdio: bool = True, run_in_background: bool = False):
+        warn_if_init_warmed_bbl_btb_policy_mismatches(
+            self.experiment_context,
+            self.collect_gem5_bbl_btb,
+        )
+        return super().execute(to_stdio=to_stdio, run_in_background=run_in_background)
