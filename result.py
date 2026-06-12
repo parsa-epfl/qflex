@@ -18,9 +18,10 @@ from rich import box
 from rich.align import Align
 
 # Global constants
-INTERVAL = 100000
+INTERVAL = 100000  # overridden by --interval (the experiment's stat_interval_cycles)
+MEASURE_UNITS = 1  # overridden by --measure-units (the experiment's measurement_ratio)
 FREQ_GHZ = 2.0  # GHz; overridden by --freq-ghz (the experiment's machine_freq_ghz)
-END = 300000
+END = 300000  # derived in main(): (index + MEASURE_UNITS) * INTERVAL
 CORE_COUNT = 64
 
 # When True, NaN / zero snapshots are dropped from stats inputs (shorter
@@ -32,6 +33,27 @@ CORE_COUNT = 64
 OMMIT_ZERO = True
 
 console = Console()
+
+
+def _window(arr: np.ndarray, index: int) -> np.ndarray:
+    """Sum the per-interval deltas over the measurement window [index, index+MEASURE_UNITS).
+    arr is [snapshots, sampling_unit_idx, cores]; returns [snapshots, cores]."""
+    return arr[:, index:index + MEASURE_UNITS, :].sum(axis=1)
+
+
+def _window_cycles(sampling_unit_size: int) -> int:
+    """Total cycles in the measurement window (the IPC denominator)."""
+    return INTERVAL * sampling_unit_size * MEASURE_UNITS
+
+
+def _check_window_bounds(n_units: int, index: int) -> None:
+    if index + MEASURE_UNITS > n_units:
+        console.print(
+            f"[red]Error: window [{index}, {index + MEASURE_UNITS}) is out of bounds — "
+            f"only {n_units} sampling units exist[/red]"
+        )
+        sys.exit(1)
+
 
 def parse_core_groups(core_groups_str: str) -> list[list[int]]:
     """
@@ -305,18 +327,15 @@ def plot_u_ipc_distribution(result_folders: list[str], sampling_unit_size: int, 
     """
     # Get instruction count data
     instruction_data, instruction_data_u = parse_direct_measurements(result_folders, sampling_unit_size)
-    
-    # Check if the index is valid
-    if index >= instruction_data.shape[1]:
-        console.print(f"[red]Error: Index {index} is out of bounds. Maximum index is {instruction_data.shape[1] - 1}[/red]")
-        sys.exit(1)
-    
-    # Extract data for the specified interval index
-    interval_instruction_data_u = instruction_data_u[:, index, :]  # Shape: [snapshots, cores]
-    
+
+    _check_window_bounds(instruction_data.shape[1], index)
+
+    # Sum the measurement window's deltas: [snapshots, cores]
+    interval_instruction_data_u = _window(instruction_data_u, index)
+
     # Calculate IPC for each snapshot and core
-    interval_ipc_data_u = interval_instruction_data_u / (INTERVAL * sampling_unit_size)
-    
+    interval_ipc_data_u = interval_instruction_data_u / _window_cycles(sampling_unit_size)
+
     # Calculate U-IPC statistics for sample size validation
     snapshot_total_u_ipc = np.sum(interval_ipc_data_u, axis=1)  # Sum across cores for each snapshot
     valid_u_ipc_data = _apply_zero_policy(snapshot_total_u_ipc, lambda x: not math.isnan(x) and x > 0)
@@ -369,19 +388,16 @@ def generate_new_core_info(result_folders: list[str], old_core_info_path: str, s
     """
     # Get instruction count data
     instruction_data, instruction_data_u = parse_direct_measurements(result_folders, sampling_unit_size)
-    
-    # Check if the index is valid
-    if index >= instruction_data.shape[1]:
-        console.print(f"[red]Error: Index {index} is out of bounds. Maximum index is {instruction_data.shape[1] - 1}[/red]")
-        sys.exit(1)
-    
-    # Extract data for the specified interval index
-    interval_instruction_data = instruction_data[:, index, :]  # Shape: [snapshots, cores]
-    interval_instruction_data_u = instruction_data_u[:, index, :]  # Shape: [snapshots, cores]
-    
+
+    _check_window_bounds(instruction_data.shape[1], index)
+
+    # Sum the measurement window's deltas: [snapshots, cores]
+    interval_instruction_data = _window(instruction_data, index)
+    interval_instruction_data_u = _window(instruction_data_u, index)
+
     # Calculate IPC for each snapshot and core
-    interval_ipc_data = interval_instruction_data / (INTERVAL * sampling_unit_size)
-    interval_ipc_data_u = interval_instruction_data_u / (INTERVAL * sampling_unit_size)
+    interval_ipc_data = interval_instruction_data / _window_cycles(sampling_unit_size)
+    interval_ipc_data_u = interval_instruction_data_u / _window_cycles(sampling_unit_size)
     
     # Average across snapshots for each core
     core_average_ipc = np.mean(interval_ipc_data, axis=0)  # Shape: [cores]
@@ -582,18 +598,13 @@ def analyze_sampling_unit(result_folders: list[str], sampling_unit_size: int, in
     console.print(f"[green]INTERVAL value: {INTERVAL}[/green]")
     console.print(f"[green]Analyzing sampling unit at index: {index}[/green]")
     
-    # Check if the index is valid
-    print(f"[green]Checking if index {index} is within bounds of {instruction_data_u.shape[1]} sampling units...[/green]")
-    if index >= instruction_data_u.shape[1]:
-        console.print(f"[red]Error: Index {index} is out of bounds. Maximum index is {instruction_data_u.shape[1] - 1}[/red]")
-        sys.exit(1)
-    
-    # Extract data for the specified interval index
-    interval_instruction_u_data = instruction_data_u[:, index, :]  # Shape: [snapshots, cores]
-    
+    _check_window_bounds(instruction_data_u.shape[1], index)
+
+    # Sum the measurement window's deltas: [snapshots, cores]
+    interval_instruction_u_data = _window(instruction_data_u, index)
+
     # Calculate IPC for each snapshot and core
-    # TODO this is hard coded !!! this needs to be fixed.
-    interval_ipc_u_data = interval_instruction_u_data / (INTERVAL * sampling_unit_size)
+    interval_ipc_u_data = interval_instruction_u_data / _window_cycles(sampling_unit_size)
     print(f"[green]Calculated U-IPC data for sampling unit index {index} with shape {interval_ipc_u_data.shape}[/green]")
     
     # Analyze core groups if specified, otherwise analyze all cores as one group
@@ -797,11 +808,28 @@ Examples:
         default=2.0,
         help="Machine frequency in GHz (cycles per ns); the experiment's machine_freq_ghz (default: 2.0)"
     )
+    parser.add_argument(
+        '--interval',
+        type=int,
+        default=100000,
+        help="Stats-dump interval in cycles; the experiment's stat_interval_cycles (default: 100000)"
+    )
+    parser.add_argument(
+        '--measure-units',
+        type=int,
+        default=1,
+        help="Number of consecutive intervals aggregated as the measurement window, starting at --index; the experiment's measurement_ratio (default: 1)"
+    )
 
     args = parser.parse_args()
 
-    global FREQ_GHZ
+    global FREQ_GHZ, INTERVAL, MEASURE_UNITS, END
     FREQ_GHZ = args.freq_ghz
+    INTERVAL = args.interval
+    MEASURE_UNITS = args.measure_units
+    # Only the files up to the end of the measurement window are needed (and must exist).
+    END = (args.index + args.measure_units) * args.unit_size * INTERVAL
+    console.print(f"[green]Window: interval={INTERVAL} cycles, measurement = units [{args.index}, {args.index + MEASURE_UNITS}) = {INTERVAL * MEASURE_UNITS * args.unit_size} cycles[/green]")
 
     console.print(Panel.fit("[bold green]Measurement Data Analysis Tool[/bold green]", border_style="green"))
 

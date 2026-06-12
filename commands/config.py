@@ -101,6 +101,7 @@ class ExperimentContext(BaseModel):
     # TODO move image name to the workload section
     image_folder: str = Field(description="Address of the image to use")
     image_name: str = Field(description="Name of the image to use")
+    original_image_name: str = Field(default="", description="Optional pristine source image. Single-node only: when image_name doesn't exist yet, it's copied from this. Multi-node bakes per-node copying in (copy_image_for_node / parent_image_name), so this is ignored there.")
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
     host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
@@ -126,14 +127,17 @@ class ExperimentContext(BaseModel):
     partition_count: int = Field(default=16, description="Number of partitions the per-sampling-unit checkpoints are split into for parallel timing runs (driven by the `partition` phase). Same value is used downstream by `run-partition` to enumerate partitions.")
     sample_size: int = Field(default=30, description="Number of sampling units the `fw` phase emits checkpoints for. Only the `fw` command consumes this; the timing-phase commands ignore it.")
     save_next_core_info: bool = Field(default=False, description="Whether the `result` phase saves the refined IPC as core_info_<next>.csv (next = max required across nodes, rounded to 50). Default False so a standalone/rerun `result` doesn't accidentally write a new sized file; the statistical-sample loop forces it True.")
-    warming_ratio: int = Field(default=2, description="Detailed-warming prefix length within each sampling unit, in units relative to `measurement_ratio` (each unit = 100k cycles). Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
-    measurement_ratio: int = Field(default=1, description="Measurement segment length within each sampling unit, in units relative to `warming_ratio`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
+    warming_ratio: int = Field(default=2, description="Detailed-warming prefix length within each sampling unit, in units of `stat_interval_cycles`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
+    measurement_ratio: int = Field(default=1, description="Measurement segment length within each sampling unit, in units of `stat_interval_cycles`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")
+    stat_interval_cycles: int = Field(default=100000, description="Flexus stats-dump interval in cycles (the `:B` in the libqflex `cycles=A:B` arg) and the unit in which warming_ratio / measurement_ratio are expressed. Timing phase only.")
     idx: int = Field(default=-1, description="Index of the partition to run, used for some qemu options.")
     seed_image_name: str = Field(default='', description="Name of the seed image file to use in multi-node setup.")
     telnet_port: int = Field(default=-1, description="Telnet port for QEMU monitor.")
     use_telnet_monitor: bool = Field(default=False, description="Whether to use telnet monitor for QEMU instead of stdio.")
     serial_telnet_port: int = Field(default=-1, description="Telnet port for QEMU serial console (used by Path A interaction_script). -1 -> auto = 55600 + node_number.")
-    interaction_script: str = Field(default="", description="Path to an executable script (expect/bash/python/...) that drives QEMU for boot/load on this leaf. Receives TELNET_SERIAL_PORT, TELNET_MONITOR_PORT, SERIAL_LOG_PATH, EXP_FOLDER, NODE_NUMBER as env vars. Setting this auto-enables monitor-on-telnet and serial-on-telnet for the leaf.")
+    interaction_script: str = Field(default="", description="Path to an executable script (expect/bash/python/...) that drives QEMU for boot/load on this leaf. Receives TELNET_SERIAL_PORT, TELNET_MONITOR_PORT, SERIAL_LOG_PATH, EXP_FOLDER, NODE_NUMBER as env vars. Setting this auto-enables monitor-on-telnet and serial-on-telnet for the leaf. A path ending in .j2 is rendered (Jinja) into the experiment's scripts/ folder with the interaction template variables before running.")
+    server_cores: str = Field(default="", description="cpuset string for the server workload container, substituted into interaction-script templates as {{ server_cores }}. Set explicitly in YAML/CLI — never computed.")
+    client_cores: str = Field(default="", description="cpuset string for the client workload container, substituted into interaction-script templates as {{ client_cores }}. Set explicitly in YAML/CLI — never computed.")
     interactive_tmux: bool = Field(default=False, description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")
     pdes_net_devs: List[str] = Field(default=[], description="List of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup.")
     sub_experiments: List["ExperimentContext"] = Field(default_factory=list, description="Optional sub-experiments. If non-empty, this context is a group node; leaf-level fields are unused and the executor recurses into each sub-experiment.")
@@ -167,12 +171,20 @@ class ExperimentContext(BaseModel):
             if self.is_multi_node():
                 self.serial_telnet_port += self.node_number
 
+    def interaction_template_vars(self) -> dict:
+        """Variables available to interaction-script (.j2) templates. Empty string = not provided.
+        To add a variable: add a context field and one entry here."""
+        return {"server_cores": self.server_cores, "client_cores": self.client_cores}
+
     def prepare_for_execution(self):
         """One entry point for all leaf-level prep. Called by the executor right before the leaf bash runs.
         Wraps the existing prep functions; do not call these from create_experiment_context."""
         self.compute_runtime_settings()
         self.set_up_folders()
         self.setup_nic_args()
+        # After set_up_folders so scripts/ exists; rewrites interaction_script to the rendered path.
+        from commands.jinja_loaders.interaction_script_loader import render_interaction_script
+        self.interaction_script = render_interaction_script(self)
 
     def get_partition_folder(self) -> str:
         if self.partition_number < 0:
@@ -227,6 +239,13 @@ class ExperimentContext(BaseModel):
         return f'{self.get_experiment_folder_address()}/parallel-qemu-saved'
     
 
+    @property
+    def _is_node_level_setup(self) -> bool:
+        """True for a node-level context (boot/load/fw); False for a per-partition/idx leaf of the timing
+        fan-out. The per-node image is materialised once here — partition/idx leaves all share that one
+        file, so they must never (re-)copy it (16 leaves would race the same rsync onto the same target)."""
+        return self.partition_number < 0 and self.idx < 0
+
     def copy_image_for_node(self, image_folder: str, parent_file_name: str):
 
         file_name_parts = parent_file_name.split('.')
@@ -236,7 +255,7 @@ class ExperimentContext(BaseModel):
         new_file_name = '.'.join(file_name_parts[:-1]) + f'-node{self.node_number}.' + file_name_parts[-1]
         new_address = f"{image_folder}/{new_file_name}"
 
-        if not os.path.exists(new_address):
+        if self._is_node_level_setup and not os.path.exists(new_address):
             print(f"Creating node specific file for node {self.node_number} at {new_address}...")
             os.system(f"rsync -ah --info=progress2 {old_address} {new_address}")
 
@@ -287,10 +306,16 @@ class ExperimentContext(BaseModel):
                     self.seed_image_address, self.seed_image_name = self.copy_image_for_node(self.image_folder, self.seed_image_name)
             else:
                 own_path = f"{self.image_folder}/{self.image_name}"
-                if not os.path.exists(own_path):
+                if self._is_node_level_setup and not os.path.exists(own_path):
                     print(f"Per-node image {own_path} missing; copying parent {self.parent_image_name} into it...")
                     os.system(f"rsync -ah --info=progress2 {self.image_folder}/{self.parent_image_name} {own_path}")
                 self.image_address = own_path
+        else:
+            # Single-node only: seed image_name from an optional pristine original when it doesn't
+            # exist yet. Multi-node already bakes copying in above (copy_image_for_node) — not here.
+            if self._is_node_level_setup and self.original_image_name and not os.path.exists(self.image_address):
+                print(f"Single-node image {self.image_address} missing; copying original {self.original_image_name} into it...")
+                os.system(f"cp -u {self.image_folder}/{self.original_image_name} {self.image_address}")
 
             
 
@@ -359,18 +384,20 @@ class ExperimentContext(BaseModel):
             # TODO add checks for when cp fails
             os.system(f"cp -u {src} {link_address}")
         # TODO turn WormCacheQFlex address into a parameter
-        # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
-        if not os.path.exists(f"./WormCacheQFlex"):
-            raise FileNotFoundError("WormCacheQFlex folder not found in the working directory.")
-        worm_dest = f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"
-        if not os.path.exists(worm_dest):
-            os.system(f"cp -r ./WormCacheQFlex {worm_dest}")
-        else:
-            # Refresh the plugin source each run so host edits propagate into a reused experiment
-            # folder (otherwise the components stay stale while init_warm regenerates parameter.rs,
-            # causing const mismatches). Host has no target/, so `/.` overwrites only source files
-            # and leaves the per-experiment cargo build cache (target/) intact.
-            os.system(f"cp -r ./WormCacheQFlex/. {worm_dest}/")
+        # WormCacheQFlex is the FW-only plugin (not used in the timing phase), so materialise it once
+        # at node level — timing partition/idx leaves don't need it and must not re-copy it per idx.
+        if self._is_node_level_setup:
+            if not os.path.exists(f"./WormCacheQFlex"):
+                raise FileNotFoundError("WormCacheQFlex folder not found in the working directory.")
+            worm_dest = f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"
+            if not os.path.exists(worm_dest):
+                os.system(f"cp -r ./WormCacheQFlex {worm_dest}")
+            else:
+                # Refresh the plugin source each run so host edits propagate into a reused experiment
+                # folder (otherwise the components stay stale while init_warm regenerates parameter.rs,
+                # causing const mismatches). Host has no target/, so `/.` overwrites only source files
+                # and leaves the per-experiment cargo build cache (target/) intact.
+                os.system(f"cp -r ./WormCacheQFlex/. {worm_dest}/")
 
         # Move files to lib
         lib_files = [
@@ -460,13 +487,13 @@ class ExperimentContext(BaseModel):
                     dev = f" -device virtio-net-pci,netdev=net{i},bus=pcie.0,addr=0x{pci_addr:02x},{mac_address},rx_queue_size=1024,tx_queue_size=256 "
                 else:
                     raise ValueError(f"Unsupported network device {net_dev} for neighbor {self.neighbor_node_list[i]}. Supported devices are 'e1000' and 'virtio-net-pci'.")
-                # phantom = a phantom node produces no measurement output, so it should exit as soon as
-                # the master is done rather than on a self-driven budget. The PDES engine seeds self_ready
-                # at creation (CTRL_READY immediately, then rides the master's CTRL_CLEANUP), so the master
-                # never blocks on it in ANY phase. Set for EVERY phantom node — including uniform timing:
-                # there libphantomkraken still advances all cores at the estimated IPC the whole run
-                # (Flexus doCycle keeps ticking until terminate), and the master only sends CLEANUP after
-                # ITS own measurement budget, so the phantom serves the full window and is never cut short.
+                # phantom=on makes the PDES engine seed self_ready at creation (CTRL_READY immediately, then
+                # ride the master's CTRL_CLEANUP). Set for EVERY phantom node, every phase: a phantom runs no
+                # detailed model that decides when it stops, so it announces exit-readiness right away. In the
+                # TIMING phase it then serves the whole window (libphantomkraken/parallel-qemu keeps advancing
+                # until terminate). In init/FW it ALSO writes a checkpoint, but the early CTRL_READY can no
+                # longer drop it: the master's checkpoint-exit gate keys on CTRL_CKP_DONE (the post-save ACK in
+                # qemu-pdes), not ready_peers — so the master always waits for every node's savevm to finalise.
                 phantom_opt = ",phantom=on" if self.all_phantom_cores else ""
                 nic_command = nic_command + f"""  -netdev pdes,id=net{i},shm-send=/{shm_send},shm-recv=/{shm_recv},latencyns={latency_ns},sync={sync},master={str(self.is_master_node()).lower()}{phantom_opt} {dev} """
 
@@ -562,11 +589,12 @@ class ExperimentContext(BaseModel):
         if not os.path.exists(base):
             os.system(f"cp {target} {base}")
         # Step 2: point the hardcoded core_info.csv (read by other code) at the biggest
-        # core_info_<size>.csv on disk.
+        # core_info_<size>.csv on disk. Atomic tmp+mv: 16 partition leaves run this concurrently
+        # while their flexus instances READ core_info.csv — an rm+cp window would hand a reader a
+        # missing/partial file.
         sym_target = self.run_core_info_path()
         biggest = self.sized_core_info_sizes()[-1]
-        os.system(f"rm -f {sym_target}")
-        os.system(f"cp {run_dir}/core_info_{biggest}.csv {sym_target}")
+        os.system(f"cp {run_dir}/core_info_{biggest}.csv {sym_target}.tmp.{os.getpid()} && mv -f {sym_target}.tmp.{os.getpid()} {sym_target}")
 
 
         
@@ -595,6 +623,7 @@ def create_experiment_context(
     image_folder: Annotated[str, Field(description="Folder where images are stored.")] = "./images",
     experiment_name: Annotated[str, Field(description="Name of the experiment. Used for organizing output files.")] = "default-experiment",
     image_name: Annotated[str, Field(description="Name of the image file to load.")] = "root.qcow2",
+    original_image_name: Annotated[str, Field(description="Optional pristine source image (settable via CLI --original-image-name or YAML). Single-node only: when image_name doesn't exist in image_folder yet, it's copied from this. Multi-node bakes per-node copying in (copy_image_for_node / parent_image_name), so this is ignored there.")] = "",
     use_image_directly: Annotated[bool, Field(description="Whether to use the image directly from the image folder or copy it to the experiment folder.")] = False,
     loadvm_name: Annotated[str, Field(description="Name of the loadvm to use in QEMU, optional.")] = "",
     use_gdb: Annotated[bool, Field(description="Wrap the qemu invocation in `gdb -ex run --args ...`. Defaults to False — qemu runs directly; opt in when you actually want the gdb wrap.")] = False,
@@ -617,14 +646,17 @@ def create_experiment_context(
     partition_count: Annotated[int, Field(description="Number of partitions the per-sampling-unit checkpoints are split into for parallel timing runs.")] = 16,
     sample_size: Annotated[int, Field(description="Number of sampling units the `fw` phase emits checkpoints for. Only the `fw` command consumes this; other phases ignore it.")] = 30,
     save_next_core_info: Annotated[bool, Field(description="Whether the `result` phase saves the refined IPC as core_info_<next>.csv. Default False so a standalone/rerun `result` doesn't accidentally write one; the statistical-sample loop forces it True.")] = False,
-    warming_ratio: Annotated[int, Field(description="Detailed-warming prefix length within each sampling unit, in units relative to `measurement_ratio` (each unit = 100k cycles). Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 2,
-    measurement_ratio: Annotated[int, Field(description="Measurement segment length within each sampling unit, in units relative to `warming_ratio`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 1,
+    warming_ratio: Annotated[int, Field(description="Detailed-warming prefix length within each sampling unit, in units of `stat_interval_cycles`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 2,
+    measurement_ratio: Annotated[int, Field(description="Measurement segment length within each sampling unit, in units of `stat_interval_cycles`. Consumed by the timing-phase commands `run-partition` / `run-single-partition` / `run-idx`; ignored by every other phase.")] = 1,
+    stat_interval_cycles: Annotated[int, Field(description="Flexus stats-dump interval in cycles (the `:B` in the libqflex `cycles=A:B` arg) and the unit in which warming_ratio / measurement_ratio are expressed. Timing phase only.")] = 100000,
     idx: Annotated[int, Field(description="Index of the partition to run, used for some qemu options.")] = -1,
     pdes_net_devs: Annotated[Optional[List[str]], Field(description="List of network device models ('e1000' or 'virtio-net-pci') to use for each neighbor node in multi-node setup. Order matches neighbor_node_list.")] = None,
     sub_experiments: Annotated[Optional[List[ExperimentContext]], Field(description="Optional sub-experiments. If non-empty, this is a group node — leaf-level fields are inherited (e.g. via YAML extends) but unused, and the executor recurses into each sub-experiment in parallel.")] = None,
     wait_for_nodes: Annotated[Optional[List[int]], Field(description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master; set e.g. [0] to wait for the master.")] = None,
     serial_telnet_port: Annotated[int, Field(description="Telnet port for QEMU serial console (Path A). -1 -> auto = 55600 + node_number.")] = -1,
-    interaction_script: Annotated[str, Field(description="Path to an executable script that drives QEMU on this leaf during boot/load. Receives TELNET_SERIAL_PORT, TELNET_MONITOR_PORT, SERIAL_LOG_PATH, EXP_FOLDER, NODE_NUMBER as env vars. Auto-enables monitor-on-telnet + serial-on-telnet.")] = "",
+    interaction_script: Annotated[str, Field(description="Path to an executable script that drives QEMU on this leaf during boot/load. Receives TELNET_SERIAL_PORT, TELNET_MONITOR_PORT, SERIAL_LOG_PATH, EXP_FOLDER, NODE_NUMBER as env vars. Auto-enables monitor-on-telnet + serial-on-telnet. A .j2 path is rendered with the interaction template variables before running.")] = "",
+    server_cores: Annotated[str, Field(description="cpuset string for the server workload container, substituted into interaction-script templates as {{ server_cores }}. Set explicitly in YAML/CLI — never computed.")] = "",
+    client_cores: Annotated[str, Field(description="cpuset string for the client workload container, substituted into interaction-script templates as {{ client_cores }}. Set explicitly in YAML/CLI — never computed.")] = "",
     interactive_tmux: Annotated[bool, Field(description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")] = False,
 ) -> ExperimentContext:
     neighbor_node_list = neighbor_node_list or []
@@ -713,6 +745,7 @@ def create_experiment_context(
         experiment_name=experiment_name,
         image_folder=image_folder,
         image_name=image_name,
+        original_image_name=original_image_name,
         simulation_context=simulation_context,
         host=host,
         workload=workload,
@@ -737,12 +770,15 @@ def create_experiment_context(
         save_next_core_info=save_next_core_info,
         warming_ratio=warming_ratio,
         measurement_ratio=measurement_ratio,
+        stat_interval_cycles=stat_interval_cycles,
         idx=idx,
         pdes_net_devs=pdes_net_devs,
         sub_experiments=sub_experiments,
         wait_for_nodes=wait_for_nodes,
         serial_telnet_port=serial_telnet_port,
         interaction_script=interaction_script,
+        server_cores=server_cores,
+        client_cores=client_cores,
         interactive_tmux=interactive_tmux,
     )
 
@@ -765,8 +801,12 @@ def clone_experiment_context(
 
     kwargs = {**source._creation_kwargs, **overrides}
     cloned = create_experiment_context(**kwargs)
-    # experiment_group_name is stamped post-construction by the group's factory call (it's not in _creation_kwargs), so re-apply it from source.
-    return cloned.model_copy(update={"experiment_group_name": source.experiment_group_name})
+    # These are stamped post-construction by the group's factory call (not in _creation_kwargs), so re-apply from source — else a clone reverts copy_image_per_node to its default and looks for a non-existent -node<N> image.
+    return cloned.model_copy(update={
+        "experiment_group_name": source.experiment_group_name,
+        "copy_image_per_node": source.copy_image_per_node,
+        "parent_image_name": source.parent_image_name,
+    })
 
 
 def get_capital_dict(variable: BaseModel):

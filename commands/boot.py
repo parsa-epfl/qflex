@@ -26,7 +26,8 @@ class Boot(Executor):
         exp = self.experiment_context
         # Path A (scripted): drop stdio so the parser emits serial-on-telnet via get_stdio().
         use_stdio = not bool(exp.interaction_script)
-        parser = QemuCommonArgParser(exp, use_stdio=use_stdio)
+        # Boot is pure emulation — no sampling alignment to protect — so skip the PWQ quantum.
+        parser = QemuCommonArgParser(exp, use_stdio=use_stdio, include_quantum=False)
         gdb_cmd = wrap_with_gdb(
             f"./qemu-system-aarch64 {parser.get_qemu_base_args()}",
             exp.use_gdb,

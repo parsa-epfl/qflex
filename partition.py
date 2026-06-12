@@ -70,6 +70,13 @@ for snapshot_idx in range(len(snapshot_files)):
             f"partition_{partition_idx}/snapshot_{snapshot_idx}.uarch"
         )
 
+    # PDES in-flight messages saved at the checkpoint barrier (written only when nonzero).
+    if os.path.exists(f"snapshot_{snapshot_idx}_in_flight.json"):
+        os.rename(
+            f"snapshot_{snapshot_idx}_in_flight.json",
+            f"partition_{partition_idx}/snapshot_{snapshot_idx}_in_flight.json"
+        )
+
 #TODO this needs to be fixed later to get it from exp config
 # Find the file with root*.qcow2 in the current folder, and check if there is exactly one such file.
 qcow2_files = glob.glob("root*.qcow2")

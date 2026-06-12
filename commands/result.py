@@ -37,16 +37,20 @@ class RunResultCommand(Executor):
 
         # TODO move all root old replica scripts to proper folders
         freq_ghz = self.experiment_context.workload.IPC_info.machine_freq_ghz
+        # Pass the measurement window explicitly so the reporters never fall back to their
+        # defaults' silent warming=2/measurement=1 assumption.
+        window_args = (f"--interval {exp.stat_interval_cycles} --index {exp.warming_ratio} "
+                       f"--measure-units {exp.measurement_ratio}")
         # Always regenerate core_info_new.csv + REQUIRED_SAMPLE_SIZE; --no-exit-on-fail so
         # the cross-node save step below always runs (an unmet bound is not a failure).
         new_result_cmd = ""
         if self.should_generate_core_info():
-            new_result_cmd = f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz} --generate-core-info --no-exit-on-fail" 
+            new_result_cmd = f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz} {window_args} --generate-core-info --no-exit-on-fail"
         else:
-            new_result_cmd = f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz}"
+            new_result_cmd = f"python {experiment_folder}/result_new.py --freq-ghz {freq_ghz} {window_args}"
         return [
             f"cd {experiment_folder}",
-            f"python {experiment_folder}/result.py --freq-ghz {freq_ghz}",
+            f"python {experiment_folder}/result.py --freq-ghz {freq_ghz} {window_args}",
             f"python {experiment_folder}/collect.py",
             new_result_cmd,
         ]

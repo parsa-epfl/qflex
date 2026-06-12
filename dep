@@ -35,6 +35,7 @@ def start_docker(
     start_directory: Annotated[str, typer.Option(help="Directory to start in inside the container.")] = None,
     background: Annotated[bool, typer.Option("--background", help="Run detached, named ('qflex-dev'), and kept alive with `tail -f /dev/null`. Subsequent `./dep exec` calls then talk to this container instead of starting a fresh one each time.")] = False,
     container_name: Annotated[str, typer.Option(help="Name of the detached container (only used with --background).")] = DEFAULT_CONTAINER_NAME,
+    image_version: Annotated[Optional[str], typer.Option(help="Image version tag to start. Defaults to the repo VERSION.")] = None,
 ):
     """
     Start a Docker container with the QFlex environment.
@@ -61,6 +62,7 @@ def start_docker(
         start_directory=start_directory,
         background=background,
         container_name=container_name,
+        image_version=image_version,
     )
     docker_executor.execute(to_stdio=True, run_in_background=False)
     # TODO bring in the build scripts here as well

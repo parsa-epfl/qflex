@@ -15,7 +15,7 @@ class RunSinglePartitionCommand(SequentialGroupExecutor, SimulationCommand):
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 use_stdio: bool = True,
+                 use_stdio: bool = False,
                  owns_progress: bool = True):
         # Init lean — children are built lazily in _build_children() so this
         # executor can be constructed before its partition snapshots exist

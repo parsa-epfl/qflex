@@ -1,0 +1,19 @@
+extends: ws
+
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: web-search-single-node-8-core-0
+    core_count: 4
+    doubled_vcpu: true
+    phantom_cpu_ipc: 4
+    # First boot creates root-8c.qcow2 in image_folder as a copy of root.qcow2.
+    original_image_name: root.qcow2
+    image_name: root-8c.qcow2
+    server_cores: "0-3"
+    client_cores: "4-7"
+
+    quantum_size: 10000
+    check_period_quantum_coeff: 10
+    is_parallel: true
+

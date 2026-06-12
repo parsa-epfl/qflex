@@ -62,10 +62,11 @@ class DockerStarter(Executor):
                  worm: bool = False,
                  start_directory: str = None,
                  background: bool = False,
-                 container_name: str = DEFAULT_CONTAINER_NAME):
+                 container_name: str = DEFAULT_CONTAINER_NAME,
+                 image_version: str = None):
         self.debug = debug
         self.worm = worm
-        self.version = get_version()
+        self.version = image_version if image_version is not None else get_version()
         self.docker_image_name = f"ghcr.io/parsa-epfl/qflex:{get_docker_image_name(debug=self.debug, worm=self.worm)}-{self.version}"
         self.images_folder = './images'
         self.mounting_folder = os.path.abspath(mounting_folder)

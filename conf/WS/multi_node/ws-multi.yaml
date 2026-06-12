@@ -1,5 +1,7 @@
 extends: ../WS_base
 
+_leaf_defaults:
+  partition_count: 24
 
 components:
   experiment_context:
@@ -20,6 +22,7 @@ components:
     latencies_ns_list: [100000]
     syncs_list: ["true"]
     image_name: root-multi-node-0.qcow2
+    server_cores: "0-0"
 
   experiment_context_node_1:
     _base_: _leaf_defaults
@@ -37,6 +40,7 @@ components:
     multi_modal: false
     phantom_cpu_ipc: 4
     image_name: root-multi-node-1.qcow2
+    client_cores: "0-0"
 
 # Boot relaxes the wire (high latency, sync off); other phases keep the per-leaf
 # defaults. Scoped to the per-leaf components so the unnamed group context
@@ -55,10 +59,10 @@ boot:
 load:
   components:
     experiment_context_node_0:
-      interaction_script: /home/dev/qflex/conf/WS/multi_node/expects/load_savevm_loaded_master.exp
+      interaction_script: /home/dev/qflex/conf/WS/multi_node/expects/load_savevm_loaded_master.exp.j2
       loadvm_name: booted
     experiment_context_node_1:
-      interaction_script: /home/dev/qflex/conf/WS/multi_node/expects/load_savevm_loaded_wait.exp
+      interaction_script: /home/dev/qflex/conf/WS/multi_node/expects/load_savevm_loaded_wait.exp.j2
       loadvm_name: booted
 
 

@@ -16,7 +16,8 @@ from rich import box
 from rich.align import Align
 
 # Global constants
-INTERVAL = 100000
+INTERVAL = 100000  # overridden by --interval (the experiment's stat_interval_cycles)
+MEASURE_UNITS = 1  # overridden by --measure-units (the experiment's measurement_ratio)
 FREQ_GHZ = 2.0  # GHz; overridden by --freq-ghz (the experiment's machine_freq_ghz)
 # TODO: the `* FREQ_GHZ` factor was commented out of the IPC denominators below so this
 # script matches result.py (treats INTERVAL as cycles, not ns). Was making every value
@@ -51,6 +52,26 @@ def parse_core_groups(core_groups_str: str) -> list[list[int]]:
         groups.append(cores)
 
     return groups
+
+
+def _window(arr: np.ndarray, index: int) -> np.ndarray:
+    """Sum the per-interval deltas over the measurement window [index, index+MEASURE_UNITS).
+    arr is [snapshots, sampling_unit_idx, cores]; returns [snapshots, cores]."""
+    return arr[:, index:index + MEASURE_UNITS, :].sum(axis=1)
+
+
+def _window_cycles(sampling_unit_size: int) -> int:
+    """Total cycles in the measurement window (the IPC denominator)."""
+    return INTERVAL * sampling_unit_size * MEASURE_UNITS
+
+
+def _check_window_bounds(n_units: int, index: int) -> None:
+    if index + MEASURE_UNITS > n_units:
+        console.print(
+            f"[red]Error: window [{index}, {index + MEASURE_UNITS}) is out of bounds — "
+            f"only {n_units} sampling units exist[/red]"
+        )
+        sys.exit(1)
 
 
 class MeasurementData:
@@ -397,10 +418,10 @@ def calculate_weighted_harmonic_average(
     halted_cycles_data = measurement_data.halted_cycles
     sampling_unit_size = measurement_data.sampling_unit_size
 
-    if index >= instruction_data_u.shape[1]:
+    if index + MEASURE_UNITS > instruction_data_u.shape[1]:
         return 0.0
 
-    total_cycles = INTERVAL * sampling_unit_size  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
+    total_cycles = _window_cycles(sampling_unit_size)  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
     num_snapshots = instruction_data_u.shape[0]
 
     if core_ids is None:
@@ -408,6 +429,8 @@ def calculate_weighted_harmonic_average(
 
     total_harmonic_sum = 0.0
 
+    window_halted = _window(halted_cycles_data, index)
+    window_instr_u = _window(instruction_data_u, index)
     for core_id in core_ids:
         if core_id >= instruction_data_u.shape[2]:
             continue
@@ -417,8 +440,8 @@ def calculate_weighted_harmonic_average(
         idle_weight = 0.0
 
         for snapshot_idx in range(num_snapshots):
-            halted_cycles = halted_cycles_data[snapshot_idx, index, core_id]
-            instructions_u = instruction_data_u[snapshot_idx, index, core_id]
+            halted_cycles = window_halted[snapshot_idx, core_id]
+            instructions_u = window_instr_u[snapshot_idx, core_id]
 
             if halted_cycles >= total_cycles:
                 idle_weight += 1.0
@@ -521,22 +544,13 @@ def plot_u_ipc_distribution(
             "is_sample_size_enough": False,
         }
 
-    # Check if the index is valid
-    if index >= instruction_data.shape[1]:
-        console.print(
-            f"[red]Error: Index {index} is out of bounds. Maximum index is {instruction_data.shape[1] - 1}[/red]"
-        )
-        sys.exit(1)
+    _check_window_bounds(instruction_data.shape[1], index)
 
-    # Extract data for the specified interval index
-    interval_instruction_data_u = instruction_data_u[
-        :, index, :
-    ]  # Shape: [snapshots, cores]
+    # Sum the measurement window's deltas: [snapshots, cores]
+    interval_instruction_data_u = _window(instruction_data_u, index)
 
     # Calculate IPC for each snapshot and core
-    interval_ipc_data_u = interval_instruction_data_u / (
-        INTERVAL * sampling_unit_size  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
-    )
+    interval_ipc_data_u = interval_instruction_data_u / _window_cycles(sampling_unit_size)
 
     # Filter by core_ids if specified
     if core_ids is not None:
@@ -563,7 +577,7 @@ def plot_u_ipc_distribution(
         interval_ipc_data_u, axis=1
     )  # Sum across cores for each snapshot
     # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
-    valid_u_ipc_data = [x for x in snapshot_total_u_ipc if not math.isnan(x)]
+    valid_u_ipc_data = [x for x in snapshot_total_u_ipc]
     unvalid_count = len(snapshot_total_u_ipc) - len(valid_u_ipc_data)
     if unvalid_count > 0:
         console.print(
@@ -634,15 +648,11 @@ def generate_new_core_info(
     halted_cycles_data = measurement_data.halted_cycles
     sampling_unit_size = measurement_data.sampling_unit_size
 
-    if index >= instruction_data.shape[1]:
-        console.print(
-            f"[red]Error: Index {index} is out of bounds. Maximum index is {instruction_data.shape[1] - 1}[/red]"
-        )
-        sys.exit(1)
+    _check_window_bounds(instruction_data.shape[1], index)
 
-    interval_instruction_data = instruction_data[:, index, :]
-    interval_instruction_data_u = instruction_data_u[:, index, :]
-    interval_halted_cycles_data = halted_cycles_data[:, index, :]
+    interval_instruction_data = _window(instruction_data, index)
+    interval_instruction_data_u = _window(instruction_data_u, index)
+    interval_halted_cycles_data = _window(halted_cycles_data, index)
 
     valid_core_ipc = {}
     valid_core_ipc_non_halted = {}
@@ -654,7 +664,7 @@ def generate_new_core_info(
         total_instructions = 0
         for snapshot_idx in range(interval_instruction_data.shape[0]):
             total_instructions += interval_instruction_data[snapshot_idx, core_id]
-            total_cycles += INTERVAL * sampling_unit_size  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
+            total_cycles += _window_cycles(sampling_unit_size)  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
             total_halted_cycles += interval_halted_cycles_data[snapshot_idx, core_id]
 
         valid_core_ipc[core_id] = (
@@ -861,22 +871,13 @@ def analyze_sampling_unit(
     console.print(f"[green]INTERVAL value: {INTERVAL}[/green]")
     console.print(f"[green]Analyzing sampling unit at index: {index}[/green]")
 
-    # Check if the index is valid
-    if index >= instruction_data_u.shape[1]:
-        console.print(
-            f"[red]Error: Index {index} is out of bounds. Maximum index is {instruction_data_u.shape[1] - 1}[/red]"
-        )
-        sys.exit(1)
+    _check_window_bounds(instruction_data_u.shape[1], index)
 
-    # Extract data for the specified interval index
-    interval_instruction_u_data = instruction_data_u[
-        :, index, :
-    ]  # Shape: [snapshots, cores]
+    # Sum the measurement window's deltas: [snapshots, cores]
+    interval_instruction_u_data = _window(instruction_data_u, index)
 
     # Calculate IPC for each snapshot and core
-    interval_ipc_u_data = interval_instruction_u_data / (
-        INTERVAL * sampling_unit_size  # * FREQ_GHZ  (see TODO at FREQ_GHZ)
-    )
+    interval_ipc_u_data = interval_instruction_u_data / _window_cycles(sampling_unit_size)
 
     # Initialize list to store results for each group
     group_results = []
@@ -914,7 +915,7 @@ def analyze_sampling_unit(
             )  # Shape: [snapshots]
 
             # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
-            valid_data = [x for x in snapshot_group_u_ipc if not math.isnan(x)]
+            valid_data = [x for x in snapshot_group_u_ipc]
             unvalid_count = len(snapshot_group_u_ipc) - len(valid_data)
             if unvalid_count > 0:
                 console.print(
@@ -1002,7 +1003,7 @@ def analyze_sampling_unit(
         snapshot_total_u_ipc = np.sum(interval_ipc_u_data, axis=1)  # Shape: [snapshots]
 
         # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
-        valid_data = [x for x in snapshot_total_u_ipc if not math.isnan(x) and x != 0]
+        valid_data = [x for x in snapshot_total_u_ipc]
 
         if len(valid_data) == 0:
             console.print(
@@ -1130,19 +1131,20 @@ def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
     deltas = {c: delta(c) for c in cumulative}
     maf_arr = strided("maf")
     n_units = deltas["instruction"].shape[1]
-    if index >= n_units:
+    if index + MEASURE_UNITS > n_units:
         console.print(
-            f"[yellow]Diagnostics skipped: index {index} out of bounds (max {n_units - 1})[/yellow]"
+            f"[yellow]Diagnostics skipped: window [{index}, {index + MEASURE_UNITS}) out of bounds (only {n_units} units)[/yellow]"
         )
         return None
 
     totals, maf_by_core = {}, {}
     for core in range(n_core):
-        tot_instr = float(deltas["instruction"][:, index, core].sum())
+        sl = slice(index, index + MEASURE_UNITS)
+        tot_instr = float(deltas["instruction"][:, sl, core].sum())
         if tot_instr <= 0:
             continue  # inactive core for this unit
-        totals[core] = {c: float(deltas[c][:, index, core].sum()) for c in cumulative}
-        vals = maf_arr[:, index, core]
+        totals[core] = {c: float(deltas[c][:, sl, core].sum()) for c in cumulative}
+        vals = maf_arr[:, sl, core].ravel()
         vals = vals[vals > 0]
         maf_by_core[core] = float(vals.mean()) if len(vals) else 0.0
     return totals, maf_by_core
@@ -1354,20 +1356,38 @@ Examples:
         help="Machine frequency in GHz (cycles per ns); the experiment's machine_freq_ghz (default: 2.0)",
     )
     parser.add_argument(
+        "--interval",
+        type=int,
+        default=100000,
+        help="Stats-dump interval in cycles; the experiment's stat_interval_cycles (default: 100000)",
+    )
+    parser.add_argument(
+        "--measure-units",
+        type=int,
+        default=1,
+        help="Number of consecutive intervals aggregated as the measurement window, starting at --index; the experiment's measurement_ratio (default: 1)",
+    )
+    parser.add_argument(
         "--no-exit-on-fail",
         action="store_true",
         help="Do not sys.exit(-1) when sampling-error bounds are unmet. Used by the statistical-sample loop, where an unmet bound is the normal signal to take another iteration.",
     )
     args = parser.parse_args()
 
-    global FREQ_GHZ
+    global FREQ_GHZ, INTERVAL, MEASURE_UNITS
     FREQ_GHZ = args.freq_ghz
+    INTERVAL = args.interval
+    MEASURE_UNITS = args.measure_units
 
     console.print(
         Panel.fit(
             "[bold green]Measurement Data Analysis Tool[/bold green]",
             border_style="green",
         )
+    )
+    console.print(
+        f"[green]Window: interval={INTERVAL} cycles, measurement = units "
+        f"[{args.index}, {args.index + MEASURE_UNITS}) = {INTERVAL * MEASURE_UNITS} cycles[/green]"
     )
 
     # Load from NPZ file if specified, otherwise parse from timing.csv

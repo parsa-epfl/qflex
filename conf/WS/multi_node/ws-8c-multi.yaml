@@ -1,0 +1,58 @@
+extends: ws-multi
+
+
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: web-search-multi-node-0-8c
+    _deps_:
+      sub_experiments:
+        - name: node_0
+        - name: node_1
+
+  experiment_context_node_0:
+    _base_: _leaf_defaults
+    _name_: node_0
+    experiment_name: web-search-node-0-0-8c
+    node_number: 0
+    neighbor_node_list: [1]
+    pdes_net_devs: ["virtio-net-pci"]
+    latencies_ns_list: [100000]
+    syncs_list: ["true"]
+    image_name: root-multi-node-0-8c.qcow2
+    server_cores: "0-3"
+    core_count: 4
+    quantum_size: 20000
+    check_period_quantum_coeff: 53
+    is_parallel: true
+
+  experiment_context_node_1:
+    _base_: _leaf_defaults
+    _name_: node_1
+    experiment_name: web-search-node-1-0-8c
+    node_number: 1
+    neighbor_node_list: [0]
+    pdes_net_devs: ["virtio-net-pci"]
+    latencies_ns_list: [100000]
+    syncs_list: ["true"]
+    wait_for_nodes: [0]
+    # Phantom-only node: from FW onward it runs a plain parallel qemu (no worm
+    # warming, no Flexus); every core advances at the phantom IPC via core_info.csv.
+    all_phantom_cores: true
+    multi_modal: false
+    phantom_cpu_ipc: 4
+    image_name: root-multi-node-1-8c.qcow2
+    client_cores: "0-3"
+    core_count: 4
+    quantum_size: 20000
+    check_period_quantum_coeff: 53
+    is_parallel: true
+
+
+
+load:
+  components:
+    experiment_context_node_0:
+      latencies_ns_list: [1000000]
+    experiment_context_node_1:
+      latencies_ns_list: [1000000]

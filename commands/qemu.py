@@ -29,7 +29,11 @@ class QemuCommonArgParser:
 
     def __init__(self,
                  experiment_context: ExperimentContext,
-                 use_stdio: bool = True):
+                 use_stdio: bool = True,
+                 include_quantum: bool = True):
+        # include_quantum=False (boot only): pure emulation needs no PWQ quantum/check_period —
+        # drop them for speed; the simulation phases keep the default True.
+        self.include_quantum = include_quantum
         self.experiment_context = experiment_context
         self.simulation_context = self.experiment_context.simulation_context
         self.image_address = self.experiment_context.get_local_image_address()
@@ -179,6 +183,14 @@ class QemuCommonArgParser:
         # TODO move this to its own class
         check_period_quantum_coeff = self.simulation_context.check_period_quantum_coeff
         quantum_command = ''
+        if not self.include_quantum:
+            # No PWQ quantum: plain MTTCG in parallel mode; bare icount (virtual time only,
+            # no q=/check_period) in RR — same icount shape the timing binary uses.
+            if not self.simulation_context.is_parallel:
+                quantum_command = '   -icount shift=0,align=off,sleep=off '
+            print("="*50+"Quantum command arguments:"+"="*50)
+            print(quantum_command if quantum_command else "(quantum disabled)")
+            return quantum_command
         # TODO check why 53 : checked this is a check done to see whether or not we need to do checkpointing, with the assumption being it will usually be way less than the sampling interval
         if self.simulation_context.is_parallel:
             quantum_command = f'   -quantum size={self.simulation_context.quantum_size},check_period={int(self.simulation_context.quantum_size * check_period_quantum_coeff)} '
@@ -224,7 +236,7 @@ class VanillaQemuArgParser(QemuCommonArgParser):
         single_step_command = f""" -singlestep -d nochain """
         log_command = f""" -D "qemu-timing.log" """
         lib_qflex_command = f""" -libqflex """
-        mode_command = f""" mode=timing,lib-path=../../lib/"{self.lib_name()}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:100000,debug=crit,ckpt-path=./snapshot_{self.idx}-flexus,freq={int(self.experiment_context.workload.IPC_info.machine_freq_ghz)} """
+        mode_command = f""" mode=timing,lib-path=../../lib/"{self.lib_name()}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:{self.experiment_context.stat_interval_cycles},debug=crit,ckpt-path=./snapshot_{self.idx}-flexus,freq={int(self.experiment_context.workload.IPC_info.machine_freq_ghz)} """
 
         qemu_args = base_args + \
         single_step_command + \

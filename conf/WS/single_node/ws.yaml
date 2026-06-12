@@ -9,6 +9,8 @@ components:
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
     image_name: root.qcow2
+    server_cores: "0-0"
+    client_cores: "1-1"
 
 
 boot:
@@ -19,7 +21,7 @@ boot:
 load:
   components:
     experiment_context:
-      interaction_script: /home/dev/qflex/conf/WS/single_node/expects/load_savevm_loaded_single.exp
+      interaction_script: /home/dev/qflex/conf/WS/single_node/expects/load_savevm_loaded_single.exp.j2
       loadvm_name: booted
 
 initialize:

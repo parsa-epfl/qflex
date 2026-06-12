@@ -3,8 +3,9 @@
 # Quit when any command fails
 set -e
 
-DW=$(($1 * 100000))
-SU=$(($2 * 100000))
+INTERVAL=${3:-100000}
+DW=$(($1 * INTERVAL))
+SU=$(($2 * INTERVAL))
 TOTAL=$(($DW + $SU + 1))
 
 # Get the number of snapshots in the current folder.
@@ -50,7 +51,7 @@ do
         -singlestep -d nochain \
         -D "qemu-timing.log" \
         -libqflex \
-        mode=timing,lib-path=../../lib/{{ "libsemikraken" if DOUBLED_VCPU else "libknottykraken" }}.so,cfg-path=../../cfg/timing.cfg,cycles=$TOTAL:100000,debug=crit,ckpt-path=./snapshot_$idx-flexus,freq=2
+        mode=timing,lib-path=../../lib/{{ "libsemikraken" if DOUBLED_VCPU else "libknottykraken" }}.so,cfg-path=../../cfg/timing.cfg,cycles=$TOTAL:$INTERVAL,debug=crit,ckpt-path=./snapshot_$idx-flexus,freq=2
     
     # 3. Backup results to the result directory
     # if we have the directory, we remove it.

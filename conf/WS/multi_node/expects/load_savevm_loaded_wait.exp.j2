@@ -52,10 +52,11 @@
 set timeout 900
 
 set BUDGET_INITIAL_S        10
-set BUDGET_DEFAULT_S        20
-set BUDGET_PROMPT_S         60
-set BUDGET_CHECKPOINTING_S 86400
-set BUDGET_WORKLOAD_INIT_S 86400   ; # client ramp-up under PDES sync=true on -smp 1: ~45 min worst case
+set BUDGET_DEFAULT_S        60
+set BUDGET_PING_S           300
+set BUDGET_PROMPT_S         180
+set BUDGET_CHECKPOINTING_S 172800
+set BUDGET_WORKLOAD_INIT_S 172800   ; # client ramp-up under PDES sync=true on -smp 1: ~45 min worst case
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
@@ -255,11 +256,11 @@ sleep 5
 # TEMP: ping the peer to verify the PDES wire is up under sync=true.
 # Match on the iputils/busybox summary line, NOT on the next prompt — proves
 # ping actually ran. 30 s host wall-clock budget; under PDES that's plenty for
-# 10 packets at -i 0.05 to land + summary to print.
-send "ping 192.168.100.1 -i 0.05 -c 10\r"
-set timeout 120
+# 10 packets at -i 0.001 to land + summary to print.
+send "ping 192.168.100.1 -i 0.001 -c 10\r"
+set timeout $BUDGET_PING_S
 expect {
-    timeout { puts "ERROR: ping summary didn't arrive within 120s"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: ping summary didn't arrive within ${BUDGET_PING_S}s"; quit_qemu $monitor_port; exit 1 }
     -re {(\d+) packets transmitted, (\d+)[ ,]} {
         puts "follower: ping summary -> $expect_out(1,string) transmitted, $expect_out(2,string) received"
     }
@@ -285,7 +286,7 @@ send "\r"
 send "./disable_logging.sh\r"
 send "\r"
 send "docker run -it --rm --name web_search_client \\\r"
-send "  --cpuset-cpus=0-0 \\\r"
+send "  --cpuset-cpus={{ client_cores }} \\\r"
 send "  --net host cloudsuite/web-search:client \\\r"
 send "  192.168.100.1 1 \\\r"
 send "  --ramp-up=30 \\\r"

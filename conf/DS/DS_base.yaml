@@ -20,7 +20,8 @@ _leaf_defaults:
   use_image_directly: true
   sample_size: 1000
   warming_ratio: 2
-  measurement_ratio: 1
+  measurement_ratio: 3
+  stat_interval_cycles: 100000
   partition_count: 16
 
 
