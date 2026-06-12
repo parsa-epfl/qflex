@@ -51,7 +51,7 @@ class FunctionalWarming(Executor):
         if self.collect_gem5_bbl_btb:
             plugin_args.append("collect_gem5_bbl_btb=1")
         if self.emit_gem:
-            plugin_args.append("emit_gem=1")
+            plugin_args.append("emit_gem=true")
         plugin_arg_string = ",".join(plugin_args)
         fw_cmd = f"""
             ./qemu-system-aarch64 \
