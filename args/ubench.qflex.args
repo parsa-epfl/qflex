@@ -1,0 +1,33 @@
+# Reference args for the ubench experiment.
+#
+# This reuses the current 8-core web-search machine configuration but points to
+# a clean snapshot-free qcow2 image dedicated to the ubench lineage.
+#
+# Important operational note:
+# both timing engines currently write canonical reports under
+#   QPoints/sim_outs/ubench/
+# so gem5 and Flexus runs should use distinct experiment identities if both
+# outputs need to be preserved side by side.
+
+--core-count 8
+--no-double-cores
+--quantum-size-ns 20000
+--llc-size-per-tile-mb 1
+--parallel
+--network user
+--memory-gb 32
+--host-name SAPHIRE
+--workload-name ubench
+--population-seconds 0.1
+--no-consolidated
+--primary-ipc 2.0
+--primary-core-start 0
+--experiment-name ubench
+--image-name ubench.qcow2
+--image-folder /mnt/sdb/aansari/images
+--bootloader /home/dev/qflex_git/QPoints/bin/m5/binaries/boot_v2_qemu_virt.arm64
+--root-device /dev/vda
+--mounting-folder /mnt/sdb/aansari
+--check-period-quantum-coeff 53.0
+--no-unique
+--use-image-directly
