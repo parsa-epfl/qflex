@@ -1,8 +1,5 @@
 extends: ../WS_base
 
-_leaf_defaults:
-  partition_count: 24
-
 components:
   experiment_context:
     _base_: _leaf_defaults

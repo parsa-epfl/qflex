@@ -7,7 +7,7 @@ _leaf_defaults:
   llc_size_per_tile_mb: 2
   is_parallel: false
   network: none
-  population_seconds: 5
+  population_seconds: 10
   is_consolidated: false
   primary_ipc: 2.0
   primary_core_start: 0
@@ -22,7 +22,7 @@ _leaf_defaults:
   warming_ratio: 2
   measurement_ratio: 3
   stat_interval_cycles: 100000
-  partition_count: 48
+  partition_count: 23
 
 
 

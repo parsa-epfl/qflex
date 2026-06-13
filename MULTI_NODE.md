@@ -75,10 +75,10 @@ Two layers, both singletons per QEMU process:
 - **`PDESEngine`** ([parallel-qemu/include/net/pdes-engine.h](parallel-qemu/include/net/pdes-engine.h), [parallel-qemu/net/pdes-engine.c](parallel-qemu/net/pdes-engine.c)) — owns the comm rings, virtual-time bookkeeping, drain-on-savevm, and a 5 µs `QEMU_CLOCK_HOST` poll timer that pulls messages off the recv ring.
 - **`PDESWWT`** ([parallel-qemu/net/pdes-wwt.c](parallel-qemu/net/pdes-wwt.c)) — wraps the engine and adds Wisconsin Wind Tunnel quantum sync.
 
-WWT in one paragraph: the simulator advances virtual time in **quanta** of `quantum_size` ns. Within a quantum, a node may freely send packets timestamped within that window; at each quantum boundary, neighbours exchange `MSG_TYPE_SYNC` messages so no node runs ahead and produces a packet that should already have been delivered to a neighbour. `current_quantum_round` and the `sync_counts` hash table track the protocol. The quantum size is set via `--quantum-size` and surfaced to QEMU by [commands/qemu.py:95-103](commands/qemu.py#L95) `quantum_args()`:
+WWT in one paragraph: the simulator advances virtual time in **quanta**. The MNQ (multi-node quantum) on a link is the link's wire latency: `wwt->quantum_ns = latencyns` (qemu-pdes/net/pdes-wwt.c). Within a quantum, a node may freely send packets timestamped within that window; at each quantum boundary, neighbours exchange `MSG_TYPE_SYNC` messages so no node runs ahead and produces a packet that should already have been delivered to a neighbour. `current_quantum_round` and the `sync_counts` hash table track the protocol. `quantum_size` (the YAML/CLI knob) is the **PWQ** (intra-machine) quantum, surfaced to QEMU by `quantum_args()` in [commands/qemu.py](commands/qemu.py):
 
-- **FW (parallel-qemu)**: `-icount shift=0,align=off,sleep=off,q=<quantum_size>,check_period=...`
-- **Timing (qemu)**: `-quantum size=<quantum_size>,check_period=...`
+- **boot/load/FW (parallel-qemu)**: `-icount shift=0,align=off,sleep=off,q=<quantum_size>,check_period=<quantum_size × check_period_quantum_coeff>` (or `-quantum size=...` when `is_parallel`)
+- **Timing (qemu)**: bare `-icount shift=0,align=off,sleep=off` — no quantum/check_period; virtual time comes from the Flexus tick, and the MNQ is `latencyns` as above. `quantum_size` never reaches the timing phase.
 
 `latencyns` (per-link) adds wire latency to outgoing message timestamps. `first_sync_virtual_time` is computed once at engine create time to reconcile checkpoints that have different virtual-time origins (e.g. when each node was independently checkpointed during FW and resumed for timing).
 

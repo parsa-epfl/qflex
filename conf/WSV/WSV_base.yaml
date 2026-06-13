@@ -22,7 +22,7 @@ _leaf_defaults:
   warming_ratio: 2
   measurement_ratio: 3
   stat_interval_cycles: 100000
-  partition_count: 16
+  partition_count: 23
 
 
 

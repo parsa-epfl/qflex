@@ -1,11 +1,5 @@
 extends: WSV_base
 
-# Optional per-leaf hooks for boot/load only (other phases ignore these):
-#   experiment_context_node_0:
-#     interaction_script: ./scripts/setup_node_0.exp   # Path A: drive QEMU automatically.
-#     # OR
-#     interactive_tmux: true                            # Path B: open a tmux window per leaf.
-
 components:
   experiment_context:
     _base_: _leaf_defaults
@@ -24,6 +18,7 @@ components:
     pdes_net_devs: ["virtio-net-pci"]
     latencies_ns_list: [100000]
     syncs_list: ["true"]
+    image_name: root-multi-node-0.qcow2
 
   experiment_context_node_1:
     _base_: _leaf_defaults
@@ -35,6 +30,12 @@ components:
     latencies_ns_list: [100000]
     syncs_list: ["true"]
     wait_for_nodes: [0]
+    # Phantom-only node: from FW onward it runs a plain parallel qemu (no worm
+    # warming, no Flexus); every core advances at the phantom IPC via core_info.csv.
+    all_phantom_cores: true
+    multi_modal: false
+    phantom_cpu_ipc: 4
+    image_name: root-multi-node-1.qcow2
 
 # Boot relaxes the wire (high latency, sync off); other phases keep the per-leaf
 # defaults. Scoped to the per-leaf components so the unnamed group context

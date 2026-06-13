@@ -17,7 +17,9 @@ class ParameterLoader(ABC):
         self.folder = out_folder
     
     def load_parameters(self) -> str:
-        jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader("./templates"))
+        # StrictUndefined: a missing context key must fail the render, not emit "" that flexus.set silently defaults.
+        jinja_env = jinja2.Environment(loader=jinja2.FileSystemLoader("./templates"),
+                                       undefined=jinja2.StrictUndefined)
         template = jinja_env.get_template(self.parameter_template)
         context = self.get_context()
         parameter_file_path = f"{self.experiment_context.get_experiment_folder_address()}/{self.folder}/{self.output_name}"

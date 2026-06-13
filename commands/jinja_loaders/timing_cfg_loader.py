@@ -18,5 +18,7 @@ class TimingLoader(ParameterLoader):
             "DIRECTORY_WAY": self.experiment_context.simulation_context.directory_way,
             "MEM_CONTROLLER_COUNT": self.experiment_context.simulation_context.mem_controller_count,
             "MEM_CONTROLLER_POSITIONS" : self.experiment_context.simulation_context.mem_controller_positions,
-            "PHANTOM_CPU_IPC": self.experiment_context.workload.IPC_info.phantom_cpu_ipc,
+            # Flexus's EstimatedIPC is uint32_t and its lexical_cast rejects "4.0" — the set then
+            # silently falls back to the wiring default (5). Render an int so the value lands.
+            "PHANTOM_CPU_IPC": int(round(self.experiment_context.workload.IPC_info.phantom_cpu_ipc)),
         }

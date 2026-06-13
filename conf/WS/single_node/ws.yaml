@@ -1,5 +1,8 @@
 extends: ../WS_base
 
+_leaf_defaults:
+  partition_count: 46
+
 components:
   experiment_context:
     _base_: _leaf_defaults
@@ -11,6 +14,7 @@ components:
     image_name: root.qcow2
     server_cores: "0-0"
     client_cores: "1-1"
+    memory_gb: 32
 
 
 boot:

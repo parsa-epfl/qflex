@@ -278,6 +278,23 @@ class Executor(abc.ABC):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         open(path, "w").close()
 
+    def _log_leaf_duration(self, exp: ExperimentContext, log_path: str, seconds: float) -> None:
+        """Append host wall-clock duration of this leaf's bash execution to the phase
+        log. Skipped for helper leaves with no context (rm/sleep SimpleCMDExecutors)."""
+        if exp is None:
+            return
+        idx_part = ""
+        if exp.partition_number >= 0:
+            idx_part = f" part{exp.partition_number}"
+        if exp.idx >= 0:
+            idx_part += f" idx{exp.idx}"
+        line = (f"[time] {self._phase_name()}{idx_part} node{exp.node_number}: "
+                f"execution took {seconds:.1f}s (host)")
+        print(line, flush=True)
+        if log_path:
+            with open(log_path, "a") as lf:
+                lf.write(line + "\n")
+
     def _build_bash(self, log_path: str, err_path: str,
                     *, tee_to_stdio: bool = False, log_append: bool = False) -> str:
         """Join self.cmd() into a single bash string, optionally wrapping with an
@@ -367,10 +384,12 @@ class Executor(abc.ABC):
                                log_append=log_append)
 
         # Force bash (not /bin/sh / dash) so process substitution `>(tee ...)` works.
+        t0 = time.monotonic()
         if to_stdio:
             r = subprocess.run(["bash", "-c", arg], text=True, cwd=cwd)
         else:
             r = subprocess.run(["bash", "-c", arg], text=True, capture_output=True, cwd=cwd)
+        self._log_leaf_duration(exp, log_path, time.monotonic() - t0)
         if exp is not None and self.NEEDS_PDES_PEER_KILL:
             self._post_exit_grace(exp, r.returncode)
             self._kill_peer_qemus(sentinel_dir)
