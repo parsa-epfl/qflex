@@ -13,7 +13,7 @@ components:
     syncs_list: ["false"]
     original_image_name: root.qcow2
     image_name: root-wsv.qcow2
-    memory_gb: 32
+    memory_gb: 64
 
 
 # epoch_0

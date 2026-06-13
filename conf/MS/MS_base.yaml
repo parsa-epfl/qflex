@@ -11,7 +11,7 @@ _leaf_defaults:
   is_consolidated: false
   primary_ipc: 2.0
   primary_core_start: 0
-  memory_gb: 16
+  memory_gb: 32
   host_name: ZEN3
   workload_name: media-streaming
   image_folder: /mnt/sdb/multi-node-experiments/image-1c/ms/

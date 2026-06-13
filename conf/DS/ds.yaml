@@ -8,7 +8,7 @@ components:
     phantom_cpu_ipc: 2
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
-    memory_gb: 32
+    memory_gb: 64
 
 
 # epoch_0
