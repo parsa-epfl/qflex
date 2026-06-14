@@ -1105,6 +1105,16 @@ def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
         )
         return None
 
+    # Cycle-denominated memory + cross-node columns. Optional so an older timing.csv still
+    # gets the base diagnostics; the memory-latency / L2-split tables just don't render.
+    optional = [
+        "mem_offchip_req_count", "mem_offchip_req_latency", "mem_offchip_retire_stalls",
+        "mem_onchip_req_count", "mem_onchip_req_latency", "mem_onchip_retire_stalls",
+        "l2_miss_peer", "l2_miss_memory",
+        "exc_entries_system", "exc_entries_idle", "exc_entries_trap",
+    ]
+    present_optional = [c for c in optional if c in df.columns]
+
     df = df[df["sys_cycles"] % INTERVAL == 0].copy()
     snaps = sorted(df["snapshot_id"].unique())
     snap_to_idx = {s: i for i, s in enumerate(snaps)}
@@ -1128,7 +1138,7 @@ def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
         a[si, pi, ci] = df[col].to_numpy()
         return a[:, ::sampling_unit_size, :]
 
-    deltas = {c: delta(c) for c in cumulative}
+    deltas = {c: delta(c) for c in cumulative + present_optional}
     maf_arr = strided("maf")
     n_units = deltas["instruction"].shape[1]
     if index + MEASURE_UNITS > n_units:
@@ -1137,17 +1147,22 @@ def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
         )
         return None
 
+    sl = slice(index, index + MEASURE_UNITS)
+    # Per-snapshot user commits in the window (summed across cores): how many snapshots did zero
+    # user work — the "server idle/waiting" signal that result.py's OMMIT_ZERO would censor.
+    per_snap_user = deltas["instruction:u"][:, sl, :].sum(axis=(1, 2))
+    zero_info = (int(per_snap_user.shape[0]), int((per_snap_user == 0).sum()))
+
     totals, maf_by_core = {}, {}
     for core in range(n_core):
-        sl = slice(index, index + MEASURE_UNITS)
         tot_instr = float(deltas["instruction"][:, sl, core].sum())
         if tot_instr <= 0:
             continue  # inactive core for this unit
-        totals[core] = {c: float(deltas[c][:, sl, core].sum()) for c in cumulative}
+        totals[core] = {c: float(deltas[c][:, sl, core].sum()) for c in cumulative + present_optional}
         vals = maf_arr[:, sl, core].ravel()
         vals = vals[vals > 0]
         maf_by_core[core] = float(vals.mean()) if len(vals) else 0.0
-    return totals, maf_by_core
+    return totals, maf_by_core, zero_info
 
 
 def report_diagnostics(
@@ -1158,7 +1173,7 @@ def report_diagnostics(
     result = _diag_window_totals(csv_path, index, sampling_unit_size)
     if result is None:
         return
-    totals, maf_by_core = result
+    totals, maf_by_core, zero_info = result
     if not totals:
         console.print("[yellow]Diagnostics skipped: no active cores for this sampling unit.[/yellow]")
         return
@@ -1176,7 +1191,7 @@ def report_diagnostics(
     # Table A: IPC & cycle accounting
     ta = Table(title=f"Diagnostics — IPC & cycle accounting (unit {index})", box=box.ROUNDED)
     for col in ["Core", "IPC", "U-IPC(user)", "U-IPC(nonspin)", "gap", "spin% (β)",
-                "idle%", "useful%", "spin-IPC"]:
+                "idle%", "kern%(insn)", "useful%", "spin-IPC"]:
         ta.add_column(col, justify="center")
 
     def ipc_row(label, t):
@@ -1186,16 +1201,25 @@ def report_diagnostics(
         uipc_ns = (t["instruction:u"] + t["commits_nonspin_system"]) / cyc
         beta = t["spin_cycles"] / cyc
         idle = t["wfi_cycles"] / cyc
+        kern = t["commits_nonspin_system"] / (t["instruction"] or 1)
         spin_instr = t["commits_spin_user"] + t["commits_spin_system"]
         spin_ipc = spin_instr / t["spin_cycles"] if t["spin_cycles"] > 0 else 0.0
         ta.add_row(label, f"{ipc:.4f}", f"{uipc_u:.4f}", f"{uipc_ns:.4f}",
                    f"{ipc - uipc_u:.4f}", f"{100 * beta:.3f}", f"{100 * idle:.3f}",
-                   f"{100 * (1 - beta - idle):.3f}", f"{spin_ipc:.4f}")
+                   f"{100 * kern:.3f}", f"{100 * (1 - beta - idle):.3f}", f"{spin_ipc:.4f}")
 
     for c in cores:
         ipc_row(str(c), totals[c])
     ipc_row("ALL", agg(all_keys))
     console.print(ta)
+
+    # Idle/wait signal: snapshots that committed zero user instructions in this window — the
+    # "server idle / waiting for (latency-delayed) requests" effect, which result.py censors.
+    n_snap, n_zero = zero_info
+    console.print(
+        f"[cyan]Zero-user-commit windows this unit: {n_zero}/{n_snap}[/cyan] "
+        f"(server idle/waiting — censored by result.py's OMMIT_ZERO; rises if multi-node latency starves the server)"
+    )
 
     # Table B: memory & communication
     tb_ = Table(title="Diagnostics — memory & communication", box=box.ROUNDED)
@@ -1209,6 +1233,53 @@ def report_diagnostics(
                     f"{maf_by_core.get(c, 0.0):.2f}", f"{int(t['nic_sent'])}",
                     f"{int(t['nic_recv'])}")
     console.print(tb_)
+
+    # Table B2: literal memory latency + cross-node cache split. Only if collect.py emitted the
+    # cycle-denominated columns (older timing.csv → skipped, base tables unaffected).
+    if "mem_offchip_req_count" in next(iter(totals.values())):
+        tb2 = Table(title="Diagnostics — memory latency & cross-node (literal)", box=box.ROUNDED)
+        for col in ["Core", "off-chip avg lat (cyc)", "off-chip reqs", "off-chip stall%",
+                    "on-chip avg lat (cyc)", "L2-Peer-MPKI", "L2-Mem-MPKI"]:
+            tb2.add_column(col, justify="center")
+
+        def mem_row(label, t):
+            instr = t["instruction"] or 1
+            cyc = t["core_cycles"] or 1
+            off_cnt, on_cnt = t["mem_offchip_req_count"], t["mem_onchip_req_count"]
+            off_avg = t["mem_offchip_req_latency"] / off_cnt if off_cnt > 0 else 0.0
+            on_avg = t["mem_onchip_req_latency"] / on_cnt if on_cnt > 0 else 0.0
+            tb2.add_row(label, f"{off_avg:.1f}", f"{int(off_cnt)}",
+                        f"{100 * t['mem_offchip_retire_stalls'] / cyc:.3f}", f"{on_avg:.1f}",
+                        f"{1000 * t['l2_miss_peer'] / instr:.3f}",
+                        f"{1000 * t['l2_miss_memory'] / instr:.3f}")
+
+        for c in cores:
+            mem_row(str(c), totals[c])
+        mem_row("ALL", agg(all_keys))
+        console.print(tb2)
+        console.print("[dim]off-chip avg lat = req_latency/req_count (cyc) — rises if multi-node "
+                      "coherence/memory is slower; L2-Peer = cross-node cache-to-cache, L2-Mem = local DRAM.[/dim]")
+
+    # Table B3: exception/interrupt ENTRIES by privilege context. Count of taken exceptions/IRQs
+    # (one Flexus "Exception" insn per entry). NOT split by IRQ type (timer/IPI/NIC) — that needs
+    # the guest's /proc/interrupts. Useful single-vs-multi: a NIC-IRQ-driven server (multi) takes
+    # more device interrupts than a loopback/IPI-driven one (single).
+    if "exc_entries_trap" in next(iter(totals.values())):
+        te = Table(title="Diagnostics — exception/interrupt entries (count, by context; NOT by IRQ type)",
+                   box=box.ROUNDED)
+        for col in ["Core", "exc:System", "exc:Idle", "exc:Trap", "exc:total"]:
+            te.add_column(col, justify="center")
+
+        def exc_row(label, t):
+            s, i, tr = t["exc_entries_system"], t["exc_entries_idle"], t["exc_entries_trap"]
+            te.add_row(label, f"{int(s)}", f"{int(i)}", f"{int(tr)}", f"{int(s + i + tr)}")
+
+        for c in cores:
+            exc_row(str(c), totals[c])
+        exc_row("ALL", agg(all_keys))
+        console.print(te)
+        console.print("[dim]= # exceptions/IRQs/faults taken (by where taken), not by source. For "
+                      "timer-vs-IPI-vs-NIC breakdown, capture the guest's /proc/interrupts (see TODO).[/dim]")
 
     # Table C: CPI-stack fractions (proportional attribution, not cycles)
     tc = Table(title="Diagnostics — CPI-stack fractions (proportional)", box=box.ROUNDED)
@@ -1224,6 +1295,8 @@ def report_diagnostics(
         tb_row(str(c), totals[c])
     tb_row("ALL", agg(TB_BUCKETS))
     console.print(tc)
+    console.print("[dim]CPI-stack is RELATIVE attribution (not literal cycles); "
+                  "mem_remote = cross-node (Remote/PeerL) stalls — the multi-node signal.[/dim]")
 
     # Invariants (the solid, same-unit ones)
     inv = Table(title="Invariants", box=box.SIMPLE)
@@ -1247,6 +1320,62 @@ def report_diagnostics(
         "cycle split.[/yellow]",
         title="Out of scope", border_style="yellow",
     ))
+
+
+def report_per_core_commits(index, sampling_unit_size, run_glob="run/partition_*/result_*"):
+    """Per-idx, per-existing-core committed-instruction counts over the measurement window.
+    Generic: discovers real cores (NNN-uarch-Commits) and phantom cores (Phantom-N-CommitCount)
+    straight from the logs, so it works for single-node (server core + phantom client) and
+    multi-node (real cores) alike. Additive/read-only — never affects the U-IPC numbers above.
+    Window = cum(end_dump) - cum(start_dump), units [index, index+MEASURE_UNITS)."""
+    import glob, re
+    start = index * INTERVAL
+    end = (index + MEASURE_UNITS) * INTERVAL
+
+    def read(path):
+        if not os.path.exists(path):
+            return None
+        out = {}
+        for line in open(path):
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            m = re.match(r"(\d+)-uarch-Commits$", parts[0])
+            if m:
+                out[f"core{int(m.group(1))}"] = int(parts[1]); continue
+            m = re.match(r"Phantom-(\d+)-CommitCount$", parts[0])
+            if m:
+                out[f"phantom{int(m.group(1))}"] = int(parts[1])
+        return out
+
+    dirs = glob.glob(run_glob)
+    if not dirs:
+        return
+    rows = []
+    for d in sorted(dirs, key=lambda p: int(os.path.basename(p).split("_")[-1])):
+        idx = int(os.path.basename(d).split("_")[-1])
+        a = read(f"{d}/all.measurement.{start:010}.log")
+        b = read(f"{d}/all.measurement.{end:010}.log")
+        if a is None or b is None:
+            continue
+        cores = set(a) | set(b)
+        rows.append((idx, {c: b.get(c, 0) - a.get(c, 0) for c in cores}))
+    if not rows:
+        return
+
+    labels = sorted({c for _, d in rows for c in d},
+                    key=lambda s: (s.startswith("phantom"), int(re.sub(r"\D", "", s) or 0)))
+    console.print(f"\n[bold cyan]=== Per-idx commits by core (window units "
+                  f"[{index},{index + MEASURE_UNITS}); real cores + phantom) ===[/bold cyan]")
+    for idx, d in rows:
+        console.print(f"idx {idx}: " + "  ".join(f"{c}={d.get(c, 0)}" for c in labels))
+    # Compact summary across idxs: how often each core is active, and (when ≥2 cores exist) how
+    # often more than one is active in the same window — the mutual-exclusion sanity check.
+    THR = 1000
+    active = {c: sum(1 for _, d in rows if d.get(c, 0) > THR) for c in labels}
+    multi = sum(1 for _, d in rows if sum(1 for c in labels if d.get(c, 0) > THR) >= 2)
+    console.print(f"[dim]active windows (>{THR} commits) per core: {active}; "
+                  f"windows with ≥2 cores active simultaneously: {multi}/{len(rows)}[/dim]")
 
 
 def main():
@@ -1508,6 +1637,7 @@ Examples:
     # output above and never affects it).
     console.print("\n[bold cyan]=== Diagnostics ===[/bold cyan]")
     report_diagnostics(args.timing_csv, args.index, args.unit_size, core_groups)
+    report_per_core_commits(args.index, args.unit_size)
 
     # Exit with -1 if sampling error bounds were not satisfied
     if not all_bounds_satisfied and not args.no_exit_on_fail:

@@ -266,6 +266,25 @@ def parse_one_result(folder_name: str):
         maf = [-1.0] * MAX_CORES
         tb = {b: [0] * MAX_CORES for b in TB_BUCKETS}
 
+        # Cycle-denominated memory accounting (summed over Coh/NonCoh × Read/Write/Atomic).
+        # avg latency = req_latency / req_count; retire_stalls = cycles retire was blocked.
+        mem_offchip_req_count = [0] * MAX_CORES
+        mem_offchip_req_latency = [0] * MAX_CORES
+        mem_offchip_retire_stalls = [0] * MAX_CORES
+        mem_onchip_req_count = [0] * MAX_CORES
+        mem_onchip_req_latency = [0] * MAX_CORES
+        mem_onchip_retire_stalls = [0] * MAX_CORES
+        # L2 miss split: Peer = cache-to-cache from the other node (cross-node); Memory = local DRAM.
+        l2_miss_peer = [0] * MAX_CORES
+        l2_miss_memory = [0] * MAX_CORES
+
+        # Exception/interrupt ENTRIES by privilege context (Flexus injects one "Exception" insn per
+        # taken exception/IRQ/fault). This is the closest "# of interrupts+exceptions" Flexus has —
+        # it does NOT split by IRQ type (timer/IPI/NIC); that needs the guest's /proc/interrupts.
+        exc_entries_system = [0] * MAX_CORES
+        exc_entries_idle = [0] * MAX_CORES
+        exc_entries_trap = [0] * MAX_CORES
+
         log_file = f"{folder_name}/all.measurement.{point:010}.log"
         with open(log_file) as f:
             for line in f:
@@ -388,6 +407,20 @@ def parse_one_result(folder_name: str):
                         continue
                     commits_spin_system[core_idx] = int(line.split()[1])
 
+                # Exception/IRQ entries by context (trailing space avoids matching ExceptionUnsupported).
+                if "-uarch-InsnCount:System:Exception " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx < MAX_CORES:
+                        exc_entries_system[core_idx] = int(line.split()[1])
+                if "-uarch-InsnCount:Idle:Exception " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx < MAX_CORES:
+                        exc_entries_idle[core_idx] = int(line.split()[1])
+                if "-uarch-InsnCount:Trap:Exception " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx < MAX_CORES:
+                        exc_entries_trap[core_idx] = int(line.split()[1])
+
                 if "-nic-MsgsSent " in line:
                     core_idx = parse_core_idx(line)
                     if core_idx >= MAX_CORES:
@@ -414,6 +447,37 @@ def parse_one_result(folder_name: str):
                         continue
                     reason = line.split()[0].split(":Bkd:", 1)[1]
                     tb[tb_bucket(reason)][core_idx] += int(line.split()[1])
+
+                # Demand memory requests (skip *-Prefetch* and *_Hist); sum across the
+                # Coh/NonCoh × Read/Write/Atomic matrix into one OnChip and one OffChip bucket.
+                if "-uarch-MemCommit:" in line:
+                    tok = line.split()[0]
+                    core_idx = parse_core_idx(line)
+                    if core_idx < MAX_CORES:
+                        if "OffChip:" in tok:
+                            if tok.endswith("-RequestCount"):
+                                mem_offchip_req_count[core_idx] += int(line.split()[1])
+                            elif tok.endswith("-RequestLatency"):
+                                mem_offchip_req_latency[core_idx] += int(line.split()[1])
+                            elif tok.endswith("-RetireStalls"):
+                                mem_offchip_retire_stalls[core_idx] += int(line.split()[1])
+                        elif "OnChip:" in tok:
+                            if tok.endswith("-RequestCount"):
+                                mem_onchip_req_count[core_idx] += int(line.split()[1])
+                            elif tok.endswith("-RequestLatency"):
+                                mem_onchip_req_latency[core_idx] += int(line.split()[1])
+                            elif tok.endswith("-RetireStalls"):
+                                mem_onchip_retire_stalls[core_idx] += int(line.split()[1])
+
+                if "L2-ReadMissPeer" in line or "L2-FetchMissPeer" in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx < MAX_CORES:
+                        l2_miss_peer[core_idx] += int(line.split()[1])
+                if ("L2-ReadMissMemory" in line or "L2-FetchMissMemory" in line
+                        or "L2-WriteMissMemory" in line):
+                    core_idx = parse_core_idx(line)
+                    if core_idx < MAX_CORES:
+                        l2_miss_memory[core_idx] += int(line.split()[1])
 
         # Determine actual core count from log file data
         actual_core_count = 0
@@ -556,6 +620,17 @@ def parse_one_result(folder_name: str):
                     nic_recv[core_id] if nic_recv[core_id] != -1 else 0,
                     maf[core_id] if maf[core_id] != -1 else 0,
                     *(tb[b][core_id] for b in TB_BUCKETS),
+                    mem_offchip_req_count[core_id],
+                    mem_offchip_req_latency[core_id],
+                    mem_offchip_retire_stalls[core_id],
+                    mem_onchip_req_count[core_id],
+                    mem_onchip_req_latency[core_id],
+                    mem_onchip_retire_stalls[core_id],
+                    l2_miss_peer[core_id],
+                    l2_miss_memory[core_id],
+                    exc_entries_system[core_id],
+                    exc_entries_idle[core_id],
+                    exc_entries_trap[core_id],
                 ]
             )
     return result
@@ -579,6 +654,8 @@ with open("timing.csv", "w") as f:
     f.write(
         "snapshot_id,core,asid,sys_cycles,instruction,instruction:u,itlb_miss,dtlb_miss,stlb_miss,btb_miss,tage_miss,l1i_miss,l1d_miss,l2_miss,halted_cycles,core_cycles,virtio_blk_read,virtio_blk_write,virtio_complete,bx_instruction,bx_instruction_access,bx_data_access,bx_private_icache_miss,bx_private_dcache_miss,bx_shared_cache_miss,bx_branch_count,bx_bp_miss,bx_tlb_miss,bx_drain_pipeline,bx_drain_store_buffer,bx_read_noc_hop,bx_write_noc_hop,bx_instruction_u,bx_instruction_k,bx_private_dcache_miss_load,bx_private_dcache_miss_store,bx_private_dcache_miss_ptw,bx_private_dcache_miss_load_ptw,bx_ifetch_noc_hop,bx_shared_cache_miss_write,bx_shared_cache_miss_ifetch,bx_shared_cache_miss_read,spin_cycles,wfi_cycles,spins,commits_nonspin_system,commits_spin_user,commits_spin_system,nic_sent,nic_recv,maf,"
         + ",".join(TB_BUCKETS)
+        + ",mem_offchip_req_count,mem_offchip_req_latency,mem_offchip_retire_stalls,mem_onchip_req_count,mem_onchip_req_latency,mem_onchip_retire_stalls,l2_miss_peer,l2_miss_memory"
+        + ",exc_entries_system,exc_entries_idle,exc_entries_trap"
         + "\n"
     )
     for result in all_results:
