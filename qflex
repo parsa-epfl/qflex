@@ -16,6 +16,7 @@ from commands.result import RunResultCommand
 from commands.duplicate_experiment import DuplicateExperiment
 from commands.remove_experiment import RemoveExperiment
 from commands.statistical_sample import StatisticalSampleCommand
+from commands.generate_test_communication import GenerateTestCommunication
 from typer_inputs.config_wrapper import data_class_wrap
 
 app = typer.Typer(
@@ -85,6 +86,28 @@ def load(
         vanilla=vanilla,
     )
     load_executor.execute(to_stdio=True, run_in_background=False)
+
+
+@app.command(name="generate-test-communication")
+@data_class_wrap(create_experiment_context, name="experiment_context")
+def generate_test_communication(
+    experiment_context: ExperimentContext,
+    duration_seconds: Annotated[int, typer.Option(
+        help="GUEST seconds to advance (a guest-side sleep) while capturing data movement (default 1). Host-resource-independent so single-vs-multi is comparable; under PDES one guest-second can take many host-minutes."
+    )]=1,
+):
+    """
+    Resume the `loaded` snapshot and let the running workload generate traffic for --duration-seconds
+    of GUEST time, capturing data-movement counters (guest /proc/net/dev + /proc/interrupts; and, for
+    multi-node, the PDES cross-node wire bytes/#chunks). Does NOT savevm and does NOT modify the qcow
+    (runs on a per-leaf cp -u copy). Produces files that `result`/result_new read if present. Diagnostic
+    only — separate from the timing sweep; measures no U-IPC.
+    """
+    gen_comm_executor = GenerateTestCommunication(
+        experiment_context=experiment_context,
+        duration_seconds=duration_seconds,
+    )
+    gen_comm_executor.execute(to_stdio=True, run_in_background=False)
 
 
 @app.command()

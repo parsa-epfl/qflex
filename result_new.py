@@ -84,6 +84,7 @@ class MeasurementData:
         halted_cycles: np.ndarray,
         result_folders: list[str],
         sampling_unit_size: int,
+        wfi_cycles: np.ndarray | None = None,
     ):
         self.instructions = (
             instructions  # instructions[snapshot_idx, sampling_unit_idx, core]
@@ -91,9 +92,14 @@ class MeasurementData:
         self.instructions_u = (
             instructions_u  # instructions_u[snapshot_idx, sampling_unit_idx, core]
         )
+        # LEGACY idle source: the `halted_cycles` csv column is the dead HaltedCycles counter (~0);
+        # it does NOT reflect real idle. Kept for back-compat / the existing (legacy) numbers.
         self.halted_cycles = (
             halted_cycles  # halted_cycles[snapshot_idx, sampling_unit_idx, core]
         )
+        # ACCURATE idle source: the `wfi_cycles` column (the ++theWFI counter) — real WFI/idle cycles.
+        # None when loading an older npz that lacks it (dual-report then falls back to legacy only).
+        self.wfi_cycles = wfi_cycles
         self.result_folders = result_folders
         self.sampling_unit_size = sampling_unit_size
 
@@ -111,6 +117,9 @@ def save_measurement_data(measurement_data: MeasurementData, file_path: str) -> 
         instructions=measurement_data.instructions,
         instructions_u=measurement_data.instructions_u,
         halted_cycles=measurement_data.halted_cycles,
+        wfi_cycles=measurement_data.wfi_cycles
+        if measurement_data.wfi_cycles is not None
+        else np.zeros_like(measurement_data.halted_cycles),
         result_folders=measurement_data.result_folders,
         sampling_unit_size=measurement_data.sampling_unit_size,
     )
@@ -140,6 +149,7 @@ def load_measurement_data(file_path: str) -> MeasurementData:
         instructions=data["instructions"],
         instructions_u=data["instructions_u"],
         halted_cycles=data["halted_cycles"],
+        wfi_cycles=data["wfi_cycles"] if "wfi_cycles" in data.files else None,
         result_folders=result_folders,
         sampling_unit_size=sampling_unit_size,
     )
@@ -237,6 +247,15 @@ def parse_measurements_from_csv(
     halted_cycles_delta = np.diff(
         halted_cycles_abs, axis=1, prepend=np.zeros(prepend_shape)
     )
+    # ACCURATE idle source: parse the separate `wfi_cycles` column (real WFI/idle — the ++theWFI
+    # counter). Guarded for older timing.csv lacking it (then wfi stays None → legacy-only reporting).
+    if "wfi_cycles" in df.columns:
+        wfi_cycles_abs = np.zeros((num_snapshots, num_raw_points, num_cores))
+        wfi_cycles_abs[snap_idx, su_idx, core_idx] = df["wfi_cycles"].to_numpy()
+        wfi_cycles_abs = wfi_cycles_abs[:, ::sampling_unit_size, :]
+        wfi_cycles_delta = np.diff(wfi_cycles_abs, axis=1, prepend=np.zeros(prepend_shape))
+    else:
+        wfi_cycles_delta = None
 
     console.print(
         f"[green]Sampling units after stride ({sampling_unit_size}x): "
@@ -252,6 +271,7 @@ def parse_measurements_from_csv(
         halted_cycles_delta,
         snapshot_labels,
         sampling_unit_size,
+        wfi_cycles=wfi_cycles_delta,
     )
 
 
@@ -398,7 +418,8 @@ def calculate_next_checkpoint_size(max_required_size: float) -> int:
 
 
 def calculate_weighted_harmonic_average(
-    measurement_data: MeasurementData, index: int, core_ids: list[int] | None = None
+    measurement_data: MeasurementData, index: int, core_ids: list[int] | None = None,
+    idle_source: str = "halted",
 ) -> float:
     """
     Calculate the weighted harmonic average across cores for a specific sampling unit.
@@ -415,7 +436,12 @@ def calculate_weighted_harmonic_average(
         The sum of weighted harmonic averages across specified cores
     """
     instruction_data_u = measurement_data.instructions_u
-    halted_cycles_data = measurement_data.halted_cycles
+    # idle_source: "halted" = LEGACY dead `halted_cycles` column (~0 idle → answer ≈ normal IPC);
+    # "wfi" = ACCURATE real idle (the ++theWFI `wfi_cycles` counter). Falls back to legacy if wfi absent.
+    if idle_source == "wfi" and measurement_data.wfi_cycles is not None:
+        halted_cycles_data = measurement_data.wfi_cycles
+    else:
+        halted_cycles_data = measurement_data.halted_cycles
     sampling_unit_size = measurement_data.sampling_unit_size
 
     if index + MEASURE_UNITS > instruction_data_u.shape[1]:
@@ -576,12 +602,15 @@ def plot_u_ipc_distribution(
     snapshot_total_u_ipc = np.sum(
         interval_ipc_data_u, axis=1
     )  # Sum across cores for each snapshot
-    # Drop NaN and zero (idle) snapshots — consistent with the other reporting paths.
+    # Keep-zeros series (existing behavior, preserved): per-snapshot U-IPC summed across cores.
     valid_u_ipc_data = [x for x in snapshot_total_u_ipc]
-    unvalid_count = len(snapshot_total_u_ipc) - len(valid_u_ipc_data)
-    if unvalid_count > 0:
+    # ADD: busy-window (drop-zeros) series — mirrors result.py's OMMIT_ZERO (drop NaN and <= 0).
+    busy_u_ipc_data = [x for x in snapshot_total_u_ipc if (not math.isnan(x)) and x > 0]
+    n_dropped = len(snapshot_total_u_ipc) - len(busy_u_ipc_data)
+    if n_dropped > 0:
         console.print(
-            f"[yellow]Warning: Dropped {unvalid_count} snapshots with NaN or zero U-IPC (idle or invalid data)[/yellow]"
+            f"[yellow]Note: {n_dropped}/{len(snapshot_total_u_ipc)} snapshots have NaN or zero U-IPC "
+            f"(idle / no user commit) — excluded from the busy-window (drop-zeros) U-IPC below.[/yellow]"
         )
 
     if len(valid_u_ipc_data) > 0:
@@ -607,10 +636,25 @@ def plot_u_ipc_distribution(
         current_sample_size = len(valid_u_ipc_data)
         is_sample_size_enough = current_sample_size >= required_sample_size
 
-        # Plot distribution using plotille if enabled
+        # ADD: busy-window (drop-zeros) stats — the busy-cycle U-IPC (what result.py reports).
+        if len(busy_u_ipc_data) > 0:
+            busy_average_u_ipc = float(np.mean(busy_u_ipc_data))
+            busy_cv = (
+                float(np.std(busy_u_ipc_data)) / busy_average_u_ipc
+                if busy_average_u_ipc > 0 else float("inf")
+            )
+            busy_required_sample_size = (z_score * busy_cv / acceptable_sampling_error) ** 2
+            busy_current_sample_size = len(busy_u_ipc_data)
+        else:
+            busy_average_u_ipc, busy_cv = 0.0, float("inf")
+            busy_required_sample_size, busy_current_sample_size = float("inf"), 0
+
+        # Plot the original (keep-zeros) distribution UNCHANGED, then ADD a second plot for the
+        # busy/drop-zeros distribution. Two plots total; the first is exactly as before.
         if plot_enabled:
             title = plot_title if plot_title else "U-IPC Distribution"
             _plot_single_distribution(valid_u_ipc_data, title, plot_enabled)
+            _plot_single_distribution(busy_u_ipc_data, title + " (busy / drop-zeros)", plot_enabled)
 
         return {
             "valid_u_ipc_data": valid_u_ipc_data,
@@ -619,6 +663,11 @@ def plot_u_ipc_distribution(
             "required_sample_size": required_sample_size,
             "current_sample_size": current_sample_size,
             "is_sample_size_enough": is_sample_size_enough,
+            "busy_average_u_ipc": busy_average_u_ipc,
+            "busy_coefficient_of_variation": busy_cv,
+            "busy_required_sample_size": busy_required_sample_size,
+            "busy_current_sample_size": busy_current_sample_size,
+            "n_dropped": n_dropped,
         }
     else:
         return {
@@ -776,6 +825,10 @@ def generate_new_core_info(
         "required_sample_size": required_sample_size,
         "current_sample_size": u_ipc_stats["current_sample_size"],
         "is_sample_size_enough": is_sample_size_enough,
+        "busy_average_u_ipc": u_ipc_stats.get("busy_average_u_ipc"),
+        "busy_required_sample_size": u_ipc_stats.get("busy_required_sample_size"),
+        "busy_current_sample_size": u_ipc_stats.get("busy_current_sample_size"),
+        "n_dropped": u_ipc_stats.get("n_dropped", 0),
         "confidence": confidence,
         "acceptable_sampling_error": acceptable_sampling_error,
     }
@@ -833,6 +886,21 @@ def display_results_table(results: dict):
     )
 
     console.print(summary_table)
+
+    # ADD — SEPARATE second table (the keep-zeros "Summary Statistics" above is unchanged):
+    # busy-window / drop-zeros U-IPC = busy-cycle efficiency over snapshots that did user work
+    # (idle/zero/NaN snapshots excluded), matching result.py's OMMIT_ZERO.
+    if results.get("busy_average_u_ipc") is not None:
+        busy_table = Table(title="Summary Statistics (busy / drop-zeros U-IPC)", box=box.DOUBLE)
+        busy_table.add_column("Metric", style="cyan")
+        busy_table.add_column("Value", style="green")
+        busy_table.add_row("Average U-IPC (busy)", f"{results['busy_average_u_ipc']:.4f}")
+        busy_table.add_row("Busy sample size", str(results["busy_current_sample_size"]))
+        busy_table.add_row("Dropped (idle / zero / NaN)", str(results.get("n_dropped", 0)))
+        busy_table.add_row(
+            "Required Sample Size (busy)", f"{results['busy_required_sample_size']:.1f}"
+        )
+        console.print(busy_table)
 
     if not results["is_sample_size_enough"]:
         needed_samples = (
@@ -964,6 +1032,11 @@ def analyze_sampling_unit(
                 measurement_data, index, valid_cores
             )
             group_table.add_row("Weighted Harmonic IPC", f"{weighted_harmonic_ipc:.4f}")
+            # ADD accurate-idle variant (wfi_cycles) next to the legacy one (halted_cycles ~0 idle).
+            whi_wfi = calculate_weighted_harmonic_average(
+                measurement_data, index, valid_cores, idle_source="wfi"
+            )
+            group_table.add_row("Weighted Harmonic IPC (wfi, accurate)", f"{whi_wfi:.4f}")
             group_table.add_row("Standard deviation", f"{std_dev:.4f}")
             group_table.add_row(
                 "Coefficient of variation", f"{coefficient_of_variation:.4f}"
@@ -977,6 +1050,27 @@ def analyze_sampling_unit(
             )
 
             console.print(group_table)
+
+            # ADD second per-group table for the busy / drop-zeros distribution (pairs with 2nd plot).
+            g_busy = [x for x in snapshot_group_u_ipc if (not math.isnan(x)) and x > 0]
+            if g_busy:
+                gb_avg = float(np.mean(g_busy))
+                gb_std = float(np.std(g_busy))
+                gb_cv = gb_std / gb_avg if gb_avg > 0 else float("inf")
+                gb_req = (z_score * gb_cv / acceptable_sampling_error) ** 2
+                gbt = Table(
+                    title=f"Core Group {group_idx + 1} Statistics (busy / drop-zeros)", box=box.ROUNDED
+                )
+                gbt.add_column("Metric", style="cyan")
+                gbt.add_column("Value", style="green")
+                gbt.add_row("Busy snapshots", str(len(g_busy)))
+                gbt.add_row(
+                    "Dropped (idle / zero / NaN)", str(len(snapshot_group_u_ipc) - len(g_busy))
+                )
+                gbt.add_row("Average U-IPC (busy)", f"{gb_avg:.4f}")
+                gbt.add_row("Coefficient of variation", f"{gb_cv:.4f}")
+                gbt.add_row("Required sample size (busy)", f"{gb_req:.1f}")
+                console.print(gbt)
 
             if not is_sample_size_enough:
                 needed = required_sample_size - current_sample_size
@@ -1044,6 +1138,11 @@ def analyze_sampling_unit(
             measurement_data, index
         )
         all_cores_table.add_row("Weighted Harmonic IPC", f"{weighted_harmonic_ipc:.4f}")
+        # ADD accurate-idle variant (wfi_cycles) next to the legacy one (halted_cycles ~0 idle).
+        whi_wfi_all = calculate_weighted_harmonic_average(
+            measurement_data, index, idle_source="wfi"
+        )
+        all_cores_table.add_row("Weighted Harmonic IPC (wfi, accurate)", f"{whi_wfi_all:.4f}")
         all_cores_table.add_row("Standard deviation", f"{std_dev:.4f}")
         all_cores_table.add_row(
             "Coefficient of variation", f"{coefficient_of_variation:.4f}"
@@ -1057,6 +1156,32 @@ def analyze_sampling_unit(
         )
 
         console.print(all_cores_table)
+        console.print(
+            "[dim]Weighted Harmonic IPC shown two ways: legacy uses the dead halted_cycles column "
+            "(~0 idle → ≈ normal IPC); '(wfi, accurate)' uses the real wfi_cycles idle counter — they "
+            "diverge once the core idles (e.g. single-node WS, ~8% idle).[/dim]"
+        )
+
+        # ADD second all-cores table for the busy / drop-zeros distribution — pairs with the second
+        # (busy) plot. The table above (keep-zeros) is unchanged.
+        busy_data = [x for x in snapshot_total_u_ipc if (not math.isnan(x)) and x > 0]
+        if busy_data:
+            b_avg = float(np.mean(busy_data))
+            b_std = float(np.std(busy_data))
+            b_cv = b_std / b_avg if b_avg > 0 else float("inf")
+            b_req = (z_score * b_cv / acceptable_sampling_error) ** 2
+            busy_all_table = Table(title="All Cores Statistics (busy / drop-zeros)", box=box.ROUNDED)
+            busy_all_table.add_column("Metric", style="cyan")
+            busy_all_table.add_column("Value", style="green")
+            busy_all_table.add_row("Busy snapshots", str(len(busy_data)))
+            busy_all_table.add_row(
+                "Dropped (idle / zero / NaN)", str(len(snapshot_total_u_ipc) - len(busy_data))
+            )
+            busy_all_table.add_row("Average U-IPC (busy)", f"{b_avg:.4f}")
+            busy_all_table.add_row("Standard deviation", f"{b_std:.4f}")
+            busy_all_table.add_row("Coefficient of variation", f"{b_cv:.4f}")
+            busy_all_table.add_row("Required sample size (busy)", f"{b_req:.1f}")
+            console.print(busy_all_table)
 
         if not is_sample_size_enough:
             needed = required_sample_size - current_sample_size
@@ -1112,6 +1237,7 @@ def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
         "mem_onchip_req_count", "mem_onchip_req_latency", "mem_onchip_retire_stalls",
         "l2_miss_peer", "l2_miss_memory",
         "exc_entries_system", "exc_entries_idle", "exc_entries_trap",
+        "exc_entries_user", "resync_interrupt",
     ]
     present_optional = [c for c in optional if c in df.columns]
 
@@ -1151,7 +1277,19 @@ def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
     # Per-snapshot user commits in the window (summed across cores): how many snapshots did zero
     # user work — the "server idle/waiting" signal that result.py's OMMIT_ZERO would censor.
     per_snap_user = deltas["instruction:u"][:, sl, :].sum(axis=(1, 2))
-    zero_info = (int(per_snap_user.shape[0]), int((per_snap_user == 0).sum()))
+    per_snap_cyc = deltas["core_cycles"][:, sl, :].sum(axis=(1, 2))
+    per_snap_wfi = deltas["wfi_cycles"][:, sl, :].sum(axis=(1, 2))
+    # Snapshot census: of N snapshots, how many add no user instructions and why. NaN = no cycles
+    # advanced (undefined U-IPC); zero = cycles ran but 0 user commits; of the zeros, how many were
+    # idle (wfi_cycles>0, i.e. the core was halted — needs the ++theWFI fix to be nonzero).
+    n_snap = int(per_snap_user.shape[0])
+    n_nan = int((per_snap_cyc == 0).sum())
+    n_zero = int(((per_snap_user == 0) & (per_snap_cyc > 0)).sum())
+    n_zero_idle = int(((per_snap_user == 0) & (per_snap_cyc > 0) & (per_snap_wfi > 0)).sum())
+    n_contrib = int((per_snap_user > 0).sum())
+    zero_info = (n_snap, int((per_snap_user == 0).sum()))  # kept for back-compat (n_snap, n_zero_total)
+    census = {"total": n_snap, "contributing": n_contrib, "zero": n_zero,
+              "zero_idle_wfi": n_zero_idle, "nan": n_nan}
 
     totals, maf_by_core = {}, {}
     for core in range(n_core):
@@ -1162,7 +1300,7 @@ def _diag_window_totals(csv_path: str, index: int, sampling_unit_size: int):
         vals = maf_arr[:, sl, core].ravel()
         vals = vals[vals > 0]
         maf_by_core[core] = float(vals.mean()) if len(vals) else 0.0
-    return totals, maf_by_core, zero_info
+    return totals, maf_by_core, zero_info, census
 
 
 def report_diagnostics(
@@ -1173,7 +1311,7 @@ def report_diagnostics(
     result = _diag_window_totals(csv_path, index, sampling_unit_size)
     if result is None:
         return
-    totals, maf_by_core, zero_info = result
+    totals, maf_by_core, zero_info, census = result
     if not totals:
         console.print("[yellow]Diagnostics skipped: no active cores for this sampling unit.[/yellow]")
         return
@@ -1213,12 +1351,21 @@ def report_diagnostics(
     ipc_row("ALL", agg(all_keys))
     console.print(ta)
 
-    # Idle/wait signal: snapshots that committed zero user instructions in this window — the
-    # "server idle / waiting for (latency-delayed) requests" effect, which result.py censors.
-    n_snap, n_zero = zero_info
+    # Snapshot census: of N snapshots, how many add NO user instructions this window, and why.
+    # These are exactly what the busy/drop-zeros U-IPC (and result.py's OMMIT_ZERO) excludes.
+    tcz = Table(title="Diagnostics — snapshot census (why snapshots add no user instructions)", box=box.ROUNDED)
+    for col in ["category", "snapshots", "% of total"]:
+        tcz.add_column(col, justify="center")
+    N = census["total"] or 1
+    tcz.add_row("contributing (U-IPC > 0)", str(census["contributing"]), f"{100*census['contributing']/N:.1f}")
+    tcz.add_row("zero U-IPC (cycles ran, 0 user commits)", str(census["zero"]), f"{100*census['zero']/N:.1f}")
+    tcz.add_row("  └ of which idle/WFI (wfi_cycles>0)", str(census["zero_idle_wfi"]), f"{100*census['zero_idle_wfi']/N:.1f}")
+    tcz.add_row("NaN U-IPC (no cycles advanced)", str(census["nan"]), f"{100*census['nan']/N:.1f}")
+    tcz.add_row("TOTAL snapshots", str(census["total"]), "100.0")
+    console.print(tcz)
     console.print(
-        f"[cyan]Zero-user-commit windows this unit: {n_zero}/{n_snap}[/cyan] "
-        f"(server idle/waiting — censored by result.py's OMMIT_ZERO; rises if multi-node latency starves the server)"
+        "[dim]contributing + zero + NaN = total; 'idle/WFI' is the subset of the zeros where the core "
+        "was halted (WFI) — needs the ++theWFI fix to be nonzero. These are the censored windows.[/dim]"
     )
 
     # Table B: memory & communication
@@ -1260,26 +1407,33 @@ def report_diagnostics(
         console.print("[dim]off-chip avg lat = req_latency/req_count (cyc) — rises if multi-node "
                       "coherence/memory is slower; L2-Peer = cross-node cache-to-cache, L2-Mem = local DRAM.[/dim]")
 
-    # Table B3: exception/interrupt ENTRIES by privilege context. Count of taken exceptions/IRQs
-    # (one Flexus "Exception" insn per entry). NOT split by IRQ type (timer/IPI/NIC) — that needs
-    # the guest's /proc/interrupts. Useful single-vs-multi: a NIC-IRQ-driven server (multi) takes
-    # more device interrupts than a loopback/IPI-driven one (single).
+    # Table B3: exception/interrupt ENTRIES by privilege context + async-IRQ resyncs. Count of taken
+    # exceptions/IRQs (one Flexus "Exception" insn per entry). exc:Trap dominates and LUMPS sync
+    # syscalls/faults with async IRQs (can't isolate interrupts). Resync:IRQ = interrupt-caused
+    # resyncs (0 ≠ "no interrupts"). nic_recv/sent here are the Flexus on-chip COHERENCE-network msg
+    # counts (MultiNic→MemoryNetwork), ∝ cache misses — NOT guest NIC packets / device RX IRQs.
     if "exc_entries_trap" in next(iter(totals.values())):
-        te = Table(title="Diagnostics — exception/interrupt entries (count, by context; NOT by IRQ type)",
+        te = Table(title="Diagnostics — exception/interrupt entries (by context; exc:Trap lumps syscalls+IRQs; nic=coherence msgs)",
                    box=box.ROUNDED)
-        for col in ["Core", "exc:System", "exc:Idle", "exc:Trap", "exc:total"]:
+        for col in ["Core", "exc:User", "exc:System", "exc:Idle", "exc:Trap", "exc:total",
+                    "Resync:IRQ", "nic_recv", "nic_sent"]:
             te.add_column(col, justify="center")
 
         def exc_row(label, t):
+            u = t.get("exc_entries_user", 0)
             s, i, tr = t["exc_entries_system"], t["exc_entries_idle"], t["exc_entries_trap"]
-            te.add_row(label, f"{int(s)}", f"{int(i)}", f"{int(tr)}", f"{int(s + i + tr)}")
+            te.add_row(label, f"{int(u)}", f"{int(s)}", f"{int(i)}", f"{int(tr)}",
+                       f"{int(u + s + i + tr)}", f"{int(t.get('resync_interrupt', 0))}",
+                       f"{int(t['nic_recv'])}", f"{int(t['nic_sent'])}")
 
         for c in cores:
             exc_row(str(c), totals[c])
         exc_row("ALL", agg(all_keys))
         console.print(te)
-        console.print("[dim]= # exceptions/IRQs/faults taken (by where taken), not by source. For "
-                      "timer-vs-IPI-vs-NIC breakdown, capture the guest's /proc/interrupts (see TODO).[/dim]")
+        console.print("[dim]= # exceptions/IRQs/faults taken (by where taken). exc:Trap lumps sync "
+                      "syscalls/faults with async IRQs. Resync:IRQ = interrupt-caused resyncs (0 ≠ no "
+                      "interrupts). nic_recv/sent = on-chip COHERENCE traffic (∝ cache misses), NOT guest "
+                      "NIC RX. Per-IRQ-type (timer/IPI/NIC) needs /proc/interrupts or a Flexus counter (see TODO).[/dim]")
 
     # Table C: CPI-stack fractions (proportional attribution, not cycles)
     tc = Table(title="Diagnostics — CPI-stack fractions (proportional)", box=box.ROUNDED)
@@ -1376,6 +1530,139 @@ def report_per_core_commits(index, sampling_unit_size, run_glob="run/partition_*
     multi = sum(1 for _, d in rows if sum(1 for c in labels if d.get(c, 0) > THR) >= 2)
     console.print(f"[dim]active windows (>{THR} commits) per core: {active}; "
                   f"windows with ≥2 cores active simultaneously: {multi}/{len(rows)}[/dim]")
+
+
+def report_pdes_wire(run_glob: str = "run/partition_*/log") -> None:
+    """Additive: cross-node data moved over the PDES wire (MULTI-NODE only). Sums the `[PDES-WIRE]`
+    lines the timing qemu prints at engine teardown (one per idx run) from the partition logs. Single-
+    node has no PDES wire (client↔server is loopback, invisible to the sim) → prints a note. Skipped
+    silently if no logs / no lines (pre-instrumentation runs)."""
+    import glob, re
+    files = glob.glob(run_glob) + glob.glob("run/partition_*/err")
+    pat = re.compile(
+        r"\[PDES-WIRE\] data_bytes_sent=(\d+) data_msgs_sent=(\d+) "
+        r"data_bytes_recv=(\d+) data_msgs_recv=(\d+)"
+    )
+    bs = ms = br = mr = runs = 0
+    for f in files:
+        try:
+            with open(f) as fh:
+                for line in fh:
+                    m = pat.search(line)
+                    if m:
+                        bs += int(m.group(1)); ms += int(m.group(2))
+                        br += int(m.group(3)); mr += int(m.group(4)); runs += 1
+        except OSError:
+            continue
+    if runs == 0:
+        console.print(
+            "[yellow]Cross-node data moved (PDES wire): none found. Expected on single-node "
+            "(client↔server is loopback — no PDES wire). For multi-node, create it with:\n"
+            "    ./qflex generate-test-communication -c <this experiment's yaml> --duration-seconds 1\n"
+            "(--duration-seconds is GUEST seconds; the guest /proc/net/dev table above compares single vs multi regardless).[/yellow]"
+        )
+        return
+    t = Table(title="Diagnostics — cross-node data moved (PDES wire, NORMAL guest packets)", box=box.ROUNDED)
+    for col in ["direction", "bytes", "chunks (msgs)", "avg bytes/chunk"]:
+        t.add_column(col, justify="center")
+    t.add_row("sent", str(bs), str(ms), f"{bs/ms:.1f}" if ms else "-")
+    t.add_row("recv", str(br), str(mr), f"{br/mr:.1f}" if mr else "-")
+    console.print(t)
+    console.print(
+        f"[dim]summed over {runs} [PDES-WIRE] line(s). MULTI-NODE only — single-node's loopback "
+        f"client↔server isn't visible sim-side; for the single-vs-multi comparison use /proc/net/dev.[/dim]"
+    )
+
+
+def _parse_netdev(path: str):
+    """{iface: (rx_bytes, rx_pkts, tx_bytes, tx_pkts)} from a captured /proc/net/dev dump (ignores the
+    typed-echo / marker / prompt lines — only iface rows with 16 trailing numbers match)."""
+    import re
+    out = {}
+    try:
+        for line in open(path):
+            m = re.match(r"\s*([A-Za-z0-9_.@-]+):\s+((?:\d+\s+){15}\d+)", line)
+            if m:
+                nums = [int(x) for x in m.group(2).split()]
+                if len(nums) >= 16:  # rx: bytes packets errs...(8) ; tx: bytes packets...(8)
+                    out[m.group(1)] = (nums[0], nums[1], nums[8], nums[9])
+    except OSError:
+        return None
+    return out or None
+
+
+def report_netdev() -> None:
+    """Additive: guest /proc/net/dev byte + packet (chunk) DELTA per interface over the
+    generate-test-communication window. single -> `lo` (localhost loopback); multi -> `lo` + `eth0`
+    (cross-node wire). Skipped (with how-to-create) if the capture is absent."""
+    before = _parse_netdev("netdev_before.txt")
+    after = _parse_netdev("netdev_after.txt")
+    if not before or not after:
+        console.print(
+            "[yellow]No data-movement capture (netdev_*.txt) found. Create it with:\n"
+            "    ./qflex generate-test-communication -c <this experiment's yaml> --duration-seconds 1\n"
+            "(--duration-seconds is GUEST seconds; resumes `loaded`, captures /proc/net/dev; no savevm, qcow untouched).[/yellow]"
+        )
+        return
+    t = Table(title="Diagnostics — data moved (guest /proc/net/dev delta over the capture window)", box=box.ROUNDED)
+    for col in ["iface", "rx bytes", "rx pkts (chunks)", "tx bytes", "tx pkts (chunks)", "avg rx B/pkt", "avg tx B/pkt"]:
+        t.add_column(col, justify="center")
+    shown = 0
+    for iface in sorted(set(before) & set(after)):
+        rb = after[iface][0] - before[iface][0]
+        rp = after[iface][1] - before[iface][1]
+        tb = after[iface][2] - before[iface][2]
+        tp = after[iface][3] - before[iface][3]
+        if rb == 0 and tb == 0 and rp == 0 and tp == 0:
+            continue
+        t.add_row(iface, str(rb), str(rp), str(tb), str(tp),
+                  f"{rb/rp:.1f}" if rp else "-", f"{tb/tp:.1f}" if tp else "-")
+        shown += 1
+    if shown:
+        console.print(t)
+    console.print(
+        "[dim]lo = localhost (single-node client↔server loopback); eth0 = cross-node wire (multi-node). "
+        "pkts = chunks. Compare single (lo) vs multi (lo + eth0).[/dim]"
+    )
+
+
+def report_interrupts() -> None:
+    """Additive: /proc/interrupts DELTA over the capture window, by IRQ — the per-type breakdown
+    (timer / reschedule-IPI / NIC RX) that the Flexus lumped exc:Trap counter can't give. Skipped if
+    the capture is absent (the netdev warning already says how to create it)."""
+    import re
+    def parse(path):
+        out = {}
+        try:
+            for line in open(path):
+                m = re.match(r"\s*([A-Za-z0-9_-]+):\s+((?:\d+\s+)*\d+)\s*(\S.*)?$", line)
+                if m:
+                    total = sum(int(x) for x in m.group(2).split())
+                    out[m.group(1)] = (total, (m.group(3) or "").strip())
+        except OSError:
+            return None
+        return out or None
+    before = parse("interrupts_before.txt")
+    after = parse("interrupts_after.txt")
+    if not before or not after:
+        return
+    rows = []
+    for irq in set(before) & set(after):
+        d = after[irq][0] - before[irq][0]
+        if d > 0:
+            rows.append((d, irq, after[irq][1]))
+    if not rows:
+        return
+    t = Table(title="Diagnostics — interrupts taken (/proc/interrupts delta, by IRQ)", box=box.ROUNDED)
+    for col in ["irq", "name", "count delta"]:
+        t.add_column(col, justify="center")
+    for d, irq, name in sorted(rows, reverse=True)[:25]:
+        t.add_row(irq, name[:44], str(d))
+    console.print(t)
+    console.print(
+        "[dim]Guest IRQ counts — timer (arch_timer), reschedule IPI, NIC RX (virtio/eth), etc. "
+        "This is the per-IRQ-type breakdown the Flexus exc:Trap counter lumps together.[/dim]"
+    )
 
 
 def main():
@@ -1638,6 +1925,9 @@ Examples:
     console.print("\n[bold cyan]=== Diagnostics ===[/bold cyan]")
     report_diagnostics(args.timing_csv, args.index, args.unit_size, core_groups)
     report_per_core_commits(args.index, args.unit_size)
+    report_pdes_wire()
+    report_netdev()
+    report_interrupts()
 
     # Exit with -1 if sampling error bounds were not satisfied
     if not all_bounds_satisfied and not args.no_exit_on_fail:

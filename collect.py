@@ -284,6 +284,9 @@ def parse_one_result(folder_name: str):
         exc_entries_system = [0] * MAX_CORES
         exc_entries_idle = [0] * MAX_CORES
         exc_entries_trap = [0] * MAX_CORES
+        # User-context exception entries + async-IRQ resyncs (Resync:Interrupt) — still no IRQ-type split.
+        exc_entries_user = [0] * MAX_CORES
+        resync_interrupt = [0] * MAX_CORES
 
         log_file = f"{folder_name}/all.measurement.{point:010}.log"
         with open(log_file) as f:
@@ -420,6 +423,14 @@ def parse_one_result(folder_name: str):
                     core_idx = parse_core_idx(line)
                     if core_idx < MAX_CORES:
                         exc_entries_trap[core_idx] = int(line.split()[1])
+                if "-uarch-InsnCount:User:Exception " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx < MAX_CORES:
+                        exc_entries_user[core_idx] = int(line.split()[1])
+                if "-uarch-Resync:Interrupt " in line:
+                    core_idx = parse_core_idx(line)
+                    if core_idx < MAX_CORES:
+                        resync_interrupt[core_idx] = int(line.split()[1])
 
                 if "-nic-MsgsSent " in line:
                     core_idx = parse_core_idx(line)
@@ -631,6 +642,8 @@ def parse_one_result(folder_name: str):
                     exc_entries_system[core_id],
                     exc_entries_idle[core_id],
                     exc_entries_trap[core_id],
+                    exc_entries_user[core_id],
+                    resync_interrupt[core_id],
                 ]
             )
     return result
@@ -655,7 +668,7 @@ with open("timing.csv", "w") as f:
         "snapshot_id,core,asid,sys_cycles,instruction,instruction:u,itlb_miss,dtlb_miss,stlb_miss,btb_miss,tage_miss,l1i_miss,l1d_miss,l2_miss,halted_cycles,core_cycles,virtio_blk_read,virtio_blk_write,virtio_complete,bx_instruction,bx_instruction_access,bx_data_access,bx_private_icache_miss,bx_private_dcache_miss,bx_shared_cache_miss,bx_branch_count,bx_bp_miss,bx_tlb_miss,bx_drain_pipeline,bx_drain_store_buffer,bx_read_noc_hop,bx_write_noc_hop,bx_instruction_u,bx_instruction_k,bx_private_dcache_miss_load,bx_private_dcache_miss_store,bx_private_dcache_miss_ptw,bx_private_dcache_miss_load_ptw,bx_ifetch_noc_hop,bx_shared_cache_miss_write,bx_shared_cache_miss_ifetch,bx_shared_cache_miss_read,spin_cycles,wfi_cycles,spins,commits_nonspin_system,commits_spin_user,commits_spin_system,nic_sent,nic_recv,maf,"
         + ",".join(TB_BUCKETS)
         + ",mem_offchip_req_count,mem_offchip_req_latency,mem_offchip_retire_stalls,mem_onchip_req_count,mem_onchip_req_latency,mem_onchip_retire_stalls,l2_miss_peer,l2_miss_memory"
-        + ",exc_entries_system,exc_entries_idle,exc_entries_trap"
+        + ",exc_entries_system,exc_entries_idle,exc_entries_trap,exc_entries_user,resync_interrupt"
         + "\n"
     )
     for result in all_results:
