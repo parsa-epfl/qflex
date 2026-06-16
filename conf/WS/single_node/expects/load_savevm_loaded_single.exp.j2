@@ -58,6 +58,7 @@ set timeout 900
 set BUDGET_INITIAL_S        10
 set BUDGET_DEFAULT_S         5
 set BUDGET_PROMPT_S         60
+set BUDGET_INSTALL_S       600     ; # apk download over NAT at idle CPU; fail fast, not the ckpt budget
 set BUDGET_WORKLOAD_INIT_S 86400   ; # 120 min for solr init + client ramp-up
 set BUDGET_CHECKPOINTING_S 86400
 
@@ -111,6 +112,15 @@ proc quit_qemu {monitor_port} {
     }
 }
 
+# Run a shell cmd and block until its unique end-marker prints (NOT a prompt match — no [6n race, no
+# leftover-prompt race). Fails fast at $budget instead of sitting on a missed prompt for hours.
+proc run_and_wait {cmd budget} {
+    global spawn_id
+    set timeout $budget
+    send "$cmd; printf '\\nQFLEXEOC%s\\n' \"\$\$\"\r"
+    expect { timeout { puts "WARN: '$cmd' did not return within ${budget}s" } -re {QFLEXEOC[0-9]+} }
+}
+
 # --- 1. Connect serial + nudge for shell prompt (post-loadvm) ---------------
 
 set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
@@ -122,6 +132,27 @@ expect {
     timeout { puts "ERROR: shell prompt timed out after loadvm"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}
 }
+
+# --- 1b. Bake `ss` (iproute2) into `loaded` for per-side socket measurement. Done here at load start
+# while the guest is idle (before the workload launches), so the install is fast; needs root + the NAT
+# NIC (eth0 in single-node) + DNS. Drop back to qflex after so the workload runs as before.
+send "su\r"
+set timeout $BUDGET_PROMPT_S
+expect {
+    timeout { puts "ERROR: su for iproute2 install timed out"; quit_qemu $monitor_port; exit 1 }
+    -re {[Ll]ogin: }    { send "\r"; exp_continue }
+    -re {[Pp]assword: } { send "\r"; exp_continue }
+    -re {# +}
+}
+# Marker-gated so each step ends the instant its command returns (no [6n / leftover-prompt race) and
+# apk fails fast at BUDGET_INSTALL_S rather than sitting on the 24h checkpointing budget.
+run_and_wait "ip link set eth0 up" $BUDGET_PROMPT_S
+run_and_wait "udhcpc -i eth0 -t 5 -n -q" $BUDGET_PROMPT_S
+run_and_wait "echo 'nameserver 10.0.2.3' > /etc/resolv.conf; echo 'nameserver 8.8.8.8' >> /etc/resolv.conf" $BUDGET_PROMPT_S
+run_and_wait "apk add --no-cache iproute2" $BUDGET_INSTALL_S
+send "exit\r"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { puts "WARN: prompt didn't return after exit" } -re {[\$#] +} }
 
 sleep 5
 
@@ -146,7 +177,7 @@ expect {
     -re {[\$#] +}
 }
 
-# --- 3. Rewrite ./client.sh with --cpuset-cpus=1-1 + 127.0.0.1 1 -----------
+# --- 3. Rewrite ./client.sh with --cpuset-cpus=1-1 + 127.0.0.1 4 -----------
 
 send "cat > ./client.sh <<'WRITE_CLIENT_EOF'\r"
 send "#!/bin/sh\r"
@@ -156,7 +187,7 @@ send "\r"
 send "docker run --rm --name web_search_client \\\r"
 send "  --cpuset-cpus={{ client_cores }} \\\r"
 send "  --net host cloudsuite/web-search:client \\\r"
-send "  127.0.0.1 1 \\\r"
+send "  127.0.0.1 4 \\\r"
 send "  --ramp-up=30 \\\r"
 send "  --ramp-down=180 \\\r"
 send "  --steady=720000 \\\r"
@@ -177,8 +208,10 @@ expect {
 sleep 5
 
 # --- 4. Background server.sh, tail /tmp/server.out for NodeDataChanged ------
-
-send "./server.sh > /tmp/server.out 2>&1 < /dev/null &\r"
+# `touch` the file on the same line as the launch so `tail -f` can't race the backgrounded child's
+# redirect (the multi-node tail-before-file failure). No `docker info` probe — docker is already up,
+# and probing it here was observed to wedge the single-vCPU guest console.
+send "touch /tmp/server.out; ./server.sh > /tmp/server.out 2>&1 < /dev/null &\r"
 expect {
     timeout { puts "ERROR: launching ./server.sh timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}
@@ -204,8 +237,7 @@ expect {
 sleep 5
 
 # --- 5. Background client.sh, tail /tmp/client.out for Ramp up completed ---
-
-send "./client.sh > /tmp/client.out 2>&1 < /dev/null &\r"
+send "touch /tmp/client.out; ./client.sh > /tmp/client.out 2>&1 < /dev/null &\r"
 expect {
     timeout { puts "ERROR: launching ./client.sh timed out"; quit_qemu $monitor_port; exit 1 }
     -re {[\$#] +}

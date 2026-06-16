@@ -13,11 +13,13 @@
 #   single-node  -> `lo` delta = localhost (client<->server loopback) data moved
 #   multi-node   -> `lo` + `eth0` deltas (+ the PDES [PDES-WIRE] line at qemu teardown) = cross-node
 
-set timeout 900
-set BUDGET_INITIAL_S       10
+# Budgets are larger than the single-node "fast interaction" defaults: under multi-node PDES the guest
+# advances far slower in host-time and both nodes must sync before a prompt flushes, so 60s is too tight.
+set timeout 1800
+set BUDGET_INITIAL_S       30
 set BUDGET_DEFAULT_S        5
-set BUDGET_PROMPT_S        60
-set BUDGET_GUEST_WINDOW_S 1800
+set BUDGET_PROMPT_S       600
+set BUDGET_GUEST_WINDOW_S 3600
 
 set serial_port  $env(TELNET_SERIAL_PORT)
 set monitor_port $env(TELNET_MONITOR_PORT)
@@ -25,7 +27,7 @@ set exp_folder   $env(EXP_FOLDER)
 if {[info exists env(DATA_MOVE_DURATION_S)]} {
     set duration_s $env(DATA_MOVE_DURATION_S)
 } else {
-    set duration_s 1
+    set duration_s 2
 }
 catch {file mkdir $exp_folder}
 log_file -noappend "$exp_folder/expect_log.txt"
@@ -105,6 +107,27 @@ expect {
 # --- 3. Capture BEFORE (read-only procfs; no su needed — both files are world-readable) -----------
 capture_to "netdev_before.txt"     "cat /proc/net/dev"
 capture_to "interrupts_before.txt" "cat /proc/interrupts"
+# Per-SOCKET TCP stats for per-side (server vs client) data movement. `ss` (iproute2) is baked into
+# `loaded` by the WS load scripts, so no install here — just su (root, to see all sockets) + ONE
+# cumulative snapshot (ss tcp-info is per-connection lifetime → no window needed). Single-node only:
+# multi-node never reaches here (foreground workload, no shell). If ss is missing the capture is just
+# empty and result_new's report_socket_perside() prints the how-to.
+# Re-assert the serial spawn (connect_telnet's retry can clobber the global spawn_id) and run the ss
+# capture best-effort: a dead/closed serial leaves ss_before.txt empty rather than aborting the diag.
+set spawn_id $serial_sid
+if {[catch {
+    send "su\r"
+    set timeout $BUDGET_PROMPT_S
+    expect {
+        timeout { puts "WARN: su for ss capture timed out; per-side will be empty" }
+        -re {[Pp]assword: } { send "\r"; exp_continue }
+        -re {[Ll]ogin: }    { send "\r"; exp_continue }
+        -re {# +}
+    }
+    capture_to "ss_before.txt" "ss -tinO"
+} err]} {
+    puts "WARN: ss capture skipped ($err); per-side will be empty"
+}
 
 # --- 4. Advance GUEST time by the window (guest-side sleep; host-resource-independent) -------------
 # The backgrounded workload keeps generating traffic during this guest interval. Under PDES sync one

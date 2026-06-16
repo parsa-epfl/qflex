@@ -24,7 +24,7 @@ class GenerateTestCommunication(SimulationCommand):
     result_new reads the produced files (netdev_*.txt, interrupts_*.txt, [PDES-WIRE]) if present.
     """
 
-    def __init__(self, experiment_context: ExperimentContext, duration_seconds: int = 1):
+    def __init__(self, experiment_context: ExperimentContext, duration_seconds: int = 2):
         self.experiment_context = experiment_context
         self.duration_seconds = duration_seconds
 

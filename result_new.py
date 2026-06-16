@@ -1538,7 +1538,9 @@ def report_pdes_wire(run_glob: str = "run/partition_*/log") -> None:
     node has no PDES wire (client↔server is loopback, invisible to the sim) → prints a note. Skipped
     silently if no logs / no lines (pre-instrumentation runs)."""
     import glob, re
-    files = glob.glob(run_glob) + glob.glob("run/partition_*/err")
+    # partition logs (per-idx timing runs) + the generate-test-communication diag log (engine teardown).
+    files = (glob.glob(run_glob) + glob.glob("run/partition_*/err")
+             + glob.glob("GenerateTestCommunication.log") + glob.glob("GenerateTestCommunication.err"))
     pat = re.compile(
         r"\[PDES-WIRE\] data_bytes_sent=(\d+) data_msgs_sent=(\d+) "
         r"data_bytes_recv=(\d+) data_msgs_recv=(\d+)"
@@ -1662,6 +1664,83 @@ def report_interrupts() -> None:
     console.print(
         "[dim]Guest IRQ counts — timer (arch_timer), reschedule IPI, NIC RX (virtio/eth), etc. "
         "This is the per-IRQ-type breakdown the Flexus exc:Trap counter lumps together.[/dim]"
+    )
+
+
+def _parse_ss(path: str):
+    """{(local,peer): {bytes_acked, bytes_received, data_segs_out, data_segs_in}} from `ss -tinO`.
+    One socket per line; tcp-info tokens are space-separated key:value. None if absent."""
+    import re
+    out = {}
+    try:
+        for line in open(path):
+            parts = line.split()
+            if len(parts) < 5 or ":" not in parts[3] or ":" not in parts[4]:
+                continue  # skip header / wrapped lines
+            kv = dict(re.findall(r"([a-z_]+):(\d+)", line))
+            if not kv:
+                continue
+            out[(parts[3], parts[4])] = {
+                "ba": int(kv.get("bytes_acked", 0)),
+                "br": int(kv.get("bytes_received", 0)),
+                "so": int(kv.get("data_segs_out", kv.get("segs_out", 0))),
+                "si": int(kv.get("data_segs_in", kv.get("segs_in", 0))),
+            }
+    except OSError:
+        return None
+    return out or None
+
+
+def report_socket_perside() -> None:
+    """Additive (SINGLE-NODE): per-side server-vs-client data moved, from `ss -tinO` socket TCP-info.
+    Server & client share --net host so /proc/net/dev can't separate them; sockets can. Server side =
+    sockets whose LOCAL port is the listen port; client side = sockets whose PEER port is it (listen
+    port = the most frequent port across all endpoints). avg B/seg = the per-side packet size. Default
+    is a single CUMULATIVE snapshot (ss_before.txt) — ss tcp-info is per-connection lifetime cumulative,
+    so no window needed; if ss_after.txt also exists, the windowed delta is used instead."""
+    snap = _parse_ss("ss_before.txt")
+    after = _parse_ss("ss_after.txt")
+    if not snap:
+        console.print(
+            "[yellow]No per-side socket capture (ss_before.txt) found (single-node only). Create it with:\n"
+            "    ./qflex generate-test-communication -c <single-node yaml> --duration-seconds 0\n"
+            "(captures `docker exec <container> ss -tinO` — one cumulative snapshot; needs a guest shell → single-node).[/yellow]"
+        )
+        return
+    # after present → windowed delta; else → cumulative from the single snapshot (prev empty).
+    src, prev = (after, snap) if after else (snap, {})
+    windowed = bool(after)
+    from collections import Counter
+    ports = Counter()
+    for (loc, peer) in src:
+        ports[loc.rsplit(":", 1)[-1]] += 1
+        ports[peer.rsplit(":", 1)[-1]] += 1
+    server_port = ports.most_common(1)[0][0]
+    agg = {"server": {"ba": 0, "br": 0, "so": 0, "si": 0}, "client": {"ba": 0, "br": 0, "so": 0, "si": 0}}
+    for sock, a in src.items():
+        b = prev.get(sock, {"ba": 0, "br": 0, "so": 0, "si": 0})
+        loc, peer = sock
+        if loc.rsplit(":", 1)[-1] == server_port:
+            side = "server"
+        elif peer.rsplit(":", 1)[-1] == server_port:
+            side = "client"
+        else:
+            continue
+        for k in ("ba", "br", "so", "si"):
+            agg[side][k] += a[k] - b.get(k, 0)
+    mode = "windowed delta" if windowed else "cumulative"
+    t = Table(title=f"Diagnostics — per-side data moved (sockets, ss TCP-info {mode}; listen port :{server_port})", box=box.ROUNDED)
+    for col in ["side", "sent bytes", "sent segs", "avg sent B/seg", "recv bytes", "recv segs", "avg recv B/seg"]:
+        t.add_column(col, justify="center")
+    for side in ("server", "client"):
+        d = agg[side]
+        t.add_row(side, str(d["ba"]), str(d["so"]), f"{d['ba']/d['so']:.1f}" if d["so"] else "-",
+                  str(d["br"]), str(d["si"]), f"{d['br']/d['si']:.1f}" if d["si"] else "-")
+    console.print(t)
+    console.print(
+        "[dim]SINGLE-NODE only. sent=bytes_acked/data_segs_out, recv=bytes_received/data_segs_in per "
+        "socket. server = listen-port side (responses out, queries in); client = the reverse. avg B/seg "
+        "= per-side packet size — compare vs the aggregate lo and vs multi's [PDES-WIRE] chunk sizes.[/dim]"
     )
 
 
@@ -1927,6 +2006,7 @@ Examples:
     report_per_core_commits(args.index, args.unit_size)
     report_pdes_wire()
     report_netdev()
+    report_socket_perside()
     report_interrupts()
 
     # Exit with -1 if sampling error bounds were not satisfied

@@ -93,8 +93,8 @@ def load(
 def generate_test_communication(
     experiment_context: ExperimentContext,
     duration_seconds: Annotated[int, typer.Option(
-        help="GUEST seconds to advance (a guest-side sleep) while capturing data movement (default 1). Host-resource-independent so single-vs-multi is comparable; under PDES one guest-second can take many host-minutes."
-    )]=1,
+        help="GUEST seconds to advance (a guest-side sleep) while capturing data movement (default 2). Host-resource-independent so single-vs-multi is comparable; under PDES one guest-second can take many host-minutes."
+    )]=2,
 ):
     """
     Resume the `loaded` snapshot and let the running workload generate traffic for --duration-seconds
