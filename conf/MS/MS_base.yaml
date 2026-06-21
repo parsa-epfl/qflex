@@ -7,7 +7,7 @@ _leaf_defaults:
   llc_size_per_tile_mb: 2
   is_parallel: false
   network: none
-  population_seconds: 10
+  population_seconds: 5
   is_consolidated: false
   primary_ipc: 2.0
   primary_core_start: 0
