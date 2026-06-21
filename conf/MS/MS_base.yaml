@@ -18,11 +18,11 @@ _leaf_defaults:
   mounting_folder: /mnt/sdb/multi-node-experiments/
   image_name: root.qcow2
   use_image_directly: true
-  sample_size: 1000
+  sample_size: 500
   warming_ratio: 2
-  measurement_ratio: 3
+  measurement_ratio: 8
   stat_interval_cycles: 100000
-  partition_count: 16
+  partition_count: 23
 
 
 

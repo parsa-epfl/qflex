@@ -16,6 +16,7 @@ from commands.result import RunResultCommand
 from commands.duplicate_experiment import DuplicateExperiment
 from commands.remove_experiment import RemoveExperiment
 from commands.statistical_sample import StatisticalSampleCommand
+from commands.simulate import SimulateCommand
 from commands.generate_test_communication import GenerateTestCommunication
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -67,6 +68,29 @@ def boot(
         vanilla=vanilla,
     )
     boot_executor.execute(to_stdio=True, run_in_background=False)
+
+@app.command()
+def simulate(
+    config: Annotated[str, typer.Option(
+        "--config", "-c",
+        help="Path to a YAML config file (or set $QFLEX_CONFIG)."
+    )] = None,
+    start_point: Annotated[str, typer.Option(
+        help="Phase to start from; runs through run-partition. "
+             "One of: boot, load, initialize, fw, partition, run-partition. "
+             "Overrides the YAML start_point; omit to use the YAML value (or the 'boot' default)."
+    )] = None,
+):
+    """
+    Run the pipeline from the start point through run-partition in one invocation.
+    e.g. start point boot runs boot->load->initialize->fw->partition->run-partition;
+    fw runs fw->partition->run-partition. The start point comes from --start-point,
+    else the YAML start_point field, else 'boot'.
+    Each phase's YAML overlay block (boot:, fw:, ...) applies as if it were run on its own.
+    """
+    SimulateCommand(config_path=config, start_point=start_point).execute(
+        to_stdio=True, run_in_background=False
+    )
 
 @app.command()
 @data_class_wrap(create_experiment_context, name="experiment_context")

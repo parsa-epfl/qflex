@@ -1,14 +1,19 @@
 extends: DS_base
 
+_leaf_defaults:
+  partition_count: 46
+
 components:
   experiment_context:
     _base_: _leaf_defaults
     experiment_name: data-serving-single-node-0
     doubled_vcpu: true
-    phantom_cpu_ipc: 2
+    phantom_cpu_ipc: 4
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
     memory_gb: 64
+    original_image_name: root.qcow2
+    image_name: root-single.qcow2
 
 
 # epoch_0

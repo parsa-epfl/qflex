@@ -12,7 +12,7 @@ components:
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
     original_image_name: root.qcow2
-    image_name: root-wsv.qcow2
+    image_name: root-single.qcow2
     memory_gb: 64
 
 

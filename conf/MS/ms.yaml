@@ -1,14 +1,19 @@
 extends: MS_base
 
+_leaf_defaults:
+  partition_count: 46
+
 components:
   experiment_context:
     _base_: _leaf_defaults
     experiment_name: media-streaming-single-node-0
     doubled_vcpu: true
-    phantom_cpu_ipc: 2
+    phantom_cpu_ipc: 4
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
     memory_gb: 64
+    original_image_name: root.qcow2
+    image_name: root-single.qcow2
 
 
 # epoch_0
@@ -21,7 +26,6 @@ boot:
 load:
   components:
     experiment_context:
-      quantum_size: 1000
       interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_single.exp
       loadvm_name: booted
 

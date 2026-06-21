@@ -33,6 +33,7 @@ components:
     syncs_list: ["true"]
     telnet_port: 56558
     serial_telnet_port: 56600
+    image_name: root-multi-node-0.qcow2
 
   experiment_context_node_1:
     _base_: _leaf_defaults
@@ -46,6 +47,10 @@ components:
     wait_for_nodes: [0]
     telnet_port: 56559
     serial_telnet_port: 56601
+    all_phantom_cores: true
+    multi_modal: false
+    phantom_cpu_ipc: 4
+    image_name: root-multi-node-1.qcow2
 
 # Boot relaxes the wire (high latency, sync off); other phases keep the per-leaf
 # defaults. Scoped to the per-leaf components so the unnamed group context
@@ -72,14 +77,16 @@ load:
     experiment_context_node_0:
       # loadvm_name: booted
       # interactive_tmux: true
-      latencies_ns_list: [1000000]
+      # Only turn back on if simulation too slow
+      # latencies_ns_list: [1000000]
       syncs_list: ["true"]
       loadvm_name: booted
       interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_master.exp
     experiment_context_node_1:
       # loadvm_name: booted
       # interactive_tmux: true
-      latencies_ns_list: [1000000]
+      # Only turn back on if simulation too slow
+      # latencies_ns_list: [1000000]
       syncs_list: ["true"]
       loadvm_name: booted
       interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_wait.exp

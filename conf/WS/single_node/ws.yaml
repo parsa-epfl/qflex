@@ -11,10 +11,11 @@ components:
     phantom_cpu_ipc: 4
     latencies_ns_list: [1000000]
     syncs_list: ["false"]
-    image_name: root.qcow2
     server_cores: "0-0"
     client_cores: "1-1"
     memory_gb: 64
+    original_image_name: root.qcow2
+    image_name: root-single.qcow2
 
 
 boot:
