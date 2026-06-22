@@ -76,19 +76,23 @@ def simulate(
         help="Path to a YAML config file (or set $QFLEX_CONFIG)."
     )] = None,
     start_point: Annotated[str, typer.Option(
-        help="Phase to start from; runs through run-partition. "
-             "One of: boot, load, initialize, fw, partition, run-partition. "
+        help="Phase to start from. One of: boot, load, initialize, fw, partition, run-partition. "
              "Overrides the YAML start_point; omit to use the YAML value (or the 'boot' default)."
+    )] = None,
+    end_point: Annotated[str, typer.Option(
+        help="Phase to stop at (inclusive). One of: boot, load, initialize, fw, partition, "
+             "run-partition, result. Overrides the YAML end_point; omit to use the YAML value "
+             "(or the 'run-partition' default)."
     )] = None,
 ):
     """
-    Run the pipeline from the start point through run-partition in one invocation.
-    e.g. start point boot runs boot->load->initialize->fw->partition->run-partition;
-    fw runs fw->partition->run-partition. The start point comes from --start-point,
-    else the YAML start_point field, else 'boot'.
+    Run the pipeline from the start point through the end point (inclusive) in one invocation.
+    e.g. boot->...->run-partition by default; --start-point fw --end-point result runs
+    fw->partition->run-partition->result. start/end come from the flags, else the YAML
+    start_point/end_point fields, else 'boot'/'run-partition'.
     Each phase's YAML overlay block (boot:, fw:, ...) applies as if it were run on its own.
     """
-    SimulateCommand(config_path=config, start_point=start_point).execute(
+    SimulateCommand(config_path=config, start_point=start_point, end_point=end_point).execute(
         to_stdio=True, run_in_background=False
     )
 

@@ -139,7 +139,8 @@ class ExperimentContext(BaseModel):
     server_cores: str = Field(default="", description="cpuset string for the server workload container, substituted into interaction-script templates as {{ server_cores }}. Set explicitly in YAML/CLI — never computed.")
     client_cores: str = Field(default="", description="cpuset string for the client workload container, substituted into interaction-script templates as {{ client_cores }}. Set explicitly in YAML/CLI — never computed.")
     interactive_tmux: bool = Field(default=False, description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")
-    start_point: str = Field(default="boot", description="Pipeline phase the `simulate` command starts from; it then runs through run-partition. One of: boot, load, initialize, fw, partition, run-partition. Only the `simulate` command consumes this; every other phase ignores it.")
+    start_point: str = Field(default="boot", description="Pipeline phase the `simulate` command starts from. One of: boot, load, initialize, fw, partition, run-partition. Only the `simulate` command consumes this; every other phase ignores it.")
+    end_point: str = Field(default="run-partition", description="Pipeline phase the `simulate` command stops at (inclusive). One of: boot, load, initialize, fw, partition, run-partition, result. Defaults to run-partition; set to result to also aggregate. Only the `simulate` command consumes this; every other phase ignores it.")
     pdes_net_devs: List[str] = Field(default=[], description="List of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup.")
     sub_experiments: List["ExperimentContext"] = Field(default_factory=list, description="Optional sub-experiments. If non-empty, this context is a group node; leaf-level fields are unused and the executor recurses into each sub-experiment.")
     wait_for_nodes: List[int] = Field(default_factory=list, description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master. Set to e.g. [0] to wait for the master, or [2] to wait for node 2.")
@@ -659,7 +660,8 @@ def create_experiment_context(
     server_cores: Annotated[str, Field(description="cpuset string for the server workload container, substituted into interaction-script templates as {{ server_cores }}. Set explicitly in YAML/CLI — never computed.")] = "",
     client_cores: Annotated[str, Field(description="cpuset string for the client workload container, substituted into interaction-script templates as {{ client_cores }}. Set explicitly in YAML/CLI — never computed.")] = "",
     interactive_tmux: Annotated[bool, Field(description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")] = False,
-    start_point: Annotated[str, Field(description="Pipeline phase the `simulate` command starts from; it then runs through run-partition. One of: boot, load, initialize, fw, partition, run-partition. Only the `simulate` command consumes this; other phases ignore it.")] = "boot",
+    start_point: Annotated[str, Field(description="Pipeline phase the `simulate` command starts from. One of: boot, load, initialize, fw, partition, run-partition. Only the `simulate` command consumes this; other phases ignore it.")] = "boot",
+    end_point: Annotated[str, Field(description="Pipeline phase the `simulate` command stops at (inclusive). One of: boot, load, initialize, fw, partition, run-partition, result. Defaults to run-partition; set to result to also aggregate. Only the `simulate` command consumes this; other phases ignore it.")] = "run-partition",
 ) -> ExperimentContext:
     neighbor_node_list = neighbor_node_list or []
     latencies_ns_list = latencies_ns_list or []
@@ -783,6 +785,7 @@ def create_experiment_context(
         client_cores=client_cores,
         interactive_tmux=interactive_tmux,
         start_point=start_point,
+        end_point=end_point,
     )
 
     e._creation_kwargs = creation_kwargs
