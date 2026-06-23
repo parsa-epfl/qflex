@@ -216,6 +216,10 @@ expect {
 # execvp's `cassandra -R -f` (foreground), so the backgrounded run is captured
 # running by savevm. cpuset=0 keeps server work on core 0.
 
+# rm first: a prior run can leave run_server.sh root-owned (we did eth0 as root), and the
+# qflex user can't truncate/chmod it -- but owns /home/qflex so can rm it. Without this the
+# stale (possibly -t) script runs -> "the input device is not a TTY".
+send "rm -f ./run_server.sh\r"; expect { timeout { } -re {[\$#] +} }
 send "cat > ./run_server.sh <<'WRITE_SERVER_EOF'\r"
 send "#!/bin/sh\r"
 send "docker run --cpuset-cpus=0 --net host --name cassandra \\\r"

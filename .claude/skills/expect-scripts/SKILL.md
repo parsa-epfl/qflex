@@ -632,3 +632,145 @@ If the bash wrapper runs `gdb -ex run --args qemu …`, gdb's stdin is /dev/null
 
 - **Don't use gdb in tests** — the qflex CLI exposes `--no-gdb` on `boot`/`load`/`initialize`/`fw`. Tests in [tests/test_chained_pipeline.py / test_dev_*.py / test_boot_login_bootstrap.py](../../../tests/test_dev_container_smoke.py) pass it.
 - **If you need gdb**, the [wrap_with_gdb](../../../commands/qemu.py) helper emits `yes | gdb -ex run --args …` so the prompt auto-answers.
+
+## Iterating an `.exp` against a live container until a phase passes
+
+When debugging a Path-A `.exp` end-to-end (multi-node `boot`/`load`), the loop that works is
+**edit → run that one phase in a container the user names → poll the per-node logs at ~5 s →
+diagnose from the captured guest serial → fix → repeat until it passes.** Concretely:
+
+1. **Ask the user which container to use — every single run, never assume.** They run several
+   containers at once (`--pid=host`); a wrong one collides with their other work. The repo is
+   bind-mounted into their dev containers, so an `.exp` edit is live immediately — no rebuild
+   or restart. (`docker images | grep qflex` shows only the variants present; pick the one the
+   user named, e.g. `./dep start-docker --background --container-name <name> --debug` if you
+   must bring one up, else `./dep exec --container-name <name> …` into theirs.)
+2. **Run only the failing phase, clean first:**
+   `./dep exec --container-name <name> --command "./clean_up.sh; ./qflex load -c conf/<WL>/<wl>-multi.yaml"`.
+   This auto-backgrounds; the real signal is the on-disk per-node logs, not the tool's stdout.
+3. **Poll every ~5 s** with a single foreground bash loop (`for i in $(seq 1 N); do … sleep 5;
+   done` — a polling loop with `sleep` between checks is allowed; never `Monitor`/`run_in_background`,
+   which write to `/tmp` and fill the boot disk). Each tick: count qemus
+   (`docker exec <name> bash -lc "ps -eo comm | grep -c '[q]emu-system'"`), `stat -c%s` each
+   node's `Load.log` for growth, and `grep -ac` the phase markers. Break early on success
+   markers, on any error marker (`ERROR:`/`Permission denied`/`not a TTY`/`spawn id … not
+   open`/`Killed`), on a qemu dropping out, or on a stall (no log growth for ~150 s). Pin any
+   workload-handshake step to a hard wall-clock budget (e.g. a client→master token must land
+   within ~60 s of being sent) and abort+retry past it instead of waiting out the 24 h budget.
+4. **Diagnose from the captured guest serial** — `Load.log`/`Load.err`/`expect_log.txt` per
+   node hold the exact bytes the guest echoed. The decisive errors live there (e.g.
+   `command not found` = a tool didn't install; `Operation not permitted` on `chmod` = the
+   file is root-owned and can't be overwritten by the qflex user; `the input device is not a
+   TTY` = a stale `-t` `docker run`). When a `docker exec` produces *no* output at all, suspect
+   `docker exec` itself hung — drive commands inside an interactive `docker run -it … bash`
+   over the serial instead.
+5. **Fix the `.exp`, re-run, repeat** until the phase's success markers all appear and neither
+   node's `.err` shows an error. Keep single- and multi-node doing identical *workload* — only
+   the per-node plumbing (DNAT, ordering, file-ownership guards) may differ.
+
+### Concrete commands
+
+Locate the per-node folders (pure path computation; filter the factory debug lines):
+
+```bash
+./qflex get-experiment-folder -c conf/<WL>/<wl>-multi.yaml | grep '^/'
+# -> <group>/, <group>-node-0-0/, <group>-node-1-0/  (logs: <node>/Load.log, Load.err, expect_log.txt)
+```
+
+Launch the one phase in the user-named container (auto-backgrounds; watch the on-disk logs):
+
+```bash
+./dep exec --container-name <name> --command "./clean_up.sh; ./qflex load -c conf/<WL>/<wl>-multi.yaml"
+```
+
+The 5 s monitor loop (one foreground bash call; re-run windows ≤ ~110 iters to stay under the
+Bash-tool 600 s cap). `N0`/`N1` = the two `Load.log` paths from `get-experiment-folder`:
+
+```bash
+N0=<group>-node-0-0/Load.log; N1=<group>-node-1-0/Load.log
+E0=${N0%.log}.err;            E1=${N1%.log}.err
+seen_q=0; last=0; stall=0
+for i in $(seq 1 110); do
+  q=$(docker exec <name> bash -lc "ps -eo comm 2>/dev/null | grep -c '[q]emu-system'"); q=$(echo "$q"|tr -dc 0-9); q=${q:-0}
+  s1=$(stat -c%s "$N1" 2>/dev/null); s1=${s1:-0}
+  ok=$(grep -ac "<phase success marker, e.g. savevm log 7>" "$N1" 2>/dev/null)   # grep -c already prints 0 — do NOT add `|| echo 0` (it double-prints and breaks `[ ]`)
+  bad=$(cat "$N0" "$N1" "$E0" "$E1" 2>/dev/null | grep -acE "ERROR:|Permission denied|Operation not permitted|not a TTY|spawn id exp5 not open|Killed")
+  [ "$q" -gt 0 ] && seen_q=1
+  if [ "$s1" -eq "$last" ]; then stall=$((stall+1)); else stall=0; fi; last=$s1
+  echo "[$i $(date +%H:%M:%S)] qemu=$q n1=$s1 ok=$ok bad=$bad stall=${stall}x5s"
+  [ "$ok"  -ge 1 ] && { echo VERDICT=SUCCESS; break; }
+  [ "$bad" -ge 1 ] && { echo VERDICT=FAIL_ERROR; break; }
+  [ "$seen_q" -eq 1 ] && [ "$q" -eq 0 ] && { echo VERDICT=ENDED; break; }
+  [ "$stall" -ge 40 ] && { echo VERDICT=STALL; break; }   # ~200 s no growth (raise threshold while a node idle-waits for its peer)
+  sleep 5
+done; tail -6 "$N1"
+```
+
+Stop a run **scoped to this experiment only** (never blanket-kill on `--pid=host` — the dev
+containers share the host PID namespace, so a bare `pkill qemu-system-aarch64` / `./clean_up.sh`
+kills the user's *other* concurrent experiments too, in every container). Also note `pkill -f
+'<shm-prefix>'` self-matches its own shell and dies with exit 137 before cleaning shm. So kill
+**by PID**, gated on the experiment group, via the `[q]emu` bracket trick (which excludes this
+shell), then remove the shm:
+
+```bash
+docker exec <name> bash -lc '
+  ps -eo pid,args | grep "[q]emu-system-aarch64" | grep "<group>" | awk "{print \$1}" | xargs -r kill -9
+  rm -f /dev/shm/*<group>*'
+```
+
+Why this is correctly scoped on two axes:
+- **Both qemu binaries, no others.** `[q]emu-system-aarch64` matches the substring
+  `qemu-system-aarch64`, which is present in **both** the parallel/FW binary `./qemu-system-aarch64`
+  (boot/load/init/fw) **and** the timing binary `./vanilla-qemu-system-aarch64` (run-* phases) —
+  so the same pattern stops the run regardless of phase, while still hitting nothing but qemu.
+- **Only the target experiment.** The second `grep "<group>"` (the group name, e.g.
+  `data-serving-multi-node-0`, which appears verbatim in each qemu's `shm-send=/…_pdes_…` /
+  `shm-recv=` args) limits the kill to this run's processes inside `<name>` — every other
+  experiment's qemus, in this or any other container, are left untouched.
+
+`<group>` = the group experiment name from `./qflex get-experiment-folder` (the part before
+`-node-<N>-<idx>`). Use the same `*<group>*` glob for the shm files, since `setup_nic_args`
+prefixes the group name onto every `/dev/shm/pdes_*` ring it creates.
+
+## Warmup vs load: gate on a warmup-DONE marker, and give each phase its own output file
+
+The client workload runs a **warmup/prep** phase (populates state) then the measured **load/run**
+phase. Two rules — both learned from a DS regression (commit `ed1c333` "V1 of expect rework")
+that deleted the warmup gate and merged the two phases into one log, so `savevm` fired ~10 s into
+warmup and the run phase never happened:
+
+1. **Wait for an explicit warmup-DONE marker before watching for the load marker — never gate the
+   run on a line the warmup phase also emits.** YCSB prints `current ops/sec; est completion in`
+   during *both* its insert(warmup) and run(load) phases, so that line alone is ambiguous. Gate
+   instead on the phase-completion banner the warmup prints, then the load line:
+   - **DS:** warmup (`ycsb load`) ends with a `Warm up is done.` banner → wait `-re {Warm up is
+     done\.}`; the run phase (`ycsb run` workloadc, READs) then emits `-re {current ops/sec; est
+     completion in}`.
+   - **MS:** warm ends with `-re {Compressed history:}`; the load driver then prints
+     `-re {All tasks are created\.}` (×4).
+   - **WSV/WS (Faban):** ramp-up *is* the warmup within one process — gate on a real success first
+     (`Successfully browsed Elgg`) then `Ramp up completed`; don't gate on the timer line alone.
+
+2. **Never write warmup and load output to the same file.** Give each phase a **separately-named**
+   file so a `tail`/`grep` for the load marker structurally cannot match a warmup line.
+   **Keep it ONE container** (do NOT split warmup and load into separate `docker run`s — they
+   often share local state, e.g. MS's warm history feeds hammar). Mechanism: the entry script
+   runs both phases in the one container but redirects each to its own file under a mounted
+   guest-owned dir, and the guest tails each file separately:
+   ```sh
+   # <wl>_client_entry.sh (one container, two files):
+   #!/bin/sh
+   ./warmup ... > /out/<wl>_warmup.out 2>&1
+   ./load   ... > /out/<wl>_load.out   2>&1
+   ```
+   ```tcl
+   # run_<wl>.sh docker run adds:  -v $(pwd)/<wl>out:/out
+   # guest, before launch — clear stale logs (so an old 'Warm up is done.' can't false-match)
+   # and pre-create so `tail -f` doesn't race file creation:
+   send "mkdir -p <wl>out; rm -f <wl>out/*.out; touch <wl>out/<wl>_warmup.out <wl>out/<wl>_load.out\r"
+   # then: tail -f <wl>out/<wl>_warmup.out -> warmup-done marker -> ^C
+   #       tail -f <wl>out/<wl>_load.out   -> load marker        -> ^C -> savevm
+   ```
+   Use a guest-**owned** dir (e.g. `$(pwd)/<wl>out` under the user's home), not sticky `/tmp`, so
+   the guest can `rm` the prior run's (root-owned, written by the container) logs.

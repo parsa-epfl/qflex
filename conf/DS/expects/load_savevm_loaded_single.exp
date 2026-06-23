@@ -133,41 +133,59 @@ expect { timeout { } -re {[\$#] +} }
 puts "ds: Cassandra startup complete. Settling 5s..."
 sleep 5
 
-# --- 4. Client: warmup + load via ds_client_entry.sh as the container entrypoint -
-# The entry's last line (./load.sh) stays foreground, so the backgrounded client
-# is captured running. workloada->c swap folded in. cpuset=1 keeps client on core 1.
+# --- 4. Client: warmup THEN load in ONE container (entry runs warmup.sh then load.sh). Each
+# phase writes a SEPARATELY-NAMED file (ds_warmup.out vs ds_load.out) under a mounted `dsout` dir,
+# so a tail for the load marker can never match a warmup line. Warmup (ycsb load/INSERT) ends with
+# the `Warm up is done.` banner; the run phase (workloadc/READ) emits `current ops/sec`.
+# cpuset=1 keeps client on core 1.
 
 send "cat > ./ds_client_entry.sh <<'WRITE_CLIENT_ENTRY_EOF'\r"
 send "#!/bin/sh\r"
-send "./warmup.sh 127.0.0.1 10000000 16\r"
+send "./warmup.sh 127.0.0.1 10000000 16 > /out/ds_warmup.out 2>&1\r"
 send "sed -i 's#workloads/workloada#workloads/workloadc#' load.sh\r"
-send "./load.sh 127.0.0.1 10000000 5000 16\r"
+send "./load.sh 127.0.0.1 10000000 5000 16 > /out/ds_load.out 2>&1\r"
 send "WRITE_CLIENT_ENTRY_EOF\r"
 expect { timeout { puts "ERROR: writing ds_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
-send "chmod +x ./ds_client_entry.sh\r"
-expect { timeout { puts "ERROR: chmod ds_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
-
+send "chmod +x ./ds_client_entry.sh\r"; expect { timeout { } -re {[\$#] +} }
 send "cat > ./run_client.sh <<'WRITE_CLIENT_EOF'\r"
 send "#!/bin/sh\r"
 send "docker run --cpuset-cpus=1 --net host \\\r"
+send "    -v \$(pwd)/dsout:/out \\\r"
 send "    -v \$(pwd)/ds_client_entry.sh:/ds_client_entry.sh \\\r"
 send "    --entrypoint=/ds_client_entry.sh \\\r"
 send "    abdu1998a/dataserving:client\r"
 send "WRITE_CLIENT_EOF\r"
 expect { timeout { puts "ERROR: writing run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
-send "chmod +x ./run_client.sh\r"
-expect { timeout { puts "ERROR: chmod run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
+send "chmod +x ./run_client.sh\r"; expect { timeout { } -re {[\$#] +} }
 
-send "./run_client.sh > /tmp/ds_client.out 2>&1 < /dev/null &\r"
+# Fresh output files (rm clears any stale 'Warm up is done.'; touch makes them exist so
+# `tail -f` doesn't race file creation).
+send "mkdir -p dsout; rm -f dsout/ds_warmup.out dsout/ds_load.out; touch dsout/ds_warmup.out dsout/ds_load.out\r"; expect { timeout { } -re {[\$#] +} }
+send "./run_client.sh > /tmp/ds_runclient.out 2>&1 < /dev/null &\r"
 expect { timeout { puts "ERROR: client launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
-puts "ds: client launched; tailing /tmp/ds_client.out for first throughput line..."
-send "tail -f /tmp/ds_client.out\r"
+
+# --- 5a. Warmup (ycsb load) -> dsout/ds_warmup.out; wait for the `Warm up is done.` banner ---
+puts "ds: client launched; tailing dsout/ds_warmup.out for 'Warm up is done.'..."
+send "tail -f dsout/ds_warmup.out\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 expect {
-    timeout { puts "ERROR: load didn't emit a throughput line"; quit_qemu $monitor_port; exit 1 }
+    timeout { puts "ERROR: warmup didn't print 'Warm up is done.'"; quit_qemu $monitor_port; exit 1 }
+    -re {Warm up is done\.}
+}
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
+puts "ds: warmup complete."
+
+# --- 5b. Load (ycsb run, workloadc) -> dsout/ds_load.out; wait for the first run-phase throughput ---
+puts "ds: tailing dsout/ds_load.out for first run-phase throughput..."
+send "tail -f dsout/ds_load.out\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: load run didn't emit a throughput line"; quit_qemu $monitor_port; exit 1 }
     -re {current ops/sec; est completion in}
 }
-puts "ds: load running (first throughput line seen); savevm loaded now..."
+puts "ds: load running (run-phase throughput seen); savevm loaded now..."
 send "\003"
 set timeout $BUDGET_PROMPT_S
 expect { timeout { } -re {[\$#] +} }

@@ -140,14 +140,16 @@ expect { timeout { } -re {[\$#] +} }
 puts "ms: server cert generated; nginx daemon should be up. Settling 5s..."
 sleep 5
 
-# --- 4. Client: warm + hammar load via ms_client_entry.sh as the container entrypoint -
-# The entry's last line (hammar load) stays foreground so the backgrounded client
-# is captured running. taskset -c 1 keeps client work on core 1 (single-node).
+# --- 4. Client: warm THEN hammar load in ONE container (entry runs warm then hammar; warm's
+# local history feeds hammar, so they MUST share the container). Each phase writes a
+# SEPARATELY-NAMED file (ms_warm.out vs ms_load.out) under a mounted `msout` dir, so a tail for
+# the load marker can't match a warm line. warm ends with `Compressed history:`; the load driver
+# prints `All tasks are created.` x4. taskset -c 1 keeps client work on core 1 (single-node).
 
 send "cat > ./ms_client_entry.sh <<'WRITE_CLIENT_ENTRY_EOF'\r"
 send "#!/bin/sh\r"
-send "taskset -c 1 ./hammar/target/release/warm ./videos 1\r"
-send "taskset -c 1 ./hammar/target/release/hammar ./videos/logs 4 8 false\r"
+send "taskset -c 1 ./hammar/target/release/warm ./videos 1 > /out/ms_warm.out 2>&1\r"
+send "taskset -c 1 ./hammar/target/release/hammar ./videos/logs 4 8 false > /out/ms_load.out 2>&1\r"
 send "WRITE_CLIENT_ENTRY_EOF\r"
 expect { timeout { puts "ERROR: writing ms_client_entry.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 send "chmod +x ./ms_client_entry.sh\r"
@@ -157,6 +159,7 @@ send "cat > ./run_client.sh <<'WRITE_CLIENT_EOF'\r"
 send "#!/bin/sh\r"
 send "docker run --name media-streaming-client --network host \\\r"
 send "    -v \$(pwd)/videos:/videos \\\r"
+send "    -v \$(pwd)/msout:/out \\\r"
 send "    -v \$(pwd)/ms_client_entry.sh:/ms_client_entry.sh \\\r"
 send "    --entrypoint=/ms_client_entry.sh \\\r"
 send "    xusine/media-streaming:client\r"
@@ -165,10 +168,28 @@ expect { timeout { puts "ERROR: writing run_client.sh timed out"; quit_qemu $mon
 send "chmod +x ./run_client.sh\r"
 expect { timeout { puts "ERROR: chmod run_client.sh timed out"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
 
-send "./run_client.sh > /tmp/ms_client.out 2>&1 < /dev/null &\r"
+# Fresh output files (rm clears any stale 'Compressed history:'; touch makes them exist so
+# `tail -f` doesn't race file creation).
+send "mkdir -p msout; rm -f msout/ms_warm.out msout/ms_load.out; touch msout/ms_warm.out msout/ms_load.out\r"; expect { timeout { } -re {[\$#] +} }
+send "./run_client.sh > /tmp/ms_runclient.out 2>&1 < /dev/null &\r"
 expect { timeout { puts "ERROR: client launch didn't return prompt"; quit_qemu $monitor_port; exit 1 } -re {[\$#] +} }
-puts "ms: client launched; tailing /tmp/ms_client.out for 'All tasks are created.' x4..."
-send "tail -f /tmp/ms_client.out\r"
+
+# --- 5a. warm -> msout/ms_warm.out; wait for `Compressed history:` (warm done) ---
+puts "ms: client launched; tailing msout/ms_warm.out for 'Compressed history:'..."
+send "tail -f msout/ms_warm.out\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { puts "ERROR: warm didn't print 'Compressed history:'"; quit_qemu $monitor_port; exit 1 }
+    -re {Compressed history:}
+}
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
+puts "ms: warm complete."
+
+# --- 5b. hammar load -> msout/ms_load.out; wait for `All tasks are created.` x4 ---
+puts "ms: tailing msout/ms_load.out for 'All tasks are created.' x4..."
+send "tail -f msout/ms_load.out\r"
 set timeout $BUDGET_WORKLOAD_INIT_S
 set tasks_created 0
 expect {
