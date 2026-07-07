@@ -14,8 +14,8 @@ _leaf_defaults:
   memory_gb: 32
   host_name: ZEN3
   workload_name: web-search
-  image_folder: /mnt/sdb/multi-node-experiments/image-1c/ws/
-  mounting_folder: /mnt/sdb/multi-node-experiments/
+  image_folder: /mnt/sdc/multi-node/image-1c/ws/
+  mounting_folder: /mnt/sdc/multi-node/
   image_name: root.qcow2
   use_image_directly: true
   sample_size: 500
