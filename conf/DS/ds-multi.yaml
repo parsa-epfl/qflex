@@ -61,13 +61,11 @@ load:
       # Bigger quantum + higher latency (matches MS load): fewer WWT sync
       # round-trips per unit virtual time, so the Cassandra server startup
       # advances in tractable wall-clock instead of crawling at quantum=10000.
-      # Only turn back on if simulation too slow
-      # latencies_ns_list: [1000000]
+      latencies_ns_list: [1000000]
       interaction_script: /home/dev/qflex/conf/DS/expects/load_savevm_loaded_master.exp
       loadvm_name: booted
     experiment_context_node_1:
-      # Only turn back on if simulation too slow 
-      # latencies_ns_list: [1000000]
+      latencies_ns_list: [1000000]
       interaction_script: /home/dev/qflex/conf/DS/expects/load_savevm_loaded_wait.exp
       loadvm_name: booted
 
