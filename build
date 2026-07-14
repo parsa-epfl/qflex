@@ -9,6 +9,7 @@ QEMU_ROOT=$(realpath qemu)
 BUILD_TYPE="release"
 CUSTOM_GCC=0
 NIX=0
+BXDB_ROOT="./bxdb"
 
 
 # Print help message
@@ -19,6 +20,7 @@ print_help() {
     echo "  -c, --custom-gcc <gcc>   Use custom GCC (default: false)"
     echo "  -n, --nix                Will use raw cmake command to comply with Nix"
     echo "  -h, --help               Print this help message"
+    echo "  --bxdb <path>            Path to bxdb (default: ./bxdb)", 
     exit 0
 }
 
@@ -44,6 +46,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             print_help
+            ;;
+        --bxdb)
+            # Path to bxdb (default: ./bxdb)
+            BXDB_ROOT="$2"
+            shift
+            shift
             ;;
         *)
             # simulator, supported every directory name in flexus/target (knottykraken, semikraken)
@@ -106,7 +114,8 @@ case $SIM in
                         --enable-libqflex                   \
                         --enable-snapvm-external            \
                         --disable-gtk                       \
-                        --with-bxdb=../../../bxdb/          \
+                        --with-bxdb=$BXDB_ROOT              \
+                        --extra-cflags="-Wno-error"         \
                         --enable-zstd                       \
                         --enable-debug
         else
@@ -117,7 +126,8 @@ case $SIM in
                         --enable-libqflex                   \
                         --disable-gtk                       \
                         --enable-snapvm-external            \
-                        --with-bxdb=../../../bxdb/          \
+                        --with-bxdb=$BXDB_ROOT              \
+                        --extra-cflags="-Wno-error"         \
                         --enable-zstd
         fi
         popd
