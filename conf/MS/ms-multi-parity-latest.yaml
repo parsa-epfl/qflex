@@ -1,0 +1,17 @@
+# Parity harness, label "latest": the branch-head build (see parity-switch-latest-tmp.sh) of the same topology.
+# Phase C1 rewrites this file to the nics: schema (see harness-temp.md); until then the legacy
+# lists inherited from ms-multi describe the identical 2-node wire.
+extends: ms-multi
+
+_leaf_defaults:
+  mounting_folder: /mnt/sdc/testing/parity/
+  image_folder: /mnt/sdc/testing/parity/images-latest/
+  binaries_folder: /mnt/sdc/testing/parity/builds/latest
+
+components:
+  experiment_context:
+    experiment_name: media-streaming-multi-node-0-parity-latest
+  experiment_context_node_0:
+    experiment_name: media-streaming-node-0-0-parity-latest
+  experiment_context_node_1:
+    experiment_name: media-streaming-node-1-0-parity-latest

@@ -39,7 +39,7 @@ endif
 # the image, so only changed files recompile — much faster than rebuilding the
 # whole docker image. Use during iteration on PDES / QEMU source.
 test-iterate:
-	QFLEX_ITERATE=1 python -m pytest -v -s --tb=long tests/container_compiler.py
+	python -m tests.container_compiler
 
 bump-major:
 	bump-my-version bump major --allow-dirty

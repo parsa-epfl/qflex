@@ -1,0 +1,16 @@
+# Parity harness, label "pre": the pre-first-commit build (see parity-switch-pre-tmp.sh) of the 2-node MS
+# topology, relocated to /mnt/sdc so the reference on /mnt/sdb is never written. Legacy-list schema on purpose.
+extends: ms-multi
+
+_leaf_defaults:
+  mounting_folder: /mnt/sdc/testing/parity/
+  image_folder: /mnt/sdc/testing/parity/images-pre/
+  binaries_folder: /mnt/sdc/testing/parity/builds/pre
+
+components:
+  experiment_context:
+    experiment_name: media-streaming-multi-node-0-parity-pre
+  experiment_context_node_0:
+    experiment_name: media-streaming-node-0-0-parity-pre
+  experiment_context_node_1:
+    experiment_name: media-streaming-node-1-0-parity-pre

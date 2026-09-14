@@ -1,6 +1,7 @@
 from commands import Executor
 from commands.config import ExperimentContext
 import os
+import shlex
 
 
 class DuplicateExperiment(Executor):
@@ -13,11 +14,13 @@ class DuplicateExperiment(Executor):
                  destination: ExperimentContext,
                  source: ExperimentContext,
                  overwrite: bool = False,
-                 replace: bool = False):
+                 replace: bool = False,
+                 exclude: list = None):
         self.destination = destination
         self.source = source
         self.overwrite = overwrite
         self.replace = replace
+        self.exclude = exclude or []
 
     def folder_pairs(self) -> list:
         src_nodes = [s.node_number for s in self.source.sub_experiments]
@@ -43,10 +46,11 @@ class DuplicateExperiment(Executor):
                     "Pass --overwrite or --replace."
                 )
         cmds = []
+        excludes = " ".join(f"--exclude {shlex.quote(p)}" for p in self.exclude)
         for src, dst in pairs:
             if self.replace:
                 cmds.append(f'rm -rf {dst}')
             cmds.append(f"echo '{src} -> {dst}'")
             # Trailing slashes merge src's contents into dst (overwrite mode) instead of nesting.
-            cmds.append(f'rsync -ah --info=progress2 {src}/ {dst}/')
+            cmds.append(f'rsync -ah --info=progress2 {excludes} {src}/ {dst}/')
         return cmds

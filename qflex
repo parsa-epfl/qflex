@@ -334,6 +334,9 @@ def duplicate_experiment(
     replace: Annotated[bool, typer.Option(
         help="Delete existing destination folders first, then copy."
     )] = False,
+    exclude: Annotated[list[str], typer.Option(
+        help="rsync --exclude pattern (repeatable), e.g. --exclude 'partition_*'."
+    )] = None,
 ):
     """
     Duplicate the experiment folders of --target-yaml under the names this
@@ -352,6 +355,7 @@ def duplicate_experiment(
         source=build_experiment_context(target_yaml),
         overwrite=overwrite,
         replace=replace,
+        exclude=exclude,
     ).execute(to_stdio=True, run_in_background=False)
 
 

@@ -109,6 +109,7 @@ class ExperimentContext(BaseModel):
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     use_gdb: bool = Field(default=False, description="Wrap the qemu invocation in `gdb -ex run --args ...`. Defaults to False so leaves run qemu directly and don't depend on gdb's interactive prompt handling on segfault; opt in (e.g. in a debug YAML) when you actually want the gdb wrap.")
+    binaries_folder: str = Field(default="", description="Folder holding qemu-system-aarch64 (FW/parallel) and vanilla-qemu-system-aarch64 (timing) that override the ./*-saved/build/ binaries in run/. Written per label by `make stash-build`; empty = use the -saved trees.")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     # TODO these two variables are a bit overkill, see if it can be simplified later
     copy_image_per_node: bool = Field(default=True, description="Whether to copy+rename the image to a per-node -node<N> file. The factory sets this False on a leaf that brought its own distinct image_name, so that image is used directly instead of being overwritten by the -node<N> copy.")
@@ -385,6 +386,13 @@ class ExperimentContext(BaseModel):
             print(f"copying {src} to {link_address}...")
             # TODO add checks for when cp fails
             os.system(f"cp -u {src} {link_address}")
+        # Explicit binary set wins regardless of mtime (cp -f, not -u); a missing file must fail here,
+        # not fall back to the -saved binary and silently void a parity run.
+        if self.binaries_folder:
+            for basename in ("qemu-system-aarch64", "vanilla-qemu-system-aarch64"):
+                src = f"{self.binaries_folder}/{basename}"
+                assert os.path.exists(src), f"binaries_folder has no {basename}: {src}"
+                os.system(f"cp -f {src} {self.get_experiment_folder_address()}/run/{basename}")
         # TODO turn WormCacheQFlex address into a parameter
         # WormCacheQFlex is the FW-only plugin (not used in the timing phase), so materialise it once
         # at node level — timing partition/idx leaves don't need it and must not re-copy it per idx.
@@ -629,6 +637,7 @@ def create_experiment_context(
     use_image_directly: Annotated[bool, Field(description="Whether to use the image directly from the image folder or copy it to the experiment folder.")] = False,
     loadvm_name: Annotated[str, Field(description="Name of the loadvm to use in QEMU, optional.")] = "",
     use_gdb: Annotated[bool, Field(description="Wrap the qemu invocation in `gdb -ex run --args ...`. Defaults to False — qemu runs directly; opt in when you actually want the gdb wrap.")] = False,
+    binaries_folder: Annotated[str, Field(description="Folder with qemu-system-aarch64 + vanilla-qemu-system-aarch64 that override the ./*-saved/build/ binaries (parity harness: `make stash-build LABEL=...`). Empty = use the -saved trees.")] = "",
     mounting_folder: Annotated[str, Field(description="Mounting directory where the experiment folders will be created.")] = ".",
     check_period_quantum_coeff: Annotated[float, Field(description="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period.")] = 53.0,
     use_cd_rom: Annotated[bool, Field(description="Whether to use a CD-ROM for initial setup.")] = False,
@@ -758,6 +767,7 @@ def create_experiment_context(
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
         use_gdb=use_gdb,
+        binaries_folder=binaries_folder,
         include_affinity=include_affinity,
         all_phantom_cores=all_phantom_cores,
         multi_modal=multi_modal,
