@@ -222,9 +222,9 @@ Still compatible: `pdes_drain`, `can_stop(engine)`, `pdes_inflight_restore_and_s
   must dry-run to identical `-netdev`/shm names before any run. Each B-phase changes the latest
   binaries → rerun `parity-switch-latest-tmp.sh`. Commit table + scripts in harness-temp.md
   (`parity-switch-{pre,latest}-tmp.sh` are the only git checkouts I run, on explicit command only).
-- [ ] B1 parallel-qemu call sites
-- [ ] B2 qemu call sites
-- [ ] B3 qemu/middleware call sites
+- [~] B1 parallel-qemu call sites — DONE 2026-09-14 (token-level, +17/−39 in 6 files): net/meson.build (+pdes-link.c), softmmu/icount.c, util/dynamic_barrier.c ×2, accel/tcg/tcg-accel-ops-rr.c, plugins/pf_api.c ×2 (`pdes_link_count()==0` single-node test, `finish_initiate_checkpoint()`, `pdes_engine_fw_complete()`), migration/savevm.c ×4 (`pdes_savevm_defer`, `pdes_drain(name,fmt)`, `pdes_engine_restore_inflight`). Uncommitted.
+- [~] B2 qemu call sites — DONE 2026-09-14 (+7/−26 in 4 files): net/meson.build, softmmu/icount.c, migration/savevm.c ×4 (arm stays fall-through as at HEAD; function is behind an assert(false)). Uncommitted.
+- [~] B3 qemu/middleware call sites — DONE 2026-09-14 (+2/−9): libqflex/libqflex.c `return can_stop();`, bare `destroy_strategy();`. Uncommitted. COMPILE: `python -m tests.container_compiler` in qflex_test rc=0 for qemu (incl. middleware) + parallel-qemu on 2026-09-14; qemu-pdes objects rebuilt: warnings only (pre-existing classes: missing-prototypes, unused vars, implicit libqflex_stop in the timing fork — same as HEAD), no errors. Harness runs not started.
 - [ ] C1 qflex Python schema groundwork (commands/nic.py, config.py, executer.py, dry-run tests) — INCLUDES rewriting `conf/MS/ms-multi-parity-latest.yaml` to `nics:` and asserting it dry-runs identical to the pre YAML
 - [ ] C2+ per-phase enablement: boot → load → fw → init-warm → run-idx → run-single-partition → run-partition (new conf/MS self-loop YAML + expects)
 - [ ] D docs (CLAUDE.md, MULTI_NODE.md, fork docs stale-singleton corrections)

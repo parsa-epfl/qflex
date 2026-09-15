@@ -45,6 +45,7 @@ Every run still waits for an explicit per-run "go" from the user.
 | `parity-lib-tmp.sh` | shared functions: paths, `switch_repos`, `stash_build`, per-level `seed`, per-level `run` (via `./dep exec`), `diff_labels` (→ `tests/parity_diff.py`), `level_main` |
 | `parity-switch-pre-tmp.sh` | checks out the PRE commit set in the 4 C repos (qemu-pdes `6593f5e`, parallel-qemu `c2f32af`, qemu `c2059d44da`, middleware `4b43c82`), `python -m tests.container_compiler` in `qflex_test`, `stash_build pre`. Refuses if any C repo has uncommitted tracked changes |
 | `parity-switch-latest-tmp.sh` | same, checking out branch `single-node-pdes` in each C repo → `stash_build latest` |
+| `parity-copy-tmp.sh <label>` | plain rsync (progress bar) of BOTH node folders, complete, plus both qcow2s from /mnt/sdb into the label`s /mnt/sdc locations (~169 GB per label). User runs it. Then run levels with `PARITY_SKIP_SEED=1` |
 | `parity-idx-tmp.sh` | level idx: `run-idx` (p/i from the YAML's run_idx overlay); diff = that idx's `all.measurement.*.log` |
 | `parity-partition-tmp.sh` | level partition: `run-single-partition`; diff = every idx of that partition |
 | `parity-partitions-tmp.sh` | level partitions: `run-partition` + `result`; diff = all partitions + `timing.csv` (sorted), `core_info_new.csv`, `REQUIRED_SAMPLE_SIZE` |
