@@ -9,17 +9,26 @@ app = typer.Typer(
     help="A CLI tool to manage QFlex dependancies and images. (suggest running ./dep --show-completion >> ~/.bashrc && source ~/.bashrc to enable autocompletions)",
 )
 
+# TODO remove worm option once fully released and integrated
 @app.command()
 def build_docker(
     debug: Annotated[bool, typer.Option(help="Build the Docker image in debug mode.")] = False,
-    push: Annotated[bool, typer.Option(help="Push the built image to docker.io/akrishnaams. Requires authentication.")] = False,
+    worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
+    qpoints: Annotated[bool, typer.Option(help="Build the Docker image with QPoints support. Experimental")] = False,
+    all_ext: Annotated[bool, typer.Option(help="Build the Docker image with both WORM and QPoints support. Experimental")] = False,
+    worm_only: Annotated[bool, typer.Option(help="Re-build only the WormCacheQFlex component.")] = False,
+    push: Annotated[bool, typer.Option(help="Push the built image to github container registery. Requires authentication.")] = False,
 ):
     """
-    Build the (all-in-one) Docker image for QFlex. Use --debug to build a debug version.
+    Build the Docker image for QFlex. Use --debug to build a debug version.
     Useful for development and testing without installing dependencies locally.
     """
     docker_build_executor = DockerBuild(
         debug=debug,
+        worm=worm,
+        qpoints=qpoints,
+        all_ext=all_ext,
+        worm_only=worm_only,
         push=push,
     )
     docker_build_executor.execute(to_stdio=True, run_in_background=False)
@@ -29,6 +38,9 @@ def build_docker(
 def start_docker(
     mounting_folder: Annotated[str, typer.Option(help="Folder to mount for files.")],
     debug: Annotated[bool, typer.Option(help="Start the Docker container in debug mode.")] = False, 
+    worm: Annotated[bool, typer.Option(help="Build the Docker image with WORM support. Experimental")] = False,
+    qpoints: Annotated[bool, typer.Option(help="Build the Docker image with QPoints support. Experimental")] = False,
+    all_ext: Annotated[bool, typer.Option(help="Build the Docker image with both WORM and QPoints support. Experimental")] = False,
     start_directory: Annotated[str, typer.Option(help="Directory to start in inside the container.")] = None,
 ):
     """
@@ -38,6 +50,9 @@ def start_docker(
     docker_executor = DockerStarter(
         mounting_folder=mounting_folder,
         debug=debug,
+        worm=worm,
+        qpoints=qpoints,
+        all_ext=all_ext,
         start_directory=start_directory,
     )
     docker_executor.execute(to_stdio=True, run_in_background=False)

@@ -9,18 +9,12 @@ class DockerStarter(Executor):
                 #  TODO change to experiment context
                  mounting_folder: str,
                  debug: bool = False,
-                 worm: bool = False,
-                 qpoints: bool = False,
-                 all_ext: bool = False,
                  start_directory: str = None):
         self.debug = debug
-        self.worm = worm
-        self.qpoints = qpoints
-        self.all_ext = all_ext or (worm and qpoints)
         self.version = get_version()
         self.docker_image_name = (
-            f"ghcr.io/parsa-epfl/qflex:"
-            f"{get_docker_image_name(debug=self.debug, worm=self.worm, qpoints=self.qpoints, all_ext=self.all_ext)}"
+            f"docker.io/akrishnaams/"
+            f"{get_docker_image_name(debug=self.debug)}"
             f"-{self.version}"
         )
         self.images_folder = './images'
@@ -47,6 +41,20 @@ class DockerStarter(Executor):
         binary_mount = f" -v {cwd}/qflex:/home/dev/qflex/qflex "
         if not os.path.exists('./qflex'):
             binary_mount = ''
+
+        # The image only bakes in the built artifacts for flexus/qemu/parallel-qemu (to save
+        # disk space). Mount the sources from the host if present, so they can be rebuilt in-container.
+        flexus_mount = f" -v {cwd}/flexus:/home/dev/qflex/flexus "
+        if not os.path.isdir('./flexus'):
+            flexus_mount = ''
+
+        qemu_mount = f" -v {cwd}/qemu:/home/dev/qflex/qemu "
+        if not os.path.isdir('./qemu'):
+            qemu_mount = ''
+
+        parallel_qemu_mount = f" -v {cwd}/parallel-qemu:/home/dev/qflex/parallel-qemu "
+        if not os.path.isdir('./parallel-qemu'):
+            parallel_qemu_mount = ''
 
         qflex_args = ''
         if os.path.exists(f'{cwd}/qflex.args'):
@@ -80,7 +88,7 @@ class DockerStarter(Executor):
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \
         {self.start_directory} \
-        {commands_mount} {binary_mount} {self.docker_image_name}
+        {commands_mount} {binary_mount} {flexus_mount} {qemu_mount} {parallel_qemu_mount} {self.docker_image_name}
         """
 
 
@@ -88,130 +96,29 @@ class DockerBuild(Executor):
     
     def __init__(self, 
                  debug: bool = False,
-                 worm: bool = False,
-                 qpoints: bool = False,
-                 all_ext: bool = False,
-                 worm_only: bool = False,
                  push: bool = False):
         self.debug = debug
-        self.worm = worm
-        self.qpoints = qpoints
-        self.all_ext = all_ext or (worm and qpoints)
-        self.worm_only = worm_only
-        if self.worm_only and (not self.worm or self.qpoints or self.all_ext):
-            raise AssertionError("--worm-only can only be used with --worm.")
-        if self.worm or self.all_ext:
-            # Check if folder "WormCacheQFlex" exists
-            assert os.path.isdir('./WormCacheQFlex'), "WormCacheQFlex folder not found. Please clone the WormCacheQFlex repository."
-        if self.qpoints or self.all_ext:
-            assert os.path.isdir('./QPoints'), "QPoints folder not found. Please clone the QPoints repository."
-        self.docker_base_image_name = get_docker_image_name(debug=self.debug, worm=False, qpoints=False, all_ext=False)
-        self.docker_image_name_with_worm = get_docker_image_name(debug=self.debug, worm=True, qpoints=False, all_ext=False)
-        self.docker_image_name_with_qpoints = get_docker_image_name(debug=self.debug, worm=False, qpoints=True, all_ext=False)
-        self.docker_image_name_with_all = get_docker_image_name(debug=self.debug, worm=False, qpoints=False, all_ext=True)
-        self.build_type = 'release'
-        if self.debug:
-            self.build_type = 'debug'
-        self.worm_only = worm_only
         self.push = push
         self.version = get_version()
+        self.docker_image_name = get_docker_image_name(debug=self.debug)
+        self.build_type = 'debug' if self.debug else 'release'
         # TODO add checks to prevent overwriting existing images
+        assert os.path.isdir('./WormCacheQFlex'), "WormCacheQFlex folder not found. Please clone the WormCacheQFlex repository."
+        assert os.path.isdir('./QPoints'), "QPoints folder not found. Please clone the QPoints repository."
         print(f"============== Building QFlex version: {self.version} ==============")
 
     def cmd(self) -> str:
-        # TODO add a debug build with all the files so it can be used for development without remaking the image and compiled again
-        
-        local_qflex_name = f"{self.docker_base_image_name}:{self.version}"
-        ghcr_qflex_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-{self.version}"
-        local_qflex_build_name = f"{self.docker_base_image_name}-build:{self.version}"
-        ghcr_qflex_build_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_base_image_name}-build-{self.version}"
+        local_name = f"{self.docker_image_name}:{self.version}"
+        remote_name = f"docker.io/akrishnaams/{self.docker_image_name}-{self.version}"
 
-        local_worm_name = f"{self.docker_image_name_with_worm}:{self.version}"
-        ghcr_worm_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_worm}-{self.version}"
-
-        local_qpoints_name = f"{self.docker_image_name_with_qpoints}:{self.version}"
-        ghcr_qpoints_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_qpoints}-{self.version}"
-
-        local_all_name = f"{self.docker_image_name_with_all}:{self.version}"
-        ghcr_all_name = f"ghcr.io/parsa-epfl/qflex:{self.docker_image_name_with_all}-{self.version}"
-        extension_base_image = ghcr_qflex_name if self.worm_only else local_qflex_name
-
-        # TODO centeralize the ghcr.io/parsa-epfl/qflex part
-        if not self.worm_only:
-            base_image_build_cmd = [
-                f"""
-                docker buildx build --load -t {local_qflex_build_name} --build-arg MODE={self.build_type} --target base-build .
-                """,
-                f"""
-                docker buildx build --load -t {local_qflex_name} --build-arg MODE={self.build_type} --target base-runtime .
-                """,
-                f"docker tag {local_qflex_build_name} {ghcr_qflex_build_name}",
-                f"docker tag {local_qflex_name} {ghcr_qflex_name}"
-            ]
-            base_image_push_cmd = [
-                f"docker push {ghcr_qflex_build_name}",
-                f"docker push {ghcr_qflex_name}"
-            ]
-        else:
-            base_image_build_cmd = [
-                f"echo 'Skipping base image build as --worm-only is set.'"
-            ]
-            base_image_push_cmd = [
-                f"echo 'Skipping base image push as --worm-only is set.'"
-            ]
-
-        worm_image_cmd = [
+        cmd = [
             f"""
-            docker buildx build --load -t {local_worm_name} --build-arg BASE_IMAGE={extension_base_image} -f Dockerfile.WormCacheQFlex .
+            docker buildx build --load -t {local_name} --build-arg MODE={self.build_type} --target runtime .
             """,
-            f"docker tag {local_worm_name} {ghcr_worm_name}"
+            f"docker tag {local_name} {remote_name}",
         ]
-        # TODO add a seperate debug image that has the files that can be used for compilation and developement without remaking the docker image
-        worm_image_push_cmd = [
-            f"docker push {ghcr_worm_name}"
-        ]
-
-        qpoints_image_cmd = [
-            f"""
-            docker buildx build --load -t {local_qpoints_name} --build-arg BASE_IMAGE={extension_base_image} -f Dockerfile.QPoints .
-            """,
-            f"docker tag {local_qpoints_name} {ghcr_qpoints_name}"
-        ]
-        qpoints_image_push_cmd = [
-            f"docker push {ghcr_qpoints_name}"
-        ]
-
-        all_image_cmd = [
-            f"""
-            docker buildx build --load -t {local_worm_name} --build-arg BASE_IMAGE={extension_base_image} -f Dockerfile.WormCacheQFlex .
-            """,
-            f"""
-            docker buildx build --load -t {local_all_name} --build-arg BASE_IMAGE={local_worm_name} -f Dockerfile.QPoints .
-            """,
-            f"docker tag {local_all_name} {ghcr_all_name}"
-        ]
-        all_image_push_cmd = [
-            f"docker push {ghcr_all_name}"
-        ]
-
-        base_cmd = base_image_build_cmd
-        worm_cmd = worm_image_cmd
-        qpoints_cmd = qpoints_image_cmd
-        all_cmd = all_image_cmd
         if self.push:
-            base_cmd += base_image_push_cmd
-            worm_cmd += worm_image_push_cmd
-            qpoints_cmd += qpoints_image_push_cmd
-            all_cmd += all_image_push_cmd
-
-
-
-        cmd = base_cmd
-        if self.all_ext:
-            cmd += all_cmd
-        elif self.worm:
-            cmd += worm_cmd
-        elif self.qpoints:
-            cmd += qpoints_cmd
+            cmd.append(f"docker push {remote_name}")
 
         return cmd
+

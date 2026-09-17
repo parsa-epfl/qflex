@@ -2,9 +2,8 @@
 
 set -e
 
-# Tolerate a missing sibling dir: some Docker build stages only bind-mount one of the two
-FLEXUS_ROOT=$(realpath flexus 2>/dev/null || echo flexus)
-QEMU_ROOT=$(realpath qemu 2>/dev/null || echo qemu)
+FLEXUS_ROOT=$(realpath flexus)
+QEMU_ROOT=$(realpath qemu)
 
 # Default values
 BUILD_TYPE="release"

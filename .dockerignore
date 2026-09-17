@@ -1,6 +1,7 @@
 .git/
 WormCache/.git/
 QPoints/.git/
+QPoints/gem5/.git
 p-qemu/.git/
 QPoints/.gitmodules
 QPoints/.gitignore

@@ -1,6 +1,6 @@
 pushd ..
 
-docker pull docker.io/akrishnaams/qflex-release-3.2.1
+docker pull ghcr.io/parsa-epfl/qflex:qflex-worm-release-3.2.1
 
 git checkout main
 git reset --hard HEAD
@@ -20,7 +20,7 @@ docker run -it --entrypoint /bin/bash \
     -w /home/dev/qflex/micro_scripts \
     --security-opt seccomp=unconfined \
     --cap-add SYS_PTRACE \
-    docker.io/akrishnaams/qflex-release-3.2.1 -c "rm -rf /exp01/lib && mkdir -p /exp01/lib && cp /home/dev/qflex/kraken_out/* /exp01/lib && rm -rf /exp01/lib && mkdir -p /exp01/lib && cp /home/dev/qflex/kraken_out/* /exp01/lib  && bash"
+    ghcr.io/parsa-epfl/qflex:qflex-worm-release-3.2.1 -c "rm -rf /exp01/lib && mkdir -p /exp01/lib && cp /home/dev/qflex/kraken_out/* /exp01/lib && rm -rf /exp01/lib && mkdir -p /exp01/lib && cp /home/dev/qflex/kraken_out/* /exp01/lib  && bash"
 
 
 
