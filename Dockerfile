@@ -46,10 +46,31 @@ RUN apt install -y --no-install-recommends htop
 # --break-system-package for ubuntu 24.04
 RUN pip install conan && pip cache purge
 
+# Install Rust system-wide. Needed to build bxdb in this image, and reused by
+# the WormCache image (which no longer installs its own toolchain).
+ENV RUSTUP_HOME=/home/dev/rust/rustup
+ENV CARGO_HOME=/home/dev/rust/cargo
+ENV PATH=/home/dev/rust/cargo/bin:${PATH}
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --no-modify-path
+
+RUN echo 'export RUSTUP_HOME=/home/dev/rust/rustup' >> /etc/bash.bashrc && \
+    echo 'export CARGO_HOME=/home/dev/rust/cargo' >> /etc/bash.bashrc && \
+    echo 'export PATH=/home/dev/rust/cargo/bin:$PATH' >> /etc/bash.bashrc
+
+# `just` runs the shared build recipes (see ./justfile).
+ARG JUST_VERSION=1.58.0
+RUN curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+    | tar -xz -C /usr/local/bin just
+
 # TODO everything before this, should be in another base image 
 # Copy local dir to container
 WORKDIR /home/dev/qflex
 COPY --link --exclude=fw-qemu --exclude=timing-qemu --exclude=./commands --exclude=./qflex --exclude=WormCache . /home/dev/qflex
+
+# Build bxdb (Rust) before the QEMUs. The recipes in ./justfile build bxdb
+# first and point both QEMUs at it.
+RUN just bxdb
 
 # Build QFlex
 
@@ -64,15 +85,12 @@ WORKDIR /home/dev/qflex
 
 # TODO add a check later to make sure qflex folder it self is never mounted, as we need the binaries, or change where they are craeted
 # TODO address the two qemu versions
-RUN --mount=type=bind,source=./timing-qemu,target=/home/dev/qflex/timing-qemu,rw conan profile detect --force && \
-    conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out -b missing && \
-    conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /home/dev/qflex/out -b missing && \
-    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out && \
-    conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /home/dev/qflex/out && \
+RUN --mount=type=bind,source=./timing-qemu,target=/home/dev/qflex/timing-qemu,rw PROFILE=${MODE} just flexus knottykraken && \
+    PROFILE=${MODE} just flexus semikraken && \
     conan cache clean -v && \
     conan remove -c "*" && \
-    ./build cq ${MODE} && \
-    python3 build-multiple-kraken_vanilla.py \
+    PROFILE=${MODE} just timing-qemu && \
+    python3 build-multiple-kraken_vanilla.py && \
     mkdir /home/dev/qflex/kraken_out && \
     cp -r out/lib/Release /home/dev/qflex/kraken_out && \
     rm -rf out && \
@@ -80,9 +98,7 @@ RUN --mount=type=bind,source=./timing-qemu,target=/home/dev/qflex/timing-qemu,rw
     cp -r /home/dev/qflex/timing-qemu/pc-bios /home/dev/qflex/timing-qemu-saved/pc-bios && \
     cp -r /home/dev/qflex/timing-qemu/build /home/dev/qflex/timing-qemu-saved/build
 
-RUN --mount=type=bind,source=./fw-qemu,target=/home/dev/qflex/fw-qemu,rw cd fw-qemu && \
-    ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
-    ninja -C build && \
+RUN --mount=type=bind,source=./fw-qemu,target=/home/dev/qflex/fw-qemu,rw just fw-qemu && \
     mkdir /home/dev/qflex/fw-qemu-saved && \
     cp -r /home/dev/qflex/fw-qemu/pc-bios /home/dev/qflex/fw-qemu-saved/pc-bios && \
     cp -r /home/dev/qflex/fw-qemu/build /home/dev/qflex/fw-qemu-saved/build

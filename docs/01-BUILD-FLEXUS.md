@@ -4,13 +4,35 @@ BUILD FLEXUS
 Installing QFlex require building both QEMU and Flexus (the uArch simulators).
 This part focus on building __Flexus__
 
+## Build recipes (`just`)
+
+All the build commands are defined once in `./justfile`, so the bare, Nix and
+Docker builds all follow the same path. The environment only provides the
+toolchain/dependencies:
+
+* **bare**: install the system packages + `rustup`, then run `just ...`
+* **Nix**: `nix develop`, then run `just ...`
+* **Docker**: `./build docker` (the image runs the same recipes)
+
+```bash
+just --list          # show every recipe
+just bxdb            # Rust snapshot database (linked by both QEMUs)
+just flexus knottykraken
+just timing-qemu
+just fw-qemu
+just all             # the whole stack
+```
+
+The `./build` script is kept as a thin backward-compatible wrapper around these
+recipes.
+
 
 ## Docker
 It is the easiest way of building __Flexus__
 You can both build docker and use it to run qflex through docker.
 
 ```bash
-./build docker {debug}
+./build docker {debug}      # equivalent to: PROFILE={debug} just all (inside the image)
 ```
 
 The debug flag can be empty or set as debug to have the image be built in debug mode.
@@ -39,7 +61,7 @@ This is aimed toward people who mainly need to use QFlex.
 
 Then call the build script using the one of the following options.
 ```bash
-./build [knottykraken/semikraken]
+just flexus [knottykraken/semikraken]   # or: ./build [knottykraken/semikraken]
 ```
 
 This will produce a directory called `out` in your current working directory.
@@ -52,8 +74,7 @@ intoducing the frame pointer with `-fno-omit-frame-pointer`.
 To do so, use the debug flag (release|debug|relwithdebinfo) when appropriate.
 
 ```bash
-./build -b (release|debug|relwithdebinfo) [receipt]
-
+PROFILE=(release|debug|relwithdebinfo) just flexus [receipt]   # or: ./build -b ...
 ```
 
 ### Build Flexus - Developer mode

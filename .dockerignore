@@ -1,8 +1,10 @@
 .git/
 WormCache/.git/
+WormCache/target/
 fw-qemu/.git/
 timing-qemu/.git/
 bxdb/.git/
+bxdb/target/
 replica/.git/
 replica/
 qflex.args

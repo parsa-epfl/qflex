@@ -1,136 +1,85 @@
 #!/usr/bin/env bash
+# QFlex build entry point.
+#
+# The actual build commands live in ./justfile so that the bare, Nix and Docker
+# builds share a single path. This script is kept as a thin, backward
+# compatible wrapper for the existing docs/scripts; prefer calling `just`.
 
-set -e
+set -euo pipefail
 
-FLEXUS_ROOT=$(realpath flexus)
-QEMU_ROOT=$(realpath timing-qemu)
-
-# Default values
 BUILD_TYPE="release"
-CUSTOM_GCC=0
-NIX=0
+export CONAN=1
+export EXTRA_PROFILE=""
 
-
-# Print help message
 print_help() {
-    echo "Usage: $0 [options] <sim>"
+    echo "Usage: $0 [options] <target>"
+    echo "Targets:"
+    echo "  <kraken>                 Build a Flexus simulator (knottykraken/semikraken)"
+    echo "  cq | qemu | q            Build timing-qemu"
+    echo "  fw | fwq                 Build fw-qemu"
+    echo "  bxdb                     Build bxdb"
+    echo "  docker                   Build the QFlex Docker image"
     echo "Options:"
-    echo "  -b, --build-type <type>  Build type (default: release)"
-    echo "  -c, --custom-gcc <gcc>   Use custom GCC (default: false)"
-    echo "  -n, --nix                Will use raw cmake command to comply with Nix"
+    echo "  -b, --build-type <type>  release (default) | debug | relwithdebinfo"
+    echo "  -c, --custom-gcc         Also use the custom-gcc Conan profile"
+    echo "  -n, --nix                Use raw CMake for Flexus (Nix) instead of Conan"
     echo "  -h, --help               Print this help message"
+    echo
+    echo "All recipes are defined in ./justfile (run 'just --list')."
     exit 0
 }
 
-# Parse command-line arguments
 while [[ $# -gt 0 ]]; do
-    key="$1"
-    case $key in
+    case "$1" in
         -b|--build-type)
-            # Accept all type present in CMake (release, relwithdebinfo, debug)
             BUILD_TYPE="$2"
             shift
             shift
             ;;
         -c|--custom-gcc)
-            # Will use a custom GCC installed in /opt/qflex
-            CUSTOM_GCC=1
+            EXTRA_PROFILE="$(realpath flexus/target/_profile/custom-gcc)"
             shift
             ;;
         -n|--nix)
-            # Build Flexus without Conan (dumb IMO)
-            NIX=1
+            CONAN=0
             shift
             ;;
         -h|--help)
             print_help
             ;;
         *)
-            # simulator, supported every directory name in flexus/target (knottykraken, semikraken)
-            SIM="$1"
+            TARGET="$1"
             shift
             break
             ;;
     esac
 done
 
-# Check if SIM is set
-if [ -z "$SIM" ]; then
-    echo "Error: <sim> argument is required"
+if [[ -z "${TARGET:-}" ]]; then
+    echo "Error: <target> argument is required" >&2
     print_help
 fi
 
-profile="-pr ${FLEXUS_ROOT}/target/_profile/${BUILD_TYPE}"
+export PROFILE="$BUILD_TYPE"
 
-
-if [ -n "$IN_NIX_SHELL" ]; then
-    echo "Detected NIX."
-    NIX=1
-fi
-
-case $SIM in
-    *kraken)
-        if [[ $NIX -gt 0 ]]; then
-            BUILD_DIRECTORY=build-${SIM}
-
-            if [ -d "$FLEXUS_ROOT/$BUILD_DIRECTORY" ]; then
-                rm -rf $FLEXUS_ROOT/$BUILD_DIRECTORY
-            fi
-
-            mkdir -p $FLEXUS_ROOT/$BUILD_DIRECTORY
-
-            pushd $FLEXUS_ROOT/$BUILD_DIRECTORY
-
-            cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DSIMULATOR=$SIM -G Ninja $FLEXUS_ROOT
-            ninja
-
-            popd
-            exit 0
-        fi
-
-        if [[ $CUSTOM_GCC -gt 0 ]]; then
-            profile="${profile} -pr ${FLEXUS_ROOT}/target/_profile/custom-gcc"
-        fi
-
-        conan build $FLEXUS_ROOT $profile --name=$SIM -of out -b missing
-        conan export-pkg $FLEXUS_ROOT $profile --name=$SIM -of out
-        ;;
-    [cC][Qq]|qemu)
-        pushd $QEMU_ROOT
-
-        if [ "$BUILD_TYPE" = "debug" ]; then
-            ./configure --target-list=aarch64-softmmu       \
-                        --disable-docs                      \
-                        --enable-capstone                   \
-                        --enable-slirp                      \
-                        --enable-libqflex                   \
-                        --enable-snapvm-external            \
-                        --disable-gtk                       \
-                        --with-bxdb=../../../bxdb/          \
-                        --enable-zstd                       \
-                        --enable-debug
-        else
-            ./configure --target-list=aarch64-softmmu       \
-                        --disable-docs                      \
-                        --enable-capstone                   \
-                        --enable-slirp                      \
-                        --enable-libqflex                   \
-                        --disable-gtk                       \
-                        --enable-snapvm-external            \
-                        --with-bxdb=../../../bxdb/          \
-                        --enable-zstd
-        fi
-        popd
-        make -C timing-qemu -j
-        ;;
-    [Qq])
-        make -C timing-qemu -j
-        ;;
+case "$TARGET" in
     docker)
-        docker buildx build -t parsa/qflex-${BUILD_TYPE}:latest --build-arg MODE=${BUILD_TYPE} .
+        docker buildx build -t "parsa/qflex-${BUILD_TYPE}:latest" --build-arg MODE="${BUILD_TYPE}" .
+        ;;
+    cq|qemu|q)
+        exec just timing-qemu
+        ;;
+    fw|fwq)
+        exec just fw-qemu
+        ;;
+    bxdb)
+        exec just bxdb
+        ;;
+    *kraken)
+        exec just flexus "$TARGET"
         ;;
     *)
-        echo "Never heard of '${SIM}'"
+        echo "Never heard of '${TARGET}'" >&2
         exit 1
         ;;
 esac
