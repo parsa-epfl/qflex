@@ -2,15 +2,19 @@
 	path = flexus
 	url = git@github.com:parsa-epfl/flexus.git
 	branch = develop
-[submodule "qemu"]
-	path = qemu
+[submodule "timing-qemu"]
+	path = timing-qemu
 	url = git@github.com:parsa-epfl/qemu.git
 	branch = develop
-[submodule "WormCacheQFlex"]
-	path = WormCacheQFlex
-	url = git@github.com:parsa-epfl/WormCacheQFlex.git
+[submodule "WormCache"]
+	path = WormCache
+	url = https://github.com/parsa-epfl/WormCache.git
+	branch = unstable
+[submodule "fw-qemu"]
+	path = fw-qemu
+	url = https://github.com/parsa-epfl/p-qemu.git
 	branch = develop
-[submodule "parallel-qemu"]
-	path = parallel-qemu
-	url = git@github.com:parsa-epfl/parallel-qemu.git
-	branch = develop
+[submodule "bxdb"]
+	path = bxdb
+	url = https://github.com/parsa-epfl/bxdb.git
+	branch = master

@@ -3,7 +3,7 @@
 set -e
 
 FLEXUS_ROOT=$(realpath flexus)
-QEMU_ROOT=$(realpath qemu)
+QEMU_ROOT=$(realpath timing-qemu)
 
 # Default values
 BUILD_TYPE="release"
@@ -121,10 +121,10 @@ case $SIM in
                         --enable-zstd
         fi
         popd
-        make -C qemu -j
+        make -C timing-qemu -j
         ;;
     [Qq])
-        make -C qemu -j
+        make -C timing-qemu -j
         ;;
     docker)
         docker buildx build -t parsa/qflex-${BUILD_TYPE}:latest --build-arg MODE=${BUILD_TYPE} .

@@ -1,13 +1,15 @@
 .git/
 WormCache/.git/
-p-qemu/.git/
+fw-qemu/.git/
+timing-qemu/.git/
+bxdb/.git/
 replica/.git/
 replica/
 qflex.args
 
 include .gitignore
 include flexus/.gitignore
-include qemu/.gitignore
+include timing-qemu/.gitignore
 
 out/
 qemu-*

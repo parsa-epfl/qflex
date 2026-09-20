@@ -49,7 +49,7 @@ RUN pip install conan && pip cache purge
 # TODO everything before this, should be in another base image 
 # Copy local dir to container
 WORKDIR /home/dev/qflex
-COPY --link --exclude=parallel-qemu --exclude=qemu --exclude=./commands --exclude=./qflex --exclude=WormCacheQFlex . /home/dev/qflex
+COPY --link --exclude=fw-qemu --exclude=timing-qemu --exclude=./commands --exclude=./qflex --exclude=WormCache . /home/dev/qflex
 
 # Build QFlex
 
@@ -64,7 +64,7 @@ WORKDIR /home/dev/qflex
 
 # TODO add a check later to make sure qflex folder it self is never mounted, as we need the binaries, or change where they are craeted
 # TODO address the two qemu versions
-RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw conan profile detect --force && \
+RUN --mount=type=bind,source=./timing-qemu,target=/home/dev/qflex/timing-qemu,rw conan profile detect --force && \
     conan build flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out -b missing && \
     conan build flexus -pr flexus/target/_profile/${MODE} --name=semikraken -of /home/dev/qflex/out -b missing && \
     conan export-pkg flexus -pr flexus/target/_profile/${MODE} --name=knottykraken -of /home/dev/qflex/out && \
@@ -76,24 +76,24 @@ RUN --mount=type=bind,source=./qemu,target=/home/dev/qflex/qemu,rw conan profile
     mkdir /home/dev/qflex/kraken_out && \
     cp -r out/lib/Release /home/dev/qflex/kraken_out && \
     rm -rf out && \
-    mkdir qemu-saved && \
-    cp -r /home/dev/qflex/qemu/pc-bios /home/dev/qflex/qemu-saved/pc-bios && \
-    cp -r /home/dev/qflex/qemu/build /home/dev/qflex/qemu-saved/build
+    mkdir timing-qemu-saved && \
+    cp -r /home/dev/qflex/timing-qemu/pc-bios /home/dev/qflex/timing-qemu-saved/pc-bios && \
+    cp -r /home/dev/qflex/timing-qemu/build /home/dev/qflex/timing-qemu-saved/build
 
-RUN --mount=type=bind,source=./parallel-qemu,target=/home/dev/qflex/parallel-qemu,rw cd parallel-qemu && \
+RUN --mount=type=bind,source=./fw-qemu,target=/home/dev/qflex/fw-qemu,rw cd fw-qemu && \
     ./configure --target-list=aarch64-softmmu --disable-gtk --enable-capstone && \
     ninja -C build && \
-    mkdir /home/dev/qflex/parallel-qemu-saved && \
-    cp -r /home/dev/qflex/parallel-qemu/pc-bios /home/dev/qflex/parallel-qemu-saved/pc-bios && \
-    cp -r /home/dev/qflex/parallel-qemu/build /home/dev/qflex/parallel-qemu-saved/build
+    mkdir /home/dev/qflex/fw-qemu-saved && \
+    cp -r /home/dev/qflex/fw-qemu/pc-bios /home/dev/qflex/fw-qemu-saved/pc-bios && \
+    cp -r /home/dev/qflex/fw-qemu/build /home/dev/qflex/fw-qemu-saved/build
 
 
 
 
 WORKDIR /home/dev/qflex
 # Post-build file link
-RUN ln -s /home/dev/qflex/parallel-qemu-saved/build/aarch64-softmmu/qemu-system-aarch64 /home/dev/qflex/qemu-aarch64
-RUN ln -s /home/dev/qflex/parallel-qemu-saved/build/qemu-img /home/dev/qflex/qemu-img
+RUN ln -s /home/dev/qflex/fw-qemu-saved/build/aarch64-softmmu/qemu-system-aarch64 /home/dev/qflex/qemu-aarch64
+RUN ln -s /home/dev/qflex/fw-qemu-saved/build/qemu-img /home/dev/qflex/qemu-img
 
 RUN pip install -r requirements.txt
 COPY  ./commands /home/dev/qflex/commands

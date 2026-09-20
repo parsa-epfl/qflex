@@ -86,8 +86,8 @@ class DockerBuild(Executor):
         self.debug = debug
         self.worm = worm
         if self.worm:
-            # Check if folder "WormCacheQFlex" exists
-            assert os.path.isdir('./WormCacheQFlex'), "WormCacheQFlex folder not found. Please clone the WormCacheQFlex repository."
+            # Check if folder "WormCache" exists
+            assert os.path.isdir('./WormCache'), "WormCache folder not found. Please clone the WormCache repository."
         self.docker_base_image_name = get_docker_image_name(debug=self.debug, worm=False)
         self.docker_image_name_with_worm = get_docker_image_name(debug=self.debug, worm=True)
         self.build_type = 'release'
@@ -129,7 +129,7 @@ class DockerBuild(Executor):
 
         worm_image_cmd = [
             f"""
-            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.WormCacheQFlex .
+            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.WormCache .
             """,
             f"docker tag {local_worm_name} {ghcr_worm_name}"
         ]
