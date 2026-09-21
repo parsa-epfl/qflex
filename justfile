@@ -22,8 +22,10 @@ jobs := env("JOBS", "")
 # resolved against build/ instead of the source root.
 bxdb_root := justfile_directory() + "/bxdb"
 
-# Configure flags shared by timing-qemu and fw-qemu.
-qemu_common := "--target-list=aarch64-softmmu --disable-gtk --enable-capstone --enable-zstd --with-bxdb=" + bxdb_root
+# Configure flags shared by timing-qemu and fw-qemu. --disable-werror is
+# needed because newer dependencies (e.g. Nix's libslirp 4.9) emit deprecation
+# warnings that QEMU turns into errors by default on git builds.
+qemu_common := "--target-list=aarch64-softmmu --disable-gtk --enable-capstone --enable-zstd --disable-werror --with-bxdb=" + bxdb_root
 
 # Extra flags only timing-qemu needs (see the fw-qemu flake for its own set).
 timing_flags := "--disable-docs --enable-slirp --enable-libqflex --enable-snapvm-external"

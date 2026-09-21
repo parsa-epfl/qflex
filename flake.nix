@@ -27,14 +27,18 @@
       libgcrypt
       zstd
 
-      python3
+      # QEMU's mkvenv bootstraps its build venv and needs distlib.
+      (python3.withPackages (ps: [ ps.distlib ]))
       git
       pbzip2
 
       flex
       bison
 
-      boost
+      # Boost 1.83 matches the Conan profile. Newer Boost made Boost.System
+      # header-only and dropped its CMake component config, which breaks
+      # flexus' find_package(Boost ... COMPONENTS system ...).
+      boost183
 
       libtinfo
       ncurses6
