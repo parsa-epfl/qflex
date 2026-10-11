@@ -50,6 +50,9 @@ class DockerStarter(Executor):
         assert os.path.exists(f'{cwd}/commands'), "commands folder not found in the current directory."
         assert os.path.exists(f'{cwd}/partition.py'), "partition.py file not found in the current directory."
         assert os.path.exists(f'{cwd}/result.py'), "result.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/collect.py'), "collect.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/training_model.py'), "training_model.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/training_by_asid.py'), "training_by_asid.py file not found in the current directory."
         
         micro_scripts = ''
         if os.path.exists(f'{cwd}/micro_scripts'):
@@ -68,6 +71,9 @@ class DockerStarter(Executor):
         {qflex_args} \
         -v {cwd}/partition.py:/home/dev/qflex/partition.py \
         -v {cwd}/result.py:/home/dev/qflex/result.py \
+        -v {cwd}/collect.py:/home/dev/qflex/collect.py \
+        -v {cwd}/training_model.py:/home/dev/qflex/training_model.py \
+        -v {cwd}/training_by_asid.py:/home/dev/qflex/training_by_asid.py \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \

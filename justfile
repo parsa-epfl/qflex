@@ -42,9 +42,10 @@ profile_flags := "-pr flexus/target/_profile/" + profile + (if extra_profile != 
 
 # ---------------------------------------------------------------------------
 
-# Build bxdb, the Rust snapshot database linked by both QEMUs.
+# Build bxdb, the Rust snapshot database linked by both QEMUs, and the `bxdb` CLI
+# (bxdb-util) used to index and purge checkpoint databases between iterations.
 bxdb:
-    cargo build --manifest-path bxdb/Cargo.toml -p bxdb-core --release
+    cargo build --manifest-path bxdb/Cargo.toml -p bxdb-core -p bxdb-util --release
 
 # Build a Flexus simulator (knottykraken by default).
 flexus sim="knottykraken":

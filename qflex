@@ -10,7 +10,7 @@ from commands.init_warm import InitWarm
 from commands.functional_warming import FunctionalWarming
 from commands.partition import PartitionCommand, CleanPartitionCommand
 from commands.run_partition import RunPartitionCommand
-from commands.result import RunResultCommand
+from commands.result import RunResultCommand, TrainCommand
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -162,15 +162,53 @@ def run_partition(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def result(
     experiment_context: ExperimentContext,
+    unit_size: Annotated[int, typer.Option(help="Size of the sampling unit in terms of INTERVAL (100K cycles).")] = 1,
+    index: Annotated[int, typer.Option(help="Index of the sampling unit to analyze.")] = 2,
+    core_groups: Annotated[str, typer.Option(help='Core groups to analyze separately, e.g. "0-7,8-15". Empty analyzes all cores as one group.')] = "",
+    confidence: Annotated[float, typer.Option(help="Confidence level for the sample size calculation.")] = 95.0,
+    error: Annotated[float, typer.Option(help="Acceptable sampling error.")] = 0.05,
+    plot: Annotated[bool, typer.Option(help="Plot the U-IPC distribution.")] = True,
 ):
     """
-    This command aggregates and processes the results from the detailed simulations.
-    It generates a core_info.csv file with the simulation results.
+    This command collects the results from the detailed simulations into timing.csv and analyzes the sampling error.
+    It writes the suggested sample size to NEXT_SAMPLE_SIZE and exits with 255 if the sampling error bound is not met.
+    It does not modify core_info.csv; use train for that.
     """
     run_result_executor = RunResultCommand(
         experiment_context=experiment_context,
+        unit_size=unit_size,
+        index=index,
+        core_groups=core_groups,
+        confidence=confidence,
+        error=error,
+        plot=plot,
     )
-    run_result_executor.execute(to_stdio=True, run_in_background=False)
+    r = run_result_executor.execute(to_stdio=True, run_in_background=False)
+    raise typer.Exit(r.returncode)
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def train(
+    experiment_context: ExperimentContext,
+    # Required, but needs a default because the experiment options are appended after it.
+    core_groups: Annotated[str, typer.Option(help='(Required) Core groups that each get their own IPC model, e.g. "0-7,8-15".')] = "",
+    interval_index: Annotated[int, typer.Option(help="Index of the sampling interval used to train the per-core IPC model.")] = 2,
+    cycle_range: Annotated[str, typer.Option(help='Cycle range "START-END" used to train the per-ASID models.')] = "200000-300000",
+):
+    """
+    This command trains the IPC model from the timing.csv produced by the result command.
+    The per-ASID models are written to run/asid_info.csv, and the trained cores in cfg/core_info.csv switch to the ipc-model.
+    The previous core_info.csv is backed up with a timestamp.
+    """
+    if not core_groups:
+        raise typer.BadParameter('--core-groups is required, e.g. "0-7,8-15".')
+    train_executor = TrainCommand(
+        experiment_context=experiment_context,
+        core_groups=core_groups,
+        interval_index=interval_index,
+        cycle_range=cycle_range,
+    )
+    train_executor.execute(to_stdio=True, run_in_background=False)
 
 
 

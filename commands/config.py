@@ -6,6 +6,17 @@ from .host import Host, SMTHost, HOSTS, HostType
 from .workload import Workload, create_workload
 import datetime
 
+# IPC-model coefficient columns of core_info.csv, in the order fw-qemu parses them
+# (must match bx_coeff_t in fw-qemu/include/sysemu/asid-coeff.h).
+CORE_INFO_COEFF_COLUMNS = [
+    "bx_private_icache_miss_coeff",
+    "bx_private_dcache_miss_coeff",
+    "bx_shared_cache_miss_coeff",
+    "bx_bp_miss_coeff",
+    "bx_drain_store_buffer_coeff",
+    "bx_instruction_coeff",
+]
+
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
 # For anyone checking this with old scripts, all worklaod, and core information is combined into the cli, as it's part of the CLI paramers now
@@ -113,7 +124,7 @@ class ExperimentContext(BaseModel):
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
-    include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
+    include_affinity: bool = Field(default=False, description="Whether host_core_idx in core_info.csv follows the host core sequence (otherwise vCPU i -> host core i).")
 
     def get_mounting_folder(self) -> str:
         return self.mounting_folder
@@ -198,7 +209,10 @@ class ExperimentContext(BaseModel):
 
         root_sls = [
            "partition.py",
-           "result.py"
+           "result.py",
+           "collect.py",
+           "training_model.py",
+           "training_by_asid.py",
         ]
         for file in root_sls:
             os.system(f"cp -u ./{file} {self.get_experiment_folder_address()}/{file}")
@@ -249,6 +263,11 @@ class ExperimentContext(BaseModel):
                 raise FileNotFoundError(f"Error: {f} not found in ./home/dev/qflex/kraken_out/")
             if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/{f}"):
                 os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
+
+        # bxdb CLI (built by `just bxdb`), used by run_partitions.sh and partition-cleanup
+        if not os.path.exists("./bxdb/target/release/bxdb"):
+            raise FileNotFoundError("Error: bxdb CLI not found at ./bxdb/target/release/bxdb. Build it with `just bxdb`.")
+        os.system(f"cp -u ./bxdb/target/release/bxdb {self.get_experiment_folder_address()}/bin/bxdb")
 
         
 
@@ -302,10 +321,15 @@ class ExperimentContext(BaseModel):
         # Check if file exists, if it does not exist create a default one
         target = f'{self.get_experiment_folder_address()}/cfg/core_info.csv'
         if not os.path.exists(target):
-            if self.include_affinity:
-                df = pandas.DataFrame([[ipns_info.ipns, ipns_info.core_index] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
-            else:
-                df = pandas.DataFrame([[ipns_info.ipns] for ipns_info in self.get_ipns_per_core()], columns=["ipns"])
+            # 9-column format parsed by fw-qemu (tcg_parse_core_info_file). Every vCPU starts
+            # with the constant model; `./qflex train` later switches cores to the ipc-model.
+            # fw-qemu always pins vCPU i to host_core_idx, so without affinity we keep its
+            # default mapping (vCPU i -> host core i).
+            rows = []
+            for vcpu_idx, ipns_info in enumerate(self.get_ipns_per_core()):
+                host_core_idx = ipns_info.core_index if self.include_affinity else vcpu_idx
+                rows.append([host_core_idx, "constant", ipns_info.ipns] + [0.0] * len(CORE_INFO_COEFF_COLUMNS))
+            df = pandas.DataFrame(rows, columns=["host_core_idx", "model_type", "ipns"] + CORE_INFO_COEFF_COLUMNS)
             df.to_csv(target, index=False)
         else:
             print(f"============== core_info.csv already exists at {target}, not overwriting it. ==============")

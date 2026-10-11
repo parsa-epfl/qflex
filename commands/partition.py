@@ -1,4 +1,5 @@
 import os
+import sys
 from commands import Executor
 from .config import ExperimentContext
 
@@ -19,8 +20,13 @@ class PartitionCommand(Executor):
             raise FileNotFoundError(f"Error: partition.py not found in {self.experiment_folder}. Make sure init_warm command has been run.")
 
     def clean_partition_command(self):
-        return f"""rm -rf {self.experiment_folder}/run/partition_* && \
-        rm -f {self.experiment_folder}/mem/[0-9]*
+        # Besides the partitions and checkpoint files, reset the bxdb database for the next functional warming:
+        # drop the B-tree index built by run_partitions.sh (with it, bxdb would open the database in B-tree
+        # mode instead of appending to chunks.log), then purge every snapshot after the base one (id 0).
+        run = f"{self.experiment_folder}/run"
+        return f"""rm -rf {run}/partition_* {run}/snapshot_*.bxdb-meta {run}/snapshot_*.state.zstd {run}/snapshot_*.uarch && \
+        rm -f {run}/*.bxdb/index.bxdb && \
+        for db in {run}/*.bxdb; do if [ -f "$db/chunks.log" ]; then {self.experiment_folder}/bin/bxdb purge 0 "$db"; fi; done
         """
 
     def cmd(self) -> str:
@@ -38,7 +44,7 @@ class PartitionCommand(Executor):
             raise FileExistsError("Partitions already exist.")
         return [
             f"cd {self.experiment_folder}",
-            f"{self.experiment_folder}/partition.py {self.partition_count}",
+            f"{sys.executable} {self.experiment_folder}/partition.py {self.partition_count}",
         ]
 
 

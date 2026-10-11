@@ -7,12 +7,13 @@ import glob
 
 '''
 How this program works:
-1. Scan the snapshot_*.zstd file under the current folder, and get the count.
+1. Scan the snapshot_*.bxdb-meta files under the current folder, and get the count.
 2. Calculate the number of files that each partition should have.
 3. Create a folder for each partition.
 4. Move the snapshot files to the corresponding partition folder.
 5. Create symbolic links for the necessary bindary files in the current folder.
 6. Copy the starting_script to each partition folder.
+7. Generate run_partitions.sh, which builds the bxdb B-tree index before running the partitions.
 '''
 
 # By default the partition is equal to the number of CPU cores.
@@ -33,7 +34,7 @@ os.chdir("./run")
 # Scan the snapshot files
 snapshot_files = []
 for file in os.listdir('.'):
-    if file.startswith('snapshot_') and file.endswith('.loc'):
+    if file.startswith('snapshot_') and file.endswith('.bxdb-meta'):
         snapshot_files.append(file)
 
 PARTITION_COUNT = min(PARTITION_COUNT, len(snapshot_files))
@@ -48,8 +49,8 @@ for snapshot_idx in range(len(snapshot_files)):
 
     # Move the file
     os.rename(
-        f"snapshot_{snapshot_idx}.loc",
-        f"partition_{partition_idx}/snapshot_{snapshot_idx}.loc"
+        f"snapshot_{snapshot_idx}.bxdb-meta",
+        f"partition_{partition_idx}/snapshot_{snapshot_idx}.bxdb-meta"
     )
 
     os.rename(
@@ -63,10 +64,10 @@ for snapshot_idx in range(len(snapshot_files)):
         f"partition_{partition_idx}/snapshot_{snapshot_idx}.uarch"
     )
 
-# find the incremental memory checkpoint file in the current folder. It should be named as "*.mem"
-mem_folder_name = glob.glob("*.mem")
-assert len(mem_folder_name) == 1, "There should be exactly one memory checkpoint file in the current folder."
-mem_folder_name = mem_folder_name[0]
+# Find the bxdb database holding the memory of all checkpoints (named after the base snapshot, e.g. init_warmed.bxdb).
+db_folder_name = glob.glob("*.bxdb")
+assert len(db_folder_name) == 1, "There should be exactly one bxdb database directory in the current folder."
+db_folder_name = db_folder_name[0]
 
 # Create symbolic links for the necessary bindary files in the current folder.
 NECESSARY_BINARY_FILES = [
@@ -76,7 +77,7 @@ NECESSARY_BINARY_FILES = [
     "../cfg/flexus_configuration.json",
     "../cfg/timing.cfg",
     "../bin/checkpoint_conversion",
-    mem_folder_name,
+    db_folder_name,
 ]
 
 for p in range(PARTITION_COUNT):
@@ -102,6 +103,9 @@ cwd_basename = os.path.basename(os.path.dirname(os.getcwd()))
 
 with open('../run_partitions.sh', 'w') as f:
     f.write("#!/bin/bash\n")
+    # Functional warming appends checkpoints to the bxdb log (chunks.log); build the B-tree
+    # index (index.bxdb) once so the timing runs can look pages up directly.
+    f.write(f"(cd run && ../bin/bxdb convert to-btree {db_folder_name}) || exit 1\n")
     # generate the script list.
     f.write("folders=(" + " ".join(folder_list) + ")\n")
     # use xarg to parallel run the scripts.
