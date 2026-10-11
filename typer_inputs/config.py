@@ -76,6 +76,10 @@ class ExperimentContextTyper(TyperDataClassMeta):
         include_affinity: Annotated[bool, typer.Option(
             help="Whether host_core_idx in core_info.csv follows the host core sequence (otherwise vCPU i -> host core i)."
         )]=False,
+        prebuilt_workload: Annotated[str, typer.Option(
+            help="Start from a prebuilt workload, e.g. 16c/dc (see ./qflex image list; download it with ./qflex image pull). "
+                 "The first command copies its disk into the experiment's run folder; later commands reuse it. --loadvm-name defaults to base."
+        )]="",
     ):
         print("quantum_size_ns:", quantum_size_ns)
         if unique:
@@ -111,6 +115,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
             check_period_quantum_coeff=check_period_quantum_coeff,
             use_cd_rom=use_cd_rom,
             machine_freq_ghz=machine_freq_ghz,
-            include_affinity=include_affinity
+            include_affinity=include_affinity,
+            prebuilt_workload=prebuilt_workload,
         )
         return experiment_context

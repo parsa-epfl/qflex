@@ -115,6 +115,34 @@ $ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
 
 ---
 
+## Alternative: start from a prebuilt workload
+
+Instead of creating an image and running **Boot** and **Load** yourself, you can download a prebuilt workload: a disk (`root.qcow2`) and a snapshot `base` (`base.zstd`) in which the workload already runs in steady state. You can then go straight to [Init Warm](#3-init-warm).
+
+List the available workloads (IDs are `<core count>/<workload>`, e.g. `16c/dc`) and download one:
+<!-- termynal -->
+```bash
+
+$ ./qflex image list
+$ ./qflex image pull 16c/dc --image-folder <MOUNT_DIR>/<IMAGE_DIR>
+
+```
+
+- Without an ID, `image pull` lets you choose from a numbered list.
+- Files go to `<IMAGE_DIR>/prebuilt/<id>/` and are read-only. An interrupted download resumes when you run `image pull` again.
+
+Then, in `qflex.args`, replace `--image-name` and `--use-image-directly` with the workload ID, and set the machine to the workload's `config.json` (qflex checks them and prints the right flags on a mismatch):
+```text
+--prebuilt-workload 16c/dc
+--image-folder <MOUNT_DIR>/<IMAGE_DIR>
+--no-unique
+```
+
+- The first command on the experiment copies `root.qcow2` into the experiment's `run/` folder and links `base.zstd` next to it; the choice is recorded in `run/prebuilt.json`, so later commands use that copy.
+- `--loadvm-name` defaults to `base`, so you can run [Init Warm](#3-init-warm) directly.
+
+---
+
 ## 1) Boot to bring up the OS and install requirements
 
 Use the `boot` action to start the OS with your common arguments. Once the VM is up, install your workload’s dependencies inside the qemu image (e.g., package manager installs, copying configs, etc.).

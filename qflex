@@ -11,6 +11,9 @@ from commands.functional_warming import FunctionalWarming
 from commands.partition import PartitionCommand, CleanPartitionCommand
 from commands.run_partition import RunPartitionCommand
 from commands.result import RunResultCommand, TrainCommand
+from commands import prebuilt
+from rich.console import Console
+from rich.table import Table
 from typer_inputs.config import ExperimentContextTyper
 from typer_inputs.config_wrapper import data_class_wrap
 
@@ -210,6 +213,58 @@ def train(
     )
     train_executor.execute(to_stdio=True, run_in_background=False)
 
+image_app = typer.Typer(help="List and download prebuilt workloads (disk + base snapshot), to start experiments directly from initialize with --prebuilt-workload.")
+app.add_typer(image_app, name="image")
+
+ImageFolderOption = Annotated[str, typer.Option(help="Image folder; prebuilt workloads are stored in <image-folder>/prebuilt/<id>.")]
+CatalogUrlOption = Annotated[str, typer.Option(help="Base URL of the prebuilt workload bucket (or set QFLEX_PREBUILT_URL).")]
+
+
+def print_prebuilt_table(catalog: list[prebuilt.PrebuiltWorkload], image_folder: str, numbered: bool = False):
+    table = Table()
+    if numbered:
+        table.add_column("#", justify="right")
+    for column in ["ID", "root.qcow2", "base.zstd", "Total", "Downloaded"]:
+        table.add_column(column, justify="left" if column == "ID" else "right")
+    for i, w in enumerate(catalog):
+        row = [w.id] + [f"{size / 1e9:.1f} GB" for size in (w.sizes["root.qcow2"], w.sizes["base.zstd"], w.total_size)]
+        row.append("yes" if prebuilt.is_downloaded(image_folder, w.id) else "")
+        table.add_row(*([str(i + 1)] if numbered else []) + row)
+    Console().print(table)
+
+
+@image_app.command("list")
+def image_list(
+    image_folder: ImageFolderOption = "./images",
+    url: CatalogUrlOption = prebuilt.PREBUILT_URL,
+):
+    """
+    List the prebuilt workloads available online. IDs are <core count>/<workload>, e.g. 16c/dc.
+    """
+    print_prebuilt_table(prebuilt.fetch_catalog(url), image_folder)
+
+
+@image_app.command("pull")
+def image_pull(
+    workload_id: Annotated[str, typer.Argument(help="ID of the prebuilt workload, e.g. 16c/dc. Omit to choose from a list.")] = "",
+    image_folder: ImageFolderOption = "./images",
+    url: CatalogUrlOption = prebuilt.PREBUILT_URL,
+):
+    """
+    Download a prebuilt workload to <image-folder>/prebuilt/<id>. Interrupted downloads resume when pulled again.
+    """
+    catalog = prebuilt.fetch_catalog(url)
+    if workload_id:
+        workload = prebuilt.find_workload(catalog, workload_id)
+    else:
+        print_prebuilt_table(catalog, image_folder, numbered=True)
+        choice = typer.prompt("Number of the workload to download", type=typer.IntRange(1, len(catalog)))
+        workload = catalog[choice - 1]
+    folder = prebuilt.pull(workload, image_folder, url)
+    config = prebuilt.load_prebuilt_config(folder)
+    print(f"Downloaded {workload.id} to {folder}:")
+    print(f"  cpu_cores={config['cpu_cores']} measured_core_count={config['measured_core_count']} memory={config['memory']} network_card={config['network_card']}")
+    print(f"Start an experiment from it with --prebuilt-workload {workload.id} --image-folder {image_folder}")
 
 
 if __name__ == "__main__":

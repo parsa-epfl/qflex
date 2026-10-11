@@ -1,9 +1,12 @@
 from pydantic import BaseModel, Field
+import json
 import os
+import subprocess
 import pandas
 
 from .host import Host, SMTHost, HOSTS, HostType
 from .workload import Workload, create_workload
+from .prebuilt import get_prebuilt_folder, load_prebuilt_config, parse_memory_gb
 import datetime
 
 # IPC-model coefficient columns of core_info.csv, in the order fw-qemu parses them
@@ -56,6 +59,14 @@ class SimulationContext(BaseModel):
     check_period_quantum_coeff: float = Field(default=53.0, description="Coefficient to determine the check period based on quantum size")
     use_cd_rom: bool = Field(default=False, description="Whether to use a CD-ROM for initial setup.")
 
+def get_qemu_nic_option(network: str) -> str:
+    if 'none' == network.strip().lower():
+        return "-nic none"
+    elif 'user' == network.strip().lower():
+        return "-nic user,model=virtio-net-pci"
+    else:
+        raise ValueError("Unsupported network type. Supported types are 'none' and 'user'.")
+
 def create_simulation_context(
     core_count: int,
     quantum_size: int,
@@ -81,12 +92,7 @@ def create_simulation_context(
     else:
         raise ValueError("Unsupported core count")
 
-    if 'none' == network.strip().lower():
-        network = "-nic none"
-    elif 'user' == network.strip().lower():
-        network = "-nic user,model=virtio-net-pci"
-    else:
-        raise ValueError("Unsupported network type. Supported types are 'none' and 'user'.")
+    network = get_qemu_nic_option(network)
     return SimulationContext(
         core_count=core_count,
         doubled_vcpu=doubled_vcpu,
@@ -125,6 +131,7 @@ class ExperimentContext(BaseModel):
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether host_core_idx in core_info.csv follows the host core sequence (otherwise vCPU i -> host core i).")
+    prebuilt_workload: str = Field(default="", description="ID of a prebuilt workload (e.g. 16c/dc) to start the experiment from, see ./qflex image list.")
 
     def get_mounting_folder(self) -> str:
         return self.mounting_folder
@@ -146,7 +153,9 @@ class ExperimentContext(BaseModel):
     
     def set_up_image(self):
 
-        if self.use_image_directly:
+        if self.prebuilt_workload or os.path.exists(self.get_prebuilt_record_address()):
+            self.set_up_prebuilt_image()
+        elif self.use_image_directly:
             self.image_address = f"{self.image_folder}/{self.image_name}"
         else:
             # TODO add some checks for this
@@ -171,14 +180,74 @@ class ExperimentContext(BaseModel):
                 os.makedirs(f"{self.image_folder}/experiments/{self.experiment_name}", exist_ok=not self.keep_experiment_unique)
                 print("created folder in images folder for this experiment, copying image...")
                 # Copy file to the new folder
-                print(f"cp {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
-                os.system(f"cp -u {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
-                print("copied image, creating symlink...")
-                # Create a symlink to the new image in the experiment folder
-                os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
-                print(f"Linked image to")
+                print(f"cp {self.image_folder}/{self.image_name} {self.get_local_image_address()}")
+                if os.system(f"cp -u {self.image_folder}/{self.image_name} {self.get_local_image_address()}") != 0:
+                    raise RuntimeError(f"Error: failed to copy {self.image_folder}/{self.image_name} to {self.get_local_image_address()}")
+                print("copied image.")
 
-            
+    def get_prebuilt_record_address(self) -> str:
+        """config.json of the prebuilt workload the experiment was set up from (absent otherwise)."""
+        return f"{self.get_experiment_folder_address()}/run/prebuilt.json"
+
+    def set_up_prebuilt_image(self):
+        """
+        Sets the experiment up from a prebuilt workload (./qflex image pull). The first command copies the
+        disk into run/ (the experiment writes snapshot entries into it) and links the read-only base.zstd;
+        the choice is recorded in run/prebuilt.json, so later commands keep using run/root.qcow2 and ignore
+        --image-folder/--image-name.
+        """
+        run = f"{self.get_experiment_folder_address()}/run"
+        record = self.get_prebuilt_record_address()
+        if os.path.exists(record):
+            with open(record) as f:
+                config = json.load(f)
+            if self.prebuilt_workload and self.prebuilt_workload != config["id"]:
+                raise ValueError(f"Error: experiment {self.experiment_name} was set up from prebuilt workload {config['id']}, not {self.prebuilt_workload}.")
+            self.prebuilt_workload = config["id"]
+            self.validate_prebuilt_config(config)
+        else:
+            if self.use_image_directly:
+                raise ValueError("Error: --prebuilt-workload cannot be combined with --use-image-directly.")
+            source = get_prebuilt_folder(self.image_folder, self.prebuilt_workload)
+            if not os.path.isfile(f"{source}/config.json"):
+                raise FileNotFoundError(f"Error: prebuilt workload {self.prebuilt_workload} not found in {source}. Download it with `./qflex image pull {self.prebuilt_workload} --image-folder {self.image_folder}`.")
+            config = load_prebuilt_config(source)
+            self.validate_prebuilt_config(config)
+            os.makedirs(run, exist_ok=True)
+            for file in ["root.qcow2", "base.zstd"]:
+                if os.path.lexists(f"{run}/{file}"):
+                    raise FileExistsError(f"Error: {run}/{file} already exists; the experiment was already set up from another image. Use a new --experiment-name.")
+            print(f"Copying {source}/root.qcow2 to {run}/root.qcow2 ...")
+            # The downloaded files are read-only; reflink makes the copy free on filesystems that support it.
+            subprocess.run(["cp", "--reflink=auto", f"{source}/root.qcow2", f"{run}/root.qcow2.part"], check=True)
+            os.chmod(f"{run}/root.qcow2.part", 0o644)
+            os.replace(f"{run}/root.qcow2.part", f"{run}/root.qcow2")
+            # base.zstd is only read by -loadvm base, so all experiments share the downloaded file.
+            os.symlink(f"{source}/base.zstd", f"{run}/base.zstd")
+            with open(record, "w") as f:
+                json.dump({"id": self.prebuilt_workload, **config}, f, indent=2)
+        self.image_name = "root.qcow2"
+        self.image_address = f"{run}/root.qcow2"
+        if not self.loadvm_name:
+            self.loadvm_name = "base"
+
+    def validate_prebuilt_config(self, config: dict):
+        """The base snapshot only restores on the machine it was taken with."""
+        sim = self.simulation_context
+        cpu_cores = sim.core_count * (2 if sim.doubled_vcpu else 1)
+        expected = {
+            "core count (--core-count)": (config["measured_core_count"], sim.core_count),
+            "vCPU count (--core-count, --double-cores)": (config["cpu_cores"], cpu_cores),
+            "memory (--memory-gb)": (parse_memory_gb(config["memory"]), sim.memory_gb),
+            "network (--network)": (get_qemu_nic_option(config["network_card"]), sim.qemu_nic),
+        }
+        mismatches = [f"  {name}: prebuilt {want}, experiment {got}" for name, (want, got) in expected.items() if want != got]
+        if mismatches:
+            double = "--double-cores" if config["cpu_cores"] == 2 * config["measured_core_count"] else "--no-double-cores"
+            raise ValueError(
+                f"Error: the experiment does not match prebuilt workload {self.prebuilt_workload}:\n" + "\n".join(mismatches)
+                + f"\nUse: --core-count {config['measured_core_count']} {double} --memory-gb {parse_memory_gb(config['memory'])} --network {config['network_card']}"
+            )
 
     def set_up_folders(self):
         # TODO go through all the files being copied with shanqing
@@ -378,7 +447,8 @@ def create_experiment_context(
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
     machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
-    include_affinity: bool = False
+    include_affinity: bool = False,
+    prebuilt_workload: str = "",
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -442,7 +512,8 @@ def create_experiment_context(
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
-        include_affinity=include_affinity
+        include_affinity=include_affinity,
+        prebuilt_workload=prebuilt_workload,
     )
 
     e.set_up_folders()
