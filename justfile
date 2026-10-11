@@ -47,14 +47,26 @@ profile_flags := "-pr flexus/target/_profile/" + profile + (if extra_profile != 
 bxdb:
     cargo build --manifest-path bxdb/Cargo.toml -p bxdb-core -p bxdb-util --release
 
+# With `mem`, the simulator is built for that many memory controllers and copied to out/kraken/mem<mem>/.
 # Build a Flexus simulator (knottykraken by default).
-flexus sim="knottykraken":
+flexus sim="knottykraken" mem="":
     #!/usr/bin/env bash
     set -euo pipefail
+    wiring="flexus/target/{{sim}}/wiring.cpp"
+    if [ -n "{{mem}}" ]; then
+        # The memory controller count is a compile-time constant in the wiring; patch it for this
+        # build only and restore the file afterwards.
+        cp "$wiring" "$wiring.orig"
+        trap 'mv "$wiring.orig" "$wiring"' EXIT
+        pattern='(FLEXUS_INSTANTIATE_COMPONENT_ARRAY\( MemoryLoopback, theMemoryCfg, theMemory, FIXED, DIVIDE, )[0-9]+ \);'
+        [ "$(grep -cE "$pattern" "$wiring")" = "1" ] || { echo "Cannot find the MemoryLoopback array in $wiring" >&2; exit 1; }
+        sed -i -E "s/$pattern/\1{{mem}} );/" "$wiring"
+    fi
     if [ "{{use_conan}}" = "1" ]; then
         conan profile detect --force
         conan build flexus {{profile_flags}} --name={{sim}} -of out -b missing
         conan export-pkg flexus -pr "flexus/target/_profile/{{profile}}" --name={{sim}} -of out
+        lib=$(ls out/lib/*/lib{{sim}}.so)
     else
         build_dir="flexus/build-{{sim}}"
         cmake -S flexus -B "$build_dir" -G Ninja \
@@ -62,7 +74,23 @@ flexus sim="knottykraken":
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DSIMULATOR={{sim}}
         ninja -C "$build_dir"
+        lib="$build_dir/lib{{sim}}.so"
     fi
+    if [ -n "{{mem}}" ]; then
+        mkdir -p out/kraken/mem{{mem}}
+        cp "$lib" out/kraken/mem{{mem}}/
+    fi
+
+# Memory controller counts the simulators are built for: one controller per 8 cores, so these cover
+# 1-8 (1), 16 (2), 32 (4), 48 (6) and 64 (8) cores. Must match MEMORY_CONTROLLERS in commands/config.py.
+kraken_mem_counts := "1 2 4 6 8"
+
+# qflex picks the variant matching the experiment's core count.
+# Build both Flexus simulators for every memory controller count into out/kraken/mem<N>/.
+kraken:
+    for mem in {{kraken_mem_counts}}; do \
+        for sim in knottykraken semikraken; do {{just_executable()}} flexus $sim $mem; done; \
+    done
 
 # Build timing-qemu (the detailed timing model).
 timing-qemu: bxdb
@@ -73,7 +101,7 @@ fw-qemu: bxdb
     cd fw-qemu && ./configure {{qemu_common}} && ninja -C build
 
 # Build the whole stack.
-all: bxdb (flexus "knottykraken") (flexus "semikraken") timing-qemu fw-qemu
+all: bxdb kraken timing-qemu fw-qemu
 
 # Remove generated build outputs.
 clean:

@@ -20,6 +20,19 @@ CORE_INFO_COEFF_COLUMNS = [
     "bx_instruction_coeff",
 ]
 
+# Memory controller locations (mesh node ids) per core count, one controller per 8 cores.
+# Flexus lays the cores out as a mesh numbered row by row (buildMesh in flexus/components/NetShim/netcontainer.cpp):
+# 16 cores 4x4, 32 cores 4x8, 48 cores 8x6, 64 cores 8x8; the controllers sit on the left and right edges.
+# Flexus is compiled for a fixed controller count: `just kraken` builds a variant per count into out/kraken/mem<N>/.
+MEMORY_CONTROLLER_POSITIONS = {
+    16: "8,15",
+    32: "8,15,16,23",
+    48: "6,11,24,29,36,41",
+    64: "8,15,24,31,32,40,47,56",
+}
+# Where `just kraken` puts the Flexus simulators (the Docker image copies them to /home/dev/qflex/kraken_out).
+KRAKEN_FOLDERS = ["./out/kraken", "/home/dev/qflex/kraken_out"]
+
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
 # For anyone checking this with old scripts, all worklaod, and core information is combined into the cli, as it's part of the CLI paramers now
@@ -79,18 +92,14 @@ def create_simulation_context(
     use_cd_rom: bool=False,
 ) -> SimulationContext:
     l2_way = 16
-    if core_count == 64:
-        memory_controller_count = 8
-        memory_controller_positions = "8,15,24,31,32,40,47,56"
-    elif core_count == 16:
-        memory_controller_count = 2
-        memory_controller_positions = "8,15"
     # TODO check the memory for 8 and the other values
-    elif core_count <= 8:
-        memory_controller_count = 1
+    if core_count <= 8:
         memory_controller_positions = "0"
+    elif core_count in MEMORY_CONTROLLER_POSITIONS:
+        memory_controller_positions = MEMORY_CONTROLLER_POSITIONS[core_count]
     else:
-        raise ValueError("Unsupported core count")
+        raise ValueError(f"Unsupported core count {core_count}. Supported: 1-8, {', '.join(map(str, MEMORY_CONTROLLER_POSITIONS))}.")
+    memory_controller_count = len(memory_controller_positions.split(","))
 
     network = get_qemu_nic_option(network)
     return SimulationContext(
@@ -322,16 +331,13 @@ class ExperimentContext(BaseModel):
         if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/WormCache"):
             os.system(f"cp -r ./WormCache {self.get_experiment_folder_address()}/lib/WormCache")
 
-        # Move files to lib
-        lib_files = [
-            "libknottykraken.so", 
-            "libsemikraken.so"
-        ]
-        for f in lib_files:
-            if not os.path.exists(f"/home/dev/qflex/kraken_out/{f}"):
-                raise FileNotFoundError(f"Error: {f} not found in ./home/dev/qflex/kraken_out/")
+        # Copy the Flexus simulators built for the experiment's memory controller count to lib
+        kraken_folder = self.get_kraken_folder()
+        for f in ["libknottykraken.so", "libsemikraken.so"]:
+            if not os.path.exists(f"{kraken_folder}/{f}"):
+                raise FileNotFoundError(f"Error: {f} not found in {kraken_folder}. Build it with `just kraken`.")
             if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/{f}"):
-                os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
+                os.system(f"cp {kraken_folder}/{f} {self.get_experiment_folder_address()}/lib/{f}")
 
         # bxdb CLI (built by `just bxdb`), used by run_partitions.sh and partition-cleanup
         if not os.path.exists("./bxdb/target/release/bxdb"):
@@ -341,6 +347,14 @@ class ExperimentContext(BaseModel):
         
 
 
+
+    def get_kraken_folder(self) -> str:
+        """Folder with the Flexus simulators compiled for this experiment's memory controller count."""
+        variant = f"mem{self.simulation_context.mem_controller_count}"
+        for folder in KRAKEN_FOLDERS:
+            if os.path.isdir(f"{folder}/{variant}"):
+                return os.path.abspath(f"{folder}/{variant}")
+        raise FileNotFoundError(f"Error: no Flexus simulators for {self.simulation_context.mem_controller_count} memory controllers ({variant}) in {' or '.join(KRAKEN_FOLDERS)}. Build them with `just kraken`.")
 
     def get_ipns_per_core(self) -> list[IPNSInfo]:
 

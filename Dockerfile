@@ -93,14 +93,11 @@ WORKDIR /home/dev/qflex
 
 # TODO add a check later to make sure qflex folder it self is never mounted, as we need the binaries, or change where they are craeted
 # TODO address the two qemu versions
-RUN --mount=type=bind,source=./timing-qemu,target=/home/dev/qflex/timing-qemu,rw PROFILE=${MODE} just flexus knottykraken && \
-    PROFILE=${MODE} just flexus semikraken && \
+RUN --mount=type=bind,source=./timing-qemu,target=/home/dev/qflex/timing-qemu,rw PROFILE=${MODE} just kraken && \
+    cp -r out/kraken /home/dev/qflex/kraken_out && \
     conan cache clean -v && \
     conan remove -c "*" && \
     PROFILE=${MODE} just timing-qemu && \
-    python3 build-multiple-kraken_vanilla.py && \
-    mkdir /home/dev/qflex/kraken_out && \
-    cp -r out/lib/Release /home/dev/qflex/kraken_out && \
     rm -rf out && \
     mkdir timing-qemu-saved && \
     cp -r /home/dev/qflex/timing-qemu/pc-bios /home/dev/qflex/timing-qemu-saved/pc-bios && \
