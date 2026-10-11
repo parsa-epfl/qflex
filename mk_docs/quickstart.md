@@ -33,7 +33,7 @@ By the end of this tutorial, you will have run through the entire workflow of st
     - **All requirements installed locally**, **or**
     - **You’ve started the Docker environment with the `dep` helper** (see [Installation](installation.md) and [Docker](reference/docker.md)):
       ```bash
-      ./dep start-docker --worm --mounting-folder <MOUNT_DIR>
+      uv run ./dep start-docker --worm --mounting-folder <MOUNT_DIR>
       ```
 ---
 
@@ -274,29 +274,49 @@ xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement-r
 ```
 This command will run all the partitions with spending twice as much cycles warming as measuring. You can adjust the `--warming-ratio` and `--measurement-ratio`.
 
+Before starting the partitions, it builds the B-tree index (`index.bxdb`) of the checkpoint database in the run folder (e.g. `init_warmed.bxdb`), so that the timing simulations can look up the memory pages of each checkpoint directly.
+
 ---
 ## 7) Collecting Results
-After the detailed simulation is done you can collect the results and decided whether or not you want to reiterate from the functional warming step as it uses an estimate IPC. The result command creates estimated IPCs that can be more accurate and with more accurate IPC you can re-iterate. 
+After the detailed simulation is done you can collect the results and decide whether or not you want to reiterate from the functional warming step. 
 <!-- termynal -->
 ```bash
 
-$ xargs -a ./qflex.args -- ./qflex result
+$ xargs -a ./qflex.args -- ./qflex result --core-groups "0-7,8-15"
 
 ```
-This will automatically create a new core_info.csv file in the experiment folder with the updated IPC values. ready for you to re-iterate the experiment. 
+This collects all measurements into `timing.csv` in the experiment folder and checks the sampling error for each core group. The suggested sample size for the next iteration is written to `NEXT_SAMPLE_SIZE`, and the command exits with code 255 if the sampling error bound is not met. It does not modify `core_info.csv`.
 
-## 8) Re-iterating
-If you decide to reiterate you should first remove the partitions folders.
+## 8) Updating core_info.csv
+Functional warming uses `cfg/core_info.csv` to model the speed of each core. It has one row per vCPU in the following 9-column format:
+```
+host_core_idx,model_type,ipns,bx_private_icache_miss_coeff,bx_private_dcache_miss_coeff,bx_shared_cache_miss_coeff,bx_bp_miss_coeff,bx_drain_store_buffer_coeff,bx_instruction_coeff
+0,constant,4.0,0.0,0.0,0.0,0.0,0.0,0.0
+```
+- `host_core_idx`: the host core the vCPU thread is pinned to.
+- `model_type`: `constant` uses a fixed `ipns` (instructions per ns); `ipc-model` requires `ipns=1.0` and estimates the time from the coefficients (ns per event).
+
+The initial file uses the constant model with the IPC given at initialization. After the `result` command, train the IPC model for each core group (plus per-ASID models in `run/asid_info.csv`):
+<!-- termynal -->
+```bash
+
+$ xargs -a ./qflex.args -- ./qflex train --core-groups "0-7,8-15"
+
+```
+The previous `cfg/core_info.csv` is backed up with a timestamp before it is replaced.
+
+## 9) Re-iterating
+If you decide to reiterate you should first clean up the checkpoints of this iteration.
 <!-- termynal -->
 ```bash
 
 $ xargs -a ./qflex.args -- ./qflex partition-cleanup
 
 ```
-The IPC is already updated in the cfg/core_info.csv file and you just need to update your sample size and can re-iterate from the functional warming step.
+Once `cfg/core_info.csv` is updated, set the sample size (see `NEXT_SAMPLE_SIZE`) and re-iterate from the functional warming step.
 <!-- Warning that this will remove all partition folders and their contents -->
 !!! warning "Warning"
-    This will remove all partition folders and their contents. Make sure you have collected any necessary data before running this command.
+    This removes all partition folders and their contents, together with the checkpoints. It also drops the B-tree index of the checkpoint database and purges every checkpoint except the base snapshot from it, so that functional warming can append new checkpoints. Make sure you have collected any necessary data before running this command.
 
 
 

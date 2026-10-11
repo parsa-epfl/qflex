@@ -37,14 +37,22 @@ RUN apt install -y --no-install-recommends grep
 # TODO once mirrors are back change back to gcc-14
 RUN apt install -y --no-install-recommends gcc-13 g++-13
 RUN apt install -y --no-install-recommends libpixman-1-dev
+# System Python is only used to build QEMU (its configure bootstraps a venv and needs pip's distlib).
+# Everything else Python is managed by uv below.
 RUN apt install -y --no-install-recommends python3 python3-venv python3-pip python3-setuptools python3-wheel   
 RUN apt install -y --no-install-recommends zstd
 RUN apt install -y --no-install-recommends vim
 RUN apt install -y --no-install-recommends tmux
 RUN apt install -y --no-install-recommends htop
 
-# --break-system-package for ubuntu 24.04
-RUN pip install conan && pip cache purge
+# uv manages all other Python tooling: conan, and the locked environment of the qflex CLI
+# (pyproject.toml / uv.lock), using a uv-managed interpreter (.python-version).
+COPY --from=ghcr.io/astral-sh/uv:0.7.19 /uv /uvx /usr/local/bin/
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \
+    UV_TOOL_DIR=/opt/uv/tools \
+    UV_TOOL_BIN_DIR=/usr/local/bin \
+    UV_PROJECT_ENVIRONMENT=/opt/qflex-venv
+RUN uv tool install conan
 
 # Install Rust system-wide. Needed to build bxdb in this image, and reused by
 # the WormCache image (which no longer installs its own toolchain).
@@ -111,11 +119,13 @@ WORKDIR /home/dev/qflex
 RUN ln -s /home/dev/qflex/fw-qemu-saved/build/aarch64-softmmu/qemu-system-aarch64 /home/dev/qflex/qemu-aarch64
 RUN ln -s /home/dev/qflex/fw-qemu-saved/build/qemu-img /home/dev/qflex/qemu-img
 
-RUN pip install -r requirements.txt
+# Install the CLI's locked dependencies. The venv comes first on PATH, so `./qflex` and `python`
+# use it directly; `uv run ./qflex` also works and reuses the same venv.
+RUN uv sync --frozen
+ENV PATH=/opt/qflex-venv/bin:${PATH}
 COPY  ./commands /home/dev/qflex/commands
 COPY ./typer_inputs /home/dev/qflex/typer_inputs
 COPY ./qflex /home/dev/qflex
-RUN ln -s /usr/bin/python3 /usr/bin/python
 
 COPY ./QEMU_EFI.fd /home/dev/qflex/QEMU_EFI.fd
 

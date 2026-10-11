@@ -36,20 +36,23 @@ $ cd qflex
 
 ## 2) Install requirements for the CLI
 
+The CLI's Python dependencies are locked in `pyproject.toml` / `uv.lock` and managed by [uv](https://docs.astral.sh/uv/). Install uv once:
+
 ```bash
-pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# or, with Nix
+nix profile install nixpkgs#uv
 ```
 
-!!! tip "Use a virtual environment (recommended)"
-    ```bash
-    python -m venv .venv
-    # macOS/Linux
-    source .venv/bin/activate
-    # Windows (PowerShell)
-    .\.venv\Scripts\Activate.ps1
+Then run the CLI through uv from the repository root. The first run creates `.venv` from the lock file (downloading the pinned Python version if needed); later runs reuse it:
 
-    pip install -r requirements.txt
-    ```
+```bash
+uv run ./qflex --help
+uv run ./dep --help
+```
+
+!!! tip "Inside Docker"
+    The Docker image already contains this environment, so `./qflex` works directly there.
 
 ---
 
@@ -59,7 +62,7 @@ pip install -r requirements.txt
     <!-- termynal -->
     ```powershell
 
-    $ python dep start-docker --worm --mounting-folder <mounting_folder>
+    $ uv run python dep start-docker --worm --mounting-folder <mounting_folder>
 
     ```
 
@@ -67,7 +70,7 @@ pip install -r requirements.txt
     <!-- termynal -->
     ```bash
 
-    $ ./dep start-docker --worm --mounting-folder <mounting_folder>
+    $ uv run ./dep start-docker --worm --mounting-folder <mounting_folder>
 
     ```
 
@@ -95,18 +98,18 @@ You should see qflex command-line options.
     - Use the **dep** helper to explore commands and manage dependencies:
       ```bash
       # Linux/macOS
-      ./dep --help
+      uv run ./dep --help
 
       # Windows (PowerShell)
-      python dep --help
+      uv run python dep --help
       ```
     - To (re)start the container with your workspace mounted:
       ```bash
       # Linux/macOS
-      ./dep start-docker --worm --mounting-folder <mounting_folder>
+      uv run ./dep start-docker --worm --mounting-folder <mounting_folder>
 
       # Windows (PowerShell)
-      python dep start-docker --worm --mounting-folder <mounting_folder>
+      uv run python dep start-docker --worm --mounting-folder <mounting_folder>
       ```
 
 

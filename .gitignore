@@ -306,3 +306,5 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,linux,windows,archive,archives,c,c++,cmake,visualstudiocode,assembler,meson,vim
+# uv-managed virtual environment
+.venv/

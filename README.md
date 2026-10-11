@@ -33,17 +33,21 @@ The following tools should be installed to start QFlex
 git clone --recursive git@github.com:parsa-epfl/qflex.git
 ```
 
-### 3. Build the python requirements
+### 3. Install uv for the python requirements
+The CLI's Python dependencies are locked in `pyproject.toml` / `uv.lock` and managed by [uv](https://docs.astral.sh/uv/).
+Install uv once (e.g. `curl -LsSf https://astral.sh/uv/install.sh | sh`, or `nix profile install nixpkgs#uv`),
+then run the CLI through it from the repository root; the first run creates `.venv` from the lock file:
 ```sh
 cd qflex
-pip install -r requirements.txt
+uv run ./qflex --help
 ```
+Inside the Docker image the environment is already installed, so `./qflex` works directly.
 
 
 ### 4. Start the docker image
 
 ```sh
-./dep --start-docker --worm
+uv run ./dep --start-docker --worm
 ```
 
 ### 5. Show the help from QFlex cli inside the docker image

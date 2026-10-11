@@ -23,3 +23,4 @@ cfg/
 experiments/
 *.qcow2
 tmp_results/
+.venv/
