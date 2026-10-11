@@ -44,12 +44,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 nix profile install nixpkgs#uv
 ```
 
-Then run the CLI through uv from the repository root. The first run creates `.venv` from the lock file (downloading the pinned Python version if needed); later runs reuse it:
+Then run the CLI from the repository root. `./qflex` runs itself through uv (see its shebang); the first run creates `.venv` from the lock file (downloading the pinned Python version if needed), and later runs reuse it:
 
 ```bash
-uv run ./qflex --help
+./qflex --help
 uv run ./dep --help
 ```
+
+!!! note "Run from the repository root"
+    uv finds `pyproject.toml` from the current directory, so run `./qflex` from the repository root (its commands also expect that).
 
 !!! tip "Inside Docker"
     The Docker image already contains this environment, so `./qflex` works directly there.

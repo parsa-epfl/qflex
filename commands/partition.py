@@ -29,7 +29,7 @@ class PartitionCommand(Executor):
         for db in {run}/*.bxdb; do if [ -f "$db/chunks.log" ]; then {self.experiment_folder}/bin/bxdb purge 0 "$db"; fi; done
         """
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         # TODO add run_flexus.sh to scripts folder
         # TODO get rid of partition at some point and move run_flexus.sh in our python commands
         # TODO seperate creating partitions and running partitions

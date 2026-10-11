@@ -47,7 +47,7 @@ class RunResultCommand(Executor):
         assert os.path.exists(f"{self.experiment_folder}/collect.py"), "Error: collect.py not found. Make sure initialization command has been run."
         assert os.path.exists(f"{self.experiment_folder}/run_partitions.sh"), "Error: run_partitions.sh not found. Make sure partition command has been run."
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         core_groups_arg = f'--core-groups "{self.core_groups}"' if self.core_groups else ""
         return [
             f"cd {self.experiment_folder}",
@@ -87,7 +87,7 @@ class TrainCommand(Executor):
         assert os.path.exists(f"{self.experiment_folder}/timing.csv"), "Error: timing.csv not found. Make sure result command has been run."
         assert os.path.exists(f"{self.experiment_folder}/cfg/core_info.csv"), "Error: cfg/core_info.csv not found. Make sure initialization command has been run."
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         return [
             f"cd {self.experiment_folder}",
             f"echo training per-ASID models with cycle range {self.cycle_range}",

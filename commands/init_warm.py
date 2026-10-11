@@ -57,7 +57,7 @@ class InitWarm(Executor):
             #  TODO check if all needed files are copied (check main file of replica plus necessary files declared in partition.py and result.py)
         ]
     
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
 
 
 

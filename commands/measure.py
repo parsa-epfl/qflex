@@ -65,7 +65,7 @@ class FunctionalWarming(Executor):
         self.error = error
         self.plot = plot
     
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         return f'./result.py \
         --unit-size {self.unit_size} \
         --index {self.sampling_index} \

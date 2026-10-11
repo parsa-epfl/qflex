@@ -36,10 +36,10 @@ git clone --recursive git@github.com:parsa-epfl/qflex.git
 ### 3. Install uv for the python requirements
 The CLI's Python dependencies are locked in `pyproject.toml` / `uv.lock` and managed by [uv](https://docs.astral.sh/uv/).
 Install uv once (e.g. `curl -LsSf https://astral.sh/uv/install.sh | sh`, or `nix profile install nixpkgs#uv`),
-then run the CLI through it from the repository root; the first run creates `.venv` from the lock file:
+then run the CLI from the repository root. Its shebang runs it through uv, and the first run creates `.venv` from the lock file:
 ```sh
 cd qflex
-uv run ./qflex --help
+./qflex --help
 ```
 Inside the Docker image the environment is already installed, so `./qflex` works directly.
 

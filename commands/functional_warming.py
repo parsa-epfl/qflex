@@ -24,7 +24,7 @@ class FunctionalWarming(Executor):
 
     
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         fw_cmd = f"""
             ./qemu-system-aarch64 \
             {self.qemu_common_parser.get_qemu_base_args()} \

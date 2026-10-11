@@ -110,7 +110,7 @@ def plot_distribution(values: np.ndarray, title: str) -> None:
     fig.x_label = "U-IPC"
     fig.y_label = "Frequency"
     fig.set_x_limits(min_=0, max_=max(values) * 1.1)
-    fig.histogram(values, bins=20, lc=100)
+    fig.histogram(values.tolist(), bins=20, lc=100)
     print("Distribution of U-IPC Values")
     print(fig.show())
 

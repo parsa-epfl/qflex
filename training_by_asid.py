@@ -18,7 +18,7 @@ import json
 import os
 import random
 import sys
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 import numpy as np
 import pandas as pd
 from scipy.optimize import nnls, lsq_linear
@@ -92,24 +92,17 @@ def load_and_build_records(
         if len(rows) < 2:
             continue
 
-        current_asid = None
-        current_metrics = None
-        current_core_cycles_start = 0
-        current_halted_cycles_start = 0
+        # The first moment starts at the first row
+        current_asid = rows.iloc[0]["asid"]
+        current_metrics = {k: 0 for k in FEATURE_NAMES}
+        current_core_cycles_start = rows.iloc[0]["core_cycles"]
+        current_halted_cycles_start = rows.iloc[0]["halted_cycles"]
 
         for i in range(len(rows) - 1):
             row_start = rows.iloc[i]
             row_end = rows.iloc[i + 1]
 
-            asid_start = row_start["asid"]
             asid_end = row_end["asid"]
-
-            # Initialise on first iteration
-            if i == 0:
-                current_asid = asid_start
-                current_metrics = {k: 0 for k in FEATURE_NAMES}
-                current_core_cycles_start = row_start["core_cycles"]
-                current_halted_cycles_start = row_start["halted_cycles"]
 
             # Accumulate delta bx_* metrics for this interval into the current ASID's bucket
             for feature in FEATURE_NAMES:
@@ -129,7 +122,7 @@ def load_and_build_records(
                 non_idle = (delta_core - delta_halted) / FREQ
 
                 if non_idle >= min_non_idle:
-                    record = {
+                    record: Dict[str, Any] = {
                         "snapshot_idx": snapshot_id,
                         "asid": current_asid,
                         "core_id": core_id,
@@ -145,23 +138,22 @@ def load_and_build_records(
                 current_halted_cycles_start = row_end["halted_cycles"]
 
         # Finalise the last moment for this (snapshot_id, core)
-        if current_metrics is not None:
-            last_row = rows.iloc[-1]
-            delta_core = int(last_row["core_cycles"]) - int(current_core_cycles_start)
-            delta_halted = int(last_row["halted_cycles"]) - int(
-                current_halted_cycles_start
-            )
-            non_idle = (delta_core - delta_halted) / FREQ
+        last_row = rows.iloc[-1]
+        delta_core = int(last_row["core_cycles"]) - int(current_core_cycles_start)
+        delta_halted = int(last_row["halted_cycles"]) - int(
+            current_halted_cycles_start
+        )
+        non_idle = (delta_core - delta_halted) / FREQ
 
-            if non_idle >= min_non_idle:
-                record = {
-                    "snapshot_idx": snapshot_id,
-                    "asid": current_asid,
-                    "core_id": core_id,
-                    "non_idle_cycles": non_idle,
-                }
-                record.update(current_metrics)
-                all_records.append(record)
+        if non_idle >= min_non_idle:
+            record = {
+                "snapshot_idx": snapshot_id,
+                "asid": current_asid,
+                "core_id": core_id,
+                "non_idle_cycles": non_idle,
+            }
+            record.update(current_metrics)
+            all_records.append(record)
 
     return all_records
 
@@ -439,7 +431,7 @@ def main():
     console.print(f"[green]Found {len(asid_records)} unique ASIDs[/green]")
 
     # Train models per ASID
-    results = []
+    results: List[Dict[str, Any]] = []
     skipped_asids = []
 
     for asid in sorted(asid_records.keys()):
@@ -540,6 +532,21 @@ def main():
 
     # Save models to JSON file
     cycle_start_val, cycle_end_val = map(int, args.cycle_range.split("-"))
+    models: List[Dict[str, Any]] = [
+        {
+            "key": f"asid_{r['asid']}",
+            "asid": int(r["asid"]),
+            "cores": None,
+            "sample_count": r["sample_count"],
+            "coefficients": {
+                name: float(coeff)
+                for name, coeff in zip(FEATURE_NAMES, r["coefficients"])
+            },
+            "train_metrics": {k: float(v) for k, v in r["train_metrics"].items()},
+            "test_metrics": {k: float(v) for k, v in r["test_metrics"].items()},
+        }
+        for r in results
+    ]
     json_data = {
         "format_version": 1,
         "source": "training_by_asid",
@@ -547,21 +554,7 @@ def main():
         "feature_names": FEATURE_NAMES,
         "cycle_range_start": cycle_start_val,
         "cycle_range_end": cycle_end_val,
-        "models": [
-            {
-                "key": f"asid_{r['asid']}",
-                "asid": int(r["asid"]),
-                "cores": None,
-                "sample_count": r["sample_count"],
-                "coefficients": {
-                    name: float(coeff)
-                    for name, coeff in zip(FEATURE_NAMES, r["coefficients"])
-                },
-                "train_metrics": {k: float(v) for k, v in r["train_metrics"].items()},
-                "test_metrics": {k: float(v) for k, v in r["test_metrics"].items()},
-            }
-            for r in results
-        ],
+        "models": models,
     }
     with open(args.output, "w") as f:
         json.dump(json_data, f, indent=2)
@@ -570,7 +563,7 @@ def main():
     # Save coefficients as CSV
     coeff_columns = [f"{name}_coeff" for name in FEATURE_NAMES]
     csv_rows = []
-    for model in json_data["models"]:
+    for model in models:
         row = {"asid": model["asid"]}
         for name in FEATURE_NAMES:
             row[f"{name}_coeff"] = model["coefficients"][name]

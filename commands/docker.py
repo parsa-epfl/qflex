@@ -10,7 +10,7 @@ class DockerStarter(Executor):
                  mounting_folder: str,
                  debug: bool = False,
                  worm: bool = False,
-                 start_directory: str = None):
+                 start_directory: str | None = None):
         self.debug = debug
         self.worm = worm
         self.version = get_version()
@@ -23,7 +23,7 @@ class DockerStarter(Executor):
             self.start_directory = f" -w {start_directory} "
 
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         cwd = os.getcwd()
         
         # if images folder doesn't exist load it
@@ -105,7 +105,7 @@ class DockerBuild(Executor):
         # TODO add checks to prevent overwriting existing images
         print(f"============== Building QFlex version: {self.version} ==============")
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         # TODO add a debug build with all the files so it can be used for development without remaking the image and compiled again
         
         local_qflex_name = f"{self.docker_base_image_name}:{self.version}"

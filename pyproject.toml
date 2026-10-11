@@ -31,3 +31,7 @@ docs = [
 [tool.uv]
 # The CLI runs from the repository as scripts; there is no package to build or install.
 package = false
+
+[tool.ty.src]
+# Only check qflex itself, not the vendored submodules (QEMUs, Flexus, WormCache, bxdb).
+exclude = ["fw-qemu", "timing-qemu", "flexus", "WormCache", "bxdb"]

@@ -12,7 +12,7 @@ class CreateImage(Executor):
         self.size_gb = size_gb
         self.image_folder = os.path.abspath(image_folder)
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         if not os.path.isdir(self.image_folder):
             os.makedirs(self.image_folder)
         # TODO force image to be in run going forward

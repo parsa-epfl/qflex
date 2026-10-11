@@ -29,7 +29,7 @@ import numpy as np
 import plotille
 from scipy.optimize import nnls, lsq_linear
 from scipy.cluster.vq import kmeans2, whiten
-from typing import List, Tuple, Dict
+from typing import Any, List, Tuple, Dict
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -731,18 +731,11 @@ def train_and_evaluate_group(
     group_name: str,
     min_instruction_coeff: float = 0.0,
     no_noc: bool = False,
-) -> tuple[
-    np.ndarray | None,
-    dict | None,
-    dict | None,
-    np.ndarray | None,
-    np.ndarray | None,
-    list[dict] | None,
-]:
+) -> tuple[np.ndarray, dict, dict, np.ndarray, np.ndarray, list[dict]] | None:
     """
     Train NNLS model for a group and evaluate on train/test sets.
 
-    Returns:
+    Returns None if there is not enough data, otherwise:
         P: Trained coefficients
         train_metrics: Training metrics
         test_metrics: Test metrics
@@ -752,7 +745,7 @@ def train_and_evaluate_group(
     """
     if len(diffs) == 0:
         console.print(f"[red]Error: No data for {group_name}[/red]")
-        return None, None, None, None, None, None
+        return None
 
     train_set, test_set = split_data(diffs, test_ratio, random_seed)
 
@@ -762,7 +755,7 @@ def train_and_evaluate_group(
 
     if len(train_set) == 0 or len(test_set) == 0:
         console.print(f"[red]Error: One of the splits is empty for {group_name}[/red]")
-        return None, None, None, None, None, None
+        return None
 
     X_train, y_train = extract_features(train_set)
     X_test, y_test = extract_features(test_set)
@@ -937,8 +930,8 @@ def main():
 
     # FEATURE_NAMES at module level controls which features are used for training
     # Store group results for aggregated statistics
-    group_results = []
-    group_coefficients = []
+    group_results: list[dict[str, Any]] = []
+    group_coefficients: list[np.ndarray] = []
     all_test_X = []
     all_test_y = []
     all_test_predictions = []
@@ -986,7 +979,7 @@ def main():
                 args.no_noc,
             )
 
-            if result[0] is None:
+            if result is None:
                 continue
 
             (
@@ -1077,7 +1070,7 @@ def main():
             args.no_noc,
         )
 
-        if result[0] is None:
+        if result is None:
             return 1
 
         (

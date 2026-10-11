@@ -10,7 +10,7 @@ class Boot(Executor):
         self.experiment_context = experiment_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         
         boot_cmd = f"""
         ./qemu-system-aarch64 \

@@ -313,7 +313,7 @@ class ExperimentContext(BaseModel):
 
         return results
     
-    def get_ipns_csv(self) -> str:
+    def get_ipns_csv(self) -> None:
         """
         Generates a CSV file containing IPNS information for each core to both cfg and run folders.
         """
@@ -363,13 +363,13 @@ def create_experiment_context(
     is_consolidated: bool,
     primary_ipc: float,
     secondary_ipc: float,
-    population_seconds: int,
+    population_seconds: float,
     phantom_cpu_ipc: float,
     # experiment sections
     image_folder: str,
     # Default parameters that can be induced from others
     experiment_name=None,
-    image_name: str=None,
+    image_name: str | None=None,
     keep_experiment_unique: bool = True,
     use_image_directly: bool = False,
     loadvm_name: str = "",
@@ -456,4 +456,4 @@ def get_capital_dict(variable: BaseModel):
     """
     Converts a list of variable names to a dictionary with uppercase keys.
     """
-    return {var.upper(): getattr(variable, var) for var in variable.__fields__.keys()}
+    return {var.upper(): getattr(variable, var) for var in type(variable).model_fields.keys()}
