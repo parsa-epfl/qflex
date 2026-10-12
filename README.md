@@ -30,7 +30,7 @@ The following tools should be installed to start QFlex
 
 ### 2. Clone repositories
 ```sh
-git clone --recursive git@github.com:parsa-epfl/qflex.git
+git clone --recursive https://github.com/parsa-epfl/qflex.git
 ```
 
 ### 3. Install uv for the python requirements

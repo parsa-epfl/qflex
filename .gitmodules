@@ -1,10 +1,10 @@
 [submodule "flexus"]
 	path = flexus
-	url = git@github.com:parsa-epfl/flexus.git
+	url = https://github.com/parsa-epfl/flexus.git
 	branch = develop
 [submodule "timing-qemu"]
 	path = timing-qemu
-	url = git@github.com:parsa-epfl/qemu.git
+	url = https://github.com/parsa-epfl/qemu.git
 	branch = develop
 [submodule "WormCache"]
 	path = WormCache

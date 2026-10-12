@@ -14,12 +14,6 @@ Follow these steps to set up the CLI and start the Docker image.
 
 - **Git** and **Python 3.9+**
 - **Docker** running locally (Docker Desktop on Windows, Docker Engine on Linux)
-- (Optional) **SSH key** configured for GitHub if using the SSH clone URL
-
-!!! note "Cloning over SSH"
-    The command below uses the SSH URL. Ensure your GitHub SSH key is set up and loaded (e.g., `ssh -T git@github.com`).  
-    Prefer HTTPS? Replace the URL accordingly.
-
 ---
 
 ## 1) Clone the repository
@@ -27,7 +21,7 @@ Follow these steps to set up the CLI and start the Docker image.
 <!-- termynal -->
 ``` bash
 
-$ git clone --recursive git@github.com:parsa-epfl/qflex.git
+$ git clone --recursive https://github.com/parsa-epfl/qflex.git
 $ cd qflex
 
 ```
@@ -129,10 +123,4 @@ You should see qflex command-line options.
     Start Docker Desktop (Windows) or the Docker daemon (Linux):  
     ```bash
     systemctl status docker
-    ```
-
-    **SSH clone fails**  
-    Test your SSH setup:  
-    ```bash
-    ssh -T git@github.com
     ```
