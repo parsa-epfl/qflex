@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 import json
 import os
+import shutil
 import subprocess
 import pandas
 
@@ -32,6 +33,29 @@ MEMORY_CONTROLLER_POSITIONS = {
 }
 # Where `just kraken` puts the Flexus simulators (the Docker image copies them to /home/dev/qflex/kraken_out).
 KRAKEN_FOLDERS = ["./out/kraken", "/home/dev/qflex/kraken_out"]
+
+# Files copied into each experiment's run folder: name in run/ -> (candidate sources, recipe that builds them).
+# The Docker image keeps the QEMU builds in ./*-qemu-saved/ (the QEMU sources are not part of the image),
+# while a native build leaves them in the submodules; the first existing candidate is used.
+RUN_FILES = {
+    "qemu-system-aarch64": (["./fw-qemu-saved/build/qemu-system-aarch64", "./fw-qemu/build/qemu-system-aarch64"], "just fw-qemu"),
+    "vanilla-qemu-system-aarch64": (["./timing-qemu-saved/build/qemu-system-aarch64", "./timing-qemu/build/qemu-system-aarch64"], "just timing-qemu"),
+    "efi-virtio.rom": (["./fw-qemu-saved/pc-bios/efi-virtio.rom", "./fw-qemu/pc-bios/efi-virtio.rom"], "git submodule update --init fw-qemu"),
+    "qemu-img": (["./qemu-img", "./fw-qemu/build/qemu-img"], "just fw-qemu"),
+    "QEMU_EFI.fd": (["./QEMU_EFI.fd"], "git checkout QEMU_EFI.fd"),
+    "debug.cfg": (["./debug.cfg"], "git checkout debug.cfg"),
+}
+# bxdb CLI (built by `just bxdb`), used by run_partitions.sh and partition-cleanup
+BXDB_CLI = "./bxdb/target/release/bxdb"
+
+
+def find_run_file(name: str) -> str:
+    """Returns the first existing source of RUN_FILES[name], or raises with the recipe that builds it."""
+    candidates, recipe = RUN_FILES[name]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    raise FileNotFoundError(f"Error: {name} not found (looked for {', '.join(candidates)}). Get it with `{recipe}`.")
 
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
@@ -270,6 +294,11 @@ class ExperimentContext(BaseModel):
         if not os.path.exists(f"{self.image_folder}"):
             os.makedirs(f"{self.image_folder}")
 
+        # Find the built files first, so a missing build fails before the image is copied.
+        run_files = {name: find_run_file(name) for name in RUN_FILES}
+        if not os.path.exists(BXDB_CLI):
+            raise FileNotFoundError(f"Error: bxdb CLI not found at {BXDB_CLI}. Build it with `just bxdb`.")
+
         self.set_up_image()
 
 
@@ -297,33 +326,11 @@ class ExperimentContext(BaseModel):
             print(f"moved {file} to experiment folder")
 
 
-        # check that both build/qemu-system-aarch64 exists in run folder plus efi-virtio.rom
-        # link all of them
         # TODO check if rom and bios files can be linked from fw-qemu-saved when using timing-qemu
-        # TODO check why files are being turned into bz2
-        
-        run_files = [
-            "./fw-qemu-saved/build/qemu-system-aarch64", 
-            # TODO if we ever decide to change EFI and bios, this needs to change
-            "./QEMU_EFI.fd", 
-            "./timing-qemu-saved/build/qemu-system-aarch64",
-            "./fw-qemu-saved/pc-bios/efi-virtio.rom",
-            "./qemu-img",
-            "debug.cfg",
-        ]
-        for f in run_files:
-
-            if "fw-qemu-saved/" in f:
-                # Link as the name of the file to run folder
-                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-            elif "timing-qemu-saved/" in f:
-                # Link as the name of the file to run folder with
-                link_address = f"{self.get_experiment_folder_address()}/run/vanilla-{f.split('/')[-1]}"
-            else:
-                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-
-            if not os.path.exists(link_address):
-                os.system(f"cp -u {f} {link_address}")
+        for name, source in run_files.items():
+            target = f"{self.get_experiment_folder_address()}/run/{name}"
+            if not os.path.exists(target):
+                shutil.copy2(source, target)
         # TODO turn WormCache address into a parameter
         # Copy WormCache to lib folder, if it doesn't exist we should throw an error
         if not os.path.exists(f"./WormCache"):
@@ -339,10 +346,7 @@ class ExperimentContext(BaseModel):
             if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/{f}"):
                 os.system(f"cp {kraken_folder}/{f} {self.get_experiment_folder_address()}/lib/{f}")
 
-        # bxdb CLI (built by `just bxdb`), used by run_partitions.sh and partition-cleanup
-        if not os.path.exists("./bxdb/target/release/bxdb"):
-            raise FileNotFoundError("Error: bxdb CLI not found at ./bxdb/target/release/bxdb. Build it with `just bxdb`.")
-        os.system(f"cp -u ./bxdb/target/release/bxdb {self.get_experiment_folder_address()}/bin/bxdb")
+        os.system(f"cp -u {BXDB_CLI} {self.get_experiment_folder_address()}/bin/bxdb")
 
         
 

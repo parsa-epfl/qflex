@@ -42,8 +42,8 @@ profile_flags := "-pr flexus/target/_profile/" + profile + (if extra_profile != 
 
 # ---------------------------------------------------------------------------
 
-# Build bxdb, the Rust snapshot database linked by both QEMUs, and the `bxdb` CLI
-# (bxdb-util) used to index and purge checkpoint databases between iterations.
+# The `bxdb` CLI (bxdb-util) indexes and purges checkpoint databases between iterations.
+# Build bxdb, the Rust snapshot database linked by both QEMUs, and the `bxdb` CLI.
 bxdb:
     cargo build --manifest-path bxdb/Cargo.toml -p bxdb-core -p bxdb-util --release
 

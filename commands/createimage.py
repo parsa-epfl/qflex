@@ -1,4 +1,5 @@
 from commands import Executor
+from .config import find_run_file
 import os
 
 
@@ -17,7 +18,7 @@ class CreateImage(Executor):
             os.makedirs(self.image_folder)
         # TODO force image to be in run going forward
         return [
-            f'./qemu-img create -f qcow2 {self.image_folder}/{self.image_name} {self.size_gb}G',
+            f'{find_run_file("qemu-img")} create -f qcow2 {self.image_folder}/{self.image_name} {self.size_gb}G',
             f'ls -lh {self.image_folder}/{self.image_name}',
             f"echo 'Created base image at {self.image_folder}/{self.image_name}'"
         ]
