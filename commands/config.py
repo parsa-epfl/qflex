@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import pandas
 
 from .workload import Workload, CoreGroup, create_workload
@@ -397,7 +398,14 @@ def find_prebuilt_config(mounting_folder: str, experiment_name: str, image_folde
     record = f"{mounting_folder}/experiments/{experiment_name}/run/prebuilt.json"
     if os.path.exists(record):
         with open(record) as f:
-            return json.load(f)
+            config = json.load(f)
+        # The experiment keeps the config.json it was set up with; tell the user when the download changed since.
+        source = get_prebuilt_folder(image_folder, config["id"])
+        if os.path.isfile(f"{source}/config.json") and load_prebuilt_config(source) != {k: v for k, v in config.items() if k != "id"}:
+            downloaded = f"{source}/config.json"
+            print(f"Warning: {record} differs from {downloaded}, which changed after the experiment was set up. "
+                  f"The experiment keeps using {record}; start a new experiment to use the new config.json.", file=sys.stderr)
+        return config
     if not prebuilt_workload:
         return None
     source = get_prebuilt_folder(image_folder, prebuilt_workload)
