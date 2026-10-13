@@ -21,15 +21,22 @@ CORE_INFO_COEFF_COLUMNS = [
     "bx_instruction_coeff",
 ]
 
-# Memory controller locations (mesh node ids) per core count, one controller per 8 cores.
-# Flexus lays the cores out as a mesh numbered row by row (buildMesh in flexus/components/NetShim/netcontainer.cpp):
-# 16 cores 4x4, 32 cores 4x8, 48 cores 8x6, 64 cores 8x8; the controllers sit on the left and right edges.
+# Memory controller locations (mesh node ids) per supported core count. Flexus and WormCache lay the cores out
+# as a mesh numbered row by row (buildMesh in flexus/components/NetShim/netcontainer.cpp, mesh_size in
+# WormCache's hop_calculator.rs): 2 cores 1x2, 4 cores 2x2, 8 cores 2x4, 16 cores 4x4, 32 cores 4x8,
+# 48 cores 8x6 and 64 cores 8x8 (rows x columns). Up to 4 cores, every core has a controller; from 16 cores
+# on, there is one per 8 cores, in pairs on the left and right edges (the same positions as experiment-scripts,
+# except for 48 cores, whose mesh is 6 columns wide).
 # Flexus is compiled for a fixed controller count: `just kraken` builds a variant per count into out/kraken/mem<N>/.
 MEMORY_CONTROLLER_POSITIONS = {
+    1: "0",
+    2: "0,1",
+    4: "0,1,2,3",
+    8: "0",
     16: "8,15",
-    32: "8,15,16,23",
+    32: "8,15,24,31",
     48: "6,11,24,29,36,41",
-    64: "8,15,24,31,32,40,47,56",
+    64: "8,15,24,31,32,39,48,55",
 }
 # Where `just kraken` puts the Flexus simulators (the Docker image copies them to /home/dev/qflex/kraken_out).
 KRAKEN_FOLDERS = ["./out/kraken", "/home/dev/qflex/kraken_out"]
@@ -116,13 +123,9 @@ def create_simulation_context(
     use_cd_rom: bool=False,
 ) -> SimulationContext:
     l2_way = 16
-    # TODO check the memory for 8 and the other values
-    if core_count <= 8:
-        memory_controller_positions = "0"
-    elif core_count in MEMORY_CONTROLLER_POSITIONS:
-        memory_controller_positions = MEMORY_CONTROLLER_POSITIONS[core_count]
-    else:
-        raise ValueError(f"Unsupported core count {core_count}. Supported: 1-8, {', '.join(map(str, MEMORY_CONTROLLER_POSITIONS))}.")
+    if core_count not in MEMORY_CONTROLLER_POSITIONS:
+        raise ValueError(f"Unsupported core count {core_count}. Supported: {', '.join(map(str, MEMORY_CONTROLLER_POSITIONS))}.")
+    memory_controller_positions = MEMORY_CONTROLLER_POSITIONS[core_count]
     memory_controller_count = len(memory_controller_positions.split(","))
 
     network = get_qemu_nic_option(network)

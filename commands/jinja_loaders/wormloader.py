@@ -1,4 +1,4 @@
-from .parameterloader import ParameterLoader
+from .parameterloader import ParameterLoader, get_microarchitecture_context
 from ..config import ExperimentContext
 
 class WormConfigLoader(ParameterLoader):
@@ -12,11 +12,4 @@ class WormConfigLoader(ParameterLoader):
         )
 
     def get_context(self):
-        return {
-            "L2_SET" : self.experiment_context.simulation_context.l2_set,
-            "L2_WAY" : self.experiment_context.simulation_context.l2_way,
-            "DIRECTORY_SET" : self.experiment_context.simulation_context.directory_set,
-            "DIRECTORY_WAY": self.experiment_context.simulation_context.directory_way,
-            "DOUBLED_VCPU": self.experiment_context.simulation_context.doubled_vcpu,
-            "CORE_COUNT": self.experiment_context.simulation_context.core_count,
-        }
+        return get_microarchitecture_context(self.experiment_context)

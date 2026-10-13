@@ -81,8 +81,8 @@ flexus sim="knottykraken" mem="":
         cp "$lib" out/kraken/mem{{mem}}/
     fi
 
-# Memory controller counts the simulators are built for: one controller per 8 cores, so these cover
-# 1-8 (1), 16 (2), 32 (4), 48 (6) and 64 (8) cores. Must match MEMORY_CONTROLLERS in commands/config.py.
+# Memory controller counts the simulators are built for, covering 1 and 8 (1), 2 and 16 (2), 4 and 32 (4),
+# 48 (6) and 64 (8) cores. Must match MEMORY_CONTROLLER_POSITIONS in commands/config.py.
 kraken_mem_counts := "1 2 4 6 8"
 
 # qflex picks the variant matching the experiment's core count.
