@@ -255,7 +255,9 @@ def image_pull(
         workload = prebuilt.find_workload(catalog, workload_id)
     else:
         print_prebuilt_table(catalog, image_folder, numbered=True)
-        choice = typer.prompt("Number of the workload to download", type=typer.IntRange(1, len(catalog)))
+        choice = typer.prompt("Number of the workload to download", type=int)
+        while not 1 <= choice <= len(catalog):
+            choice = typer.prompt(f"Enter a number between 1 and {len(catalog)}", type=int)
         workload = catalog[choice - 1]
     folder = prebuilt.pull(workload, image_folder, url)
     config = prebuilt.load_prebuilt_config(folder)
