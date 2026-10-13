@@ -79,13 +79,8 @@ Create `./qflex.args` (a.k.a. *qflex.common.args*) with **one argument per line*
 --parallel
 --network none
 --memory-gb 32
---host-name ZEN3
 --workload-name web-search
 --population-seconds 5
---no-consolidated
---primary-ipc 2.0
---primary-core-start 0
---phantom-cpu-ipc 4
 --experiment-name experiment_name_001
 --image-name root.qcow2
 --image-folder <MOUNT_DIR>/<IMAGE_DIR>
@@ -131,15 +126,35 @@ $ ./qflex image pull 16c/dc --image-folder <MOUNT_DIR>/<IMAGE_DIR>
 - Without an ID, `image pull` lets you choose from a numbered list.
 - Files go to `<IMAGE_DIR>/prebuilt/<id>/` and are read-only. An interrupted download resumes when you run `image pull` again.
 
-Then, in `qflex.args`, replace `--image-name` and `--use-image-directly` with the workload ID, and set the machine to the workload's `config.json` (qflex checks them and prints the right flags on a mismatch):
+The workload's `config.json` describes the machine the snapshot was taken on and the workload itself, so `qflex.args` only keeps the simulation settings:
 ```text
 --prebuilt-workload 16c/dc
 --image-folder <MOUNT_DIR>/<IMAGE_DIR>
+--mounting-folder <MOUNT_DIR>
+--experiment-name experiment_name_001
+--quantum-size-ns 2000
+--llc-size-per-tile-mb 2
+--parallel
 --no-unique
 ```
 
+- `--core-count`, `--double-cores`, `--memory-gb`, `--network` and `--workload-name` come from `config.json`. The snapshot only restores on its own machine, so qflex rejects machine flags that do not match.
+- `--population-seconds` defaults to the workload's `suggested_population_seconds`; pass it to override.
+- `--groups` defaults to the workload's vCPU groups (see [Core groups](#core-groups)).
 - The first command on the experiment copies `root.qcow2` into the experiment's `run/` folder and links `base.zstd` next to it; the choice is recorded in `run/prebuilt.json`, so later commands use that copy.
 - `--loadvm-name` defaults to `base`, so you can run [Init Warm](#3-init-warm) directly.
+
+### Core groups
+
+The vCPUs are split into groups, given as `name:cores[:ipc]`:
+```text
+--groups "dc:0-7:0.6,ws:8-15:4.2,phantom:16-31:4"
+```
+- Each measured group runs one workload; more than one group makes a consolidated workload.
+- With `--double-cores`, the `phantom` group holds the client vCPUs `N…2N-1` of an `N`-core experiment.
+- The IPC is the starting estimate written to `cfg/core_info.csv` (default 2, phantom 4), until [`train`](#8-updating-core_infocsv) fits the IPC model.
+- Without `--groups` (and without a prebuilt workload), all cores form one group.
+- `result` and `train` use the measured groups as their default `--core-groups`.
 
 ---
 
@@ -310,10 +325,10 @@ After the detailed simulation is done you can collect the results and decide whe
 <!-- termynal -->
 ```bash
 
-$ xargs -a ./qflex.args -- ./qflex result --core-groups "0-7,8-15"
+$ xargs -a ./qflex.args -- ./qflex result
 
 ```
-This collects all measurements into `timing.csv` in the experiment folder and checks the sampling error for each core group. The suggested sample size for the next iteration is written to `NEXT_SAMPLE_SIZE`, and the command exits with code 255 if the sampling error bound is not met. It does not modify `core_info.csv`.
+This collects all measurements into `timing.csv` in the experiment folder and checks the sampling error for each core group (by default the measured [groups](#core-groups), or `--core-groups "0-7,8-15"`). The suggested sample size for the next iteration is written to `NEXT_SAMPLE_SIZE`, and the command exits with code 255 if the sampling error bound is not met. It does not modify `core_info.csv`.
 
 ## 8) Updating core_info.csv
 Functional warming uses `cfg/core_info.csv` to model the speed of each core. It has one row per vCPU in the following 9-column format:
@@ -324,11 +339,11 @@ host_core_idx,model_type,ipns,bx_private_icache_miss_coeff,bx_private_dcache_mis
 - `host_core_idx`: the host core the vCPU thread is pinned to.
 - `model_type`: `constant` uses a fixed `ipns` (instructions per ns); `ipc-model` requires `ipns=1.0` and estimates the time from the coefficients (ns per event).
 
-The initial file uses the constant model with the IPC given at initialization. After the `result` command, train the IPC model for each core group (plus per-ASID models in `run/asid_info.csv`):
+The initial file uses the constant model with the IPC of each [group](#core-groups). After the `result` command, train the IPC model for each core group (plus per-ASID models in `run/asid_info.csv`):
 <!-- termynal -->
 ```bash
 
-$ xargs -a ./qflex.args -- ./qflex train --core-groups "0-7,8-15"
+$ xargs -a ./qflex.args -- ./qflex train
 
 ```
 The previous `cfg/core_info.csv` is backed up with a timestamp before it is replaced.

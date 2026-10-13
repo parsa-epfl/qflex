@@ -5,8 +5,7 @@ import shutil
 import subprocess
 import pandas
 
-from .host import Host, SMTHost, HOSTS, HostType
-from .workload import Workload, create_workload
+from .workload import Workload, CoreGroup, create_workload
 from .prebuilt import get_prebuilt_folder, load_prebuilt_config, parse_memory_gb
 import datetime
 
@@ -102,6 +101,7 @@ class SimulationContext(BaseModel):
     is_parallel: bool = Field(default=True, description="whether the simulation is parallel or not")
     check_period_quantum_coeff: float = Field(default=53.0, description="Coefficient to determine the check period based on quantum size")
     use_cd_rom: bool = Field(default=False, description="Whether to use a CD-ROM for initial setup.")
+    machine_freq_ghz: float = Field(default=2.0, description="Frequency of the simulated cores in GHz, converts IPC to instructions per ns")
 
 def get_qemu_nic_option(network: str) -> str:
     if 'none' == network.strip().lower():
@@ -121,6 +121,7 @@ def create_simulation_context(
     memory_gb: int,
     check_period_quantum_coeff: float=53.0,
     use_cd_rom: bool=False,
+    machine_freq_ghz: float=2.0,
 ) -> SimulationContext:
     l2_way = 16
     if core_count not in MEMORY_CONTROLLER_POSITIONS:
@@ -144,11 +145,8 @@ def create_simulation_context(
         is_parallel=is_parallel,
         check_period_quantum_coeff=check_period_quantum_coeff,
         use_cd_rom=use_cd_rom,
+        machine_freq_ghz=machine_freq_ghz,
     )
-
-class IPNSInfo(BaseModel):
-    core_index: int = Field(description="Index of the core")
-    ipns: float = Field(description="IPNs for the core")
 
 class ExperimentContext(BaseModel):
     """
@@ -159,14 +157,12 @@ class ExperimentContext(BaseModel):
     image_folder: str = Field(description="Address of the image to use")
     image_name: str = Field(description="Name of the image to use")
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
-    host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
     mounting_folder: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
     keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
-    include_affinity: bool = Field(default=False, description="Whether host_core_idx in core_info.csv follows the host core sequence (otherwise vCPU i -> host core i).")
     prebuilt_workload: str = Field(default="", description="ID of a prebuilt workload (e.g. 16c/dc) to start the experiment from, see ./qflex image list.")
 
     def get_mounting_folder(self) -> str:
@@ -279,10 +275,9 @@ class ExperimentContext(BaseModel):
         }
         mismatches = [f"  {name}: prebuilt {want}, experiment {got}" for name, (want, got) in expected.items() if want != got]
         if mismatches:
-            double = "--double-cores" if config["cpu_cores"] == 2 * config["measured_core_count"] else "--no-double-cores"
             raise ValueError(
                 f"Error: the experiment does not match prebuilt workload {self.prebuilt_workload}:\n" + "\n".join(mismatches)
-                + f"\nUse: --core-count {config['measured_core_count']} {double} --memory-gb {parse_memory_gb(config['memory'])} --network {config['network_card']}"
+                + "\nThese settings are read from the workload's config.json: remove --core-count, --double-cores, --memory-gb and --network."
             )
 
     def set_up_folders(self):
@@ -363,62 +358,20 @@ class ExperimentContext(BaseModel):
                 return os.path.abspath(f"{folder}/{variant}")
         raise FileNotFoundError(f"Error: no Flexus simulators for {self.simulation_context.mem_controller_count} memory controllers ({variant}) in {' or '.join(KRAKEN_FOLDERS)}. Build them with `just kraken`.")
 
-    def get_ipns_per_core(self) -> list[IPNSInfo]:
-
-        # TODO This part looks messy to me, we need to revisit it later 
-        is_consolidated = self.workload.IPC_info.is_consolidated
-        has_client = self.simulation_context.doubled_vcpu
-        core_list = self.host.get_core_sequence_as_list()
-        results: list[IPNSInfo] = []
-        
-        core_count = self.simulation_context.core_count
-
-        primary_ipc = self.workload.IPC_info.primary_ipc
-        secondary_ipc = self.workload.IPC_info.secondary_ipc
-        phantom_ipc = self.workload.IPC_info.phantom_cpu_ipc
-        min_ipc = self.workload.IPC_info.min_ipc
-        machine_freq_ghz = self.workload.IPC_info.machine_freq_ghz
-        ipns_primary = round(primary_ipc * machine_freq_ghz, 2)
-        ipns_secondary = round(secondary_ipc * machine_freq_ghz, 2)
-        ipns_phantom = round(
-            phantom_ipc * machine_freq_ghz / min_ipc * primary_ipc,
-            2
-        )
-
-        if not is_consolidated:
-            for core_idx in range(core_count):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_primary))
-        else:
-            primary_core_start = self.workload.core_range.primary_core_start
-            secondary_core_start = self.workload.core_range.secondary_core_start
-            # TODO check this with shanqing, changed this so you can give core numbers that are actually used unlike the og script
-            for core_idx in range(primary_core_start, secondary_core_start):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_primary))
-            for core_idx in range(secondary_core_start, core_count):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_secondary))
-            
-        if has_client:
-            for core_idx in range (core_count, core_count * 2):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_phantom))
-
-        return results
-    
     def get_ipns_csv(self) -> None:
         """
         Generates a CSV file containing IPNS information for each core to both cfg and run folders.
         """
-        # TODO check on this as well as we talked about removing the dependancy between host and target
         # Check if file exists, if it does not exist create a default one
         target = f'{self.get_experiment_folder_address()}/cfg/core_info.csv'
         if not os.path.exists(target):
             # 9-column format parsed by fw-qemu (tcg_parse_core_info_file). Every vCPU starts
-            # with the constant model; `./qflex train` later switches cores to the ipc-model.
-            # fw-qemu always pins vCPU i to host_core_idx, so without affinity we keep its
-            # default mapping (vCPU i -> host core i).
+            # with the constant model at the IPC of its group; `./qflex train` later switches cores
+            # to the ipc-model. fw-qemu pins vCPU i to host_core_idx, here host core i.
             rows = []
-            for vcpu_idx, ipns_info in enumerate(self.get_ipns_per_core()):
-                host_core_idx = ipns_info.core_index if self.include_affinity else vcpu_idx
-                rows.append([host_core_idx, "constant", ipns_info.ipns] + [0.0] * len(CORE_INFO_COEFF_COLUMNS))
+            for vcpu_idx, ipc in enumerate(self.workload.ipc_per_vcpu()):
+                ipns = round(ipc * self.simulation_context.machine_freq_ghz, 2)
+                rows.append([vcpu_idx, "constant", ipns] + [0.0] * len(CORE_INFO_COEFF_COLUMNS))
             df = pandas.DataFrame(rows, columns=["host_core_idx", "model_type", "ipns"] + CORE_INFO_COEFF_COLUMNS)
             df.to_csv(target, index=False)
         else:
@@ -436,25 +389,35 @@ class ExperimentContext(BaseModel):
         
 
 
+def find_prebuilt_config(mounting_folder: str, experiment_name: str, image_folder: str, prebuilt_workload: str) -> dict | None:
+    """
+    config.json of the prebuilt workload of the experiment: run/prebuilt.json once the experiment is set up
+    (so later commands do not need --prebuilt-workload), else the downloaded one. None without a prebuilt workload.
+    """
+    record = f"{mounting_folder}/experiments/{experiment_name}/run/prebuilt.json"
+    if os.path.exists(record):
+        with open(record) as f:
+            return json.load(f)
+    if not prebuilt_workload:
+        return None
+    source = get_prebuilt_folder(image_folder, prebuilt_workload)
+    if not os.path.isfile(f"{source}/config.json"):
+        raise FileNotFoundError(f"Error: prebuilt workload {prebuilt_workload} not found in {source}. Download it with `./qflex image pull {prebuilt_workload} --image-folder {image_folder}`.")
+    return load_prebuilt_config(source)
+
+
 def create_experiment_context(
-    core_count: int,
     quantum_size: int,
-    doubled_vcpu: bool,
     llc_size_per_tile_mb: int,
     is_parallel: bool,
-    network: str,
-    memory_gb: int,
-    # Host section:
-    host_name: str,
-    # Workload section:
-    workload_name: str,
-    primary_core_start: int,
-    secondary_core_start: int,
-    is_consolidated: bool,
-    primary_ipc: float,
-    secondary_ipc: float,
-    population_seconds: float,
-    phantom_cpu_ipc: float,
+    # Machine and workload: read from the config.json of --prebuilt-workload when not given
+    core_count: int | None,
+    doubled_vcpu: bool | None,
+    network: str | None,
+    memory_gb: int | None,
+    workload_name: str | None,
+    groups: list[CoreGroup] | None,
+    population_seconds: float | None,
     # experiment sections
     image_folder: str,
     # Default parameters that can be induced from others
@@ -467,29 +430,12 @@ def create_experiment_context(
     # Default for simulation context
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
-    machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
-    include_affinity: bool = False,
+    machine_freq_ghz: float = 2.0,
     prebuilt_workload: str = "",
 ) -> ExperimentContext:
-    # assert False
-    # TODO add how to create experiment name
-
-    
     # TODO check this to make sure it doesn't have edge cases
     mounting_folder = os.path.abspath(mounting_folder)
     image_folder = os.path.abspath(image_folder)
-
-    workload = create_workload(
-        workload_name=workload_name,
-        primary_core_start=primary_core_start,
-        secondary_core_start=secondary_core_start,
-        is_consolidated=is_consolidated,
-        primary_ipc=primary_ipc,
-        secondary_ipc=secondary_ipc,
-        phantom_cpu_ipc=phantom_cpu_ipc,
-        population_seconds=population_seconds,
-        machine_freq_ghz=machine_freq_ghz,
-    )
 
     if image_name is None:
         image_name = f"root.qcow2"
@@ -501,6 +447,27 @@ def create_experiment_context(
         # Add date time to prevent overwriting
         experiment_name = experiment_name + '-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
+    # A prebuilt workload describes its machine and workload; given flags take precedence
+    # (set_up_prebuilt_image rejects machine flags that do not match the snapshot).
+    config = find_prebuilt_config(mounting_folder, experiment_name, image_folder, prebuilt_workload)
+    if config is not None:
+        measured = config["measured_core_count"]
+        core_count = measured if core_count is None else core_count
+        doubled_vcpu = config["cpu_cores"] == 2 * measured if doubled_vcpu is None else doubled_vcpu
+        network = config["network_card"] if network is None else network
+        memory_gb = parse_memory_gb(config["memory"]) if memory_gb is None else memory_gb
+        workload_name = workload_name or config["workload"]
+        # Older config.json files have no groups nor population: one group with the default IPCs.
+        if groups is None and "groups" in config:
+            groups = [CoreGroup(**g) for g in config["groups"]]
+        if population_seconds is None:
+            population_seconds = config.get("suggested_population_seconds")
+    missing = [flag for flag, value in [("--core-count", core_count), ("--double-cores/--no-double-cores", doubled_vcpu),
+                                        ("--network", network), ("--memory-gb", memory_gb)] if value is None]
+    if missing:
+        raise ValueError(f"Error: missing {', '.join(missing)} (required without --prebuilt-workload).")
+    assert core_count is not None and doubled_vcpu is not None and network is not None and memory_gb is not None
+
     simulation_context = create_simulation_context(
         core_count=core_count,
         quantum_size=quantum_size,
@@ -511,29 +478,28 @@ def create_experiment_context(
         memory_gb=memory_gb,
         check_period_quantum_coeff=check_period_quantum_coeff,
         use_cd_rom=use_cd_rom,
+        machine_freq_ghz=machine_freq_ghz,
     )
 
-    if host_name.upper() not in HostType.__members__.keys():
-        raise ValueError(f"Host type {host_name} not recognized. Available types: {list(HostType.__members__.keys())}")
-    host_type = HostType[host_name.upper()]
-    host = HOSTS[host_type]
+    workload = create_workload(
+        workload_name=workload_name or "workload",
+        groups=groups,
+        core_count=core_count,
+        doubled_vcpu=doubled_vcpu,
+        population_seconds=population_seconds,
+    )
 
-    
-
-    
     e = ExperimentContext(
         experiment_name=experiment_name,
         image_folder=image_folder,
         image_name=image_name,
         keep_experiment_unique=keep_experiment_unique,
         simulation_context=simulation_context,
-        host=host,
         workload=workload,
         mounting_folder=mounting_folder,
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
-        include_affinity=include_affinity,
         prebuilt_workload=prebuilt_workload,
     )
 

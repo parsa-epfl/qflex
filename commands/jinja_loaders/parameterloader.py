@@ -40,7 +40,7 @@ def get_microarchitecture_context(experiment_context: ExperimentContext) -> dict
         # Worker threads for parallel checkpoint (de)serialization; must divide the simulated core count.
         "CHECKPOINT_POOL_SIZE": max(1, simulation.core_count // 4) if simulation.is_parallel else 1,
         # Flexus' phantom-cpu:estimated_ipc is an integer.
-        "CLIENT_ESTIMATED_IPC": int(experiment_context.workload.IPC_info.phantom_cpu_ipc),
+        "CLIENT_ESTIMATED_IPC": int(experiment_context.workload.phantom_ipc()),
         # WormCache features (all on: full-system simulation with the MMU and the SMS prefetcher).
         "ENABLE_MMU": True,
         "SMS_PREFETCHING": True,

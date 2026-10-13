@@ -16,8 +16,11 @@ class FunctionalWarming(Executor):
         self.simulation_context = self.experiment_context.simulation_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
         self.sample_size = sample_size
+        population = self.experiment_context.workload.population
+        if population is None:
+            raise ValueError("Error: functional warming needs --population-seconds (the config.json of this prebuilt workload has no suggested population).")
         self.sampling_interval = math.ceil(
-            (self.experiment_context.workload.population + self.sample_size - 1) / self.sample_size
+            (population + self.sample_size - 1) / self.sample_size
         )
 
 
