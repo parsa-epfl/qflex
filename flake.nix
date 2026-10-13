@@ -56,6 +56,8 @@
       stdenv = pkgs.llvmPackages_19.stdenv;
     } {
       packages = buildInputs;
+      # Certificates for cargo to download crates in a pure shell (`nix develop -i`), which drops the host's.
+      SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
       shellHook = ''
         echo "QFlex Nix shell ready. Build the whole stack with: just all"
       '';

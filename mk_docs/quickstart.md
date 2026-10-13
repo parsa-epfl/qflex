@@ -1,148 +1,125 @@
 ---
 title: QFlex - Statistical Sampling Quickstart, Fast and Accurate Simulation
-description: You bring a workload and a question; QFlex brings fast, accurate answers. This guide walks you through the steps to set up and run a statistical sampling experiment using QFlex.
+description: Run a statistical sampling experiment with QFlex, from a prebuilt workload to the simulation result.
 tags: [getting-started, QFlex, args, reproducibility, performance, sampling, statistical-simulation, tutorial]
 ---
 
 # Let's get started
 
+This guide runs one full iteration of statistical sampling on a **prebuilt workload**, from downloading it to the
+simulation result, and then shows how to iterate. Each step ends with a **Check** of what it should produce.
+
 ---
+
 ## Overview of the workflow
+
 ``` mermaid
 graph TD
-  B[Boot] --> L{Load};
-  L --> I[Initialization];
+  W[Prebuilt workload, or Boot + Load] --> I[Init Warm];
   I --> F[Functional Warming];
   F --> P[Partitioning];
   P --> RP[Run Partitions];
   RP --> R[Results];
   R --> C{Check Results};
   C -->|Number of Samples Is Enough| Fi[Finished];
-  C ---->|Number of Samples Is Not Enough| U[Update Sample Number];
-  U --> CleanPartition[Clean Up Partitions, Removes Old Files];
+  C ---->|Number of Samples Is Not Enough| T[Train the timekeeping model];
+  T --> CleanPartition[Clean Up Partitions];
   CleanPartition --> F;
 ```
-By the end of this tutorial, you will have run through the entire workflow of statistical sampling. You will also learn why each step is necessary.
 
-## 0) Prerequisites
-
-
-!!! note "Before you begin"
-    Make sure your environment is ready using **one** of the following ways:
-    
-    - **All requirements installed locally**, **or**
-    - **You’ve started the Docker environment with the `dep` helper** (see [Installation](installation.md) and [Docker](reference/docker.md)):
-      ```bash
-      uv run ./dep start-docker --worm --mounting-folder <MOUNT_DIR>
-      ```
----
-
-### Create the base image
-
-Before booting, create a base image in the **same directory** you use for `--image-folder` and `--working-directory` in your shared args file.
-
-### Command
-<!-- termynal -->
-```bash
-
-$ ./qflex create-base-image --image-folder <YOUR_FOLDER>
-
-```
-
-- Set `<YOUR_FOLDER>` to the path you use in `qflex.args`:
-  ```text
-  --image-folder <YOUR_FOLDER>
-  ```
-- By default, the image name aligns with your args (e.g., `--image-name root.qcow2` if you kept the template).
-
-!!! tip "See all options"
-    Explore additional flags for sizing, format, or naming:
-    ```bash
-    ./qflex create-base-image --help
-    ```
-    Keep `--image-folder` consistent with your later steps so snapshots and artifacts stay together.
-
+- **Init Warm** warms the long-term microarchitectural state (caches, TLBs, branch predictors) once per experiment.
+- **Functional Warming** runs the workload over the population and takes a checkpoint per sample.
+- **Partitioning** and **Run Partitions** simulate every checkpoint in detail, in parallel.
+- **Results** computes the sampling error and the sample size the next iteration needs.
 
 ---
 
-## Create a shared args file (and the run pattern)
+## 0) Before you begin
 
-To avoid repeating long flag lists, keep common options in a single file and pass them to `qflex` with `xargs`.
-Create `./qflex.args` (a.k.a. *qflex.common.args*) with **one argument per line**.
+QFlex is built and `./qflex --help` works (see [Installation](installation.md)). Run every command from the
+repository root, and outside the Nix shell if you built with Nix.
 
-**Template (replace `<MOUNT_DIR>`):**
-```text
---core-count 8
---double-cores
---quantum-size-ns 2000
---llc-size-per-tile-mb 2
---parallel
---network none
---memory-gb 32
---workload-name web-search
---population-seconds 5
---experiment-name experiment_name_001
---image-name root.qcow2
---image-folder <MOUNT_DIR>/<IMAGE_DIR>
---mounting-folder <MOUNT_DIR>
---check-period-quantum-coeff 53.0
---no-unique --use-image-directly
-```
+The examples use two folders:
 
-!!! tip "Inline flags are possible, but"
-    You can pass these flags directly on the command line, but keeping them in `qflex.args` avoids duplication and reduces mistakes.
-
-**Run pattern using `xargs`**  
-Use `xargs` to feed the file’s flags to `./qflex`:
-<!-- termynal -->
-```bash
-
-$ xargs -a ./qflex.args -- ./qflex boot
-
-```
-Add any **run-specific** flags after the command:
-<!-- termynal -->
-```bash
-
-$ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
-
-```
+- `<MOUNT_DIR>`: holds the experiments, in `<MOUNT_DIR>/experiments/<experiment name>/`;
+- `<IMAGE_DIR>`: holds the downloaded workloads, e.g. `<MOUNT_DIR>/images`.
 
 ---
 
-## Alternative: start from a prebuilt workload
+## 1) Download a prebuilt workload
 
-Instead of creating an image and running **Boot** and **Load** yourself, you can download a prebuilt workload: a disk (`root.qcow2`) and a snapshot `base` (`base.zstd`) in which the workload already runs in steady state. You can then go straight to [Init Warm](#3-init-warm).
+A prebuilt workload is a disk (`root.qcow2`) and a snapshot `base` (`base.zstd`) in which the workload already
+runs in steady state, plus a `config.json` describing the machine and the workload. IDs are
+`<core count>/<workload>`, e.g. `2c/djd` or `16c/dc-ws`.
 
-List the available workloads (IDs are `<core count>/<workload>`, e.g. `16c/dc`) and download one:
 <!-- termynal -->
 ```bash
 
 $ ./qflex image list
-$ ./qflex image pull 16c/dc --image-folder <MOUNT_DIR>/<IMAGE_DIR>
+$ ./qflex image pull 2c/djd --image-folder <IMAGE_DIR>
 
 ```
 
+- `image list` shows every workload with its size; with `--image-folder`, it also marks the downloaded ones.
 - Without an ID, `image pull` lets you choose from a numbered list.
-- Files go to `<IMAGE_DIR>/prebuilt/<id>/` and are read-only. An interrupted download resumes when you run `image pull` again.
+- An interrupted download resumes when you run `image pull` again.
 
-The workload's `config.json` describes the machine the snapshot was taken on and the workload itself, so `qflex.args` only keeps the simulation settings:
+**Check.** `<IMAGE_DIR>/prebuilt/2c/djd/` holds `root.qcow2`, `base.zstd` and `config.json` (read-only), and
+`image pull` printed the machine: `cpu_cores=4 measured_core_count=2 memory=64G network_card=none`.
+
+??? info "What is in `config.json`"
+    ```json
+    {
+      "workload": "djd",
+      "measured_core_count": 2,
+      "cpu_cores": 4,
+      "memory": "64G",
+      "network_card": "none",
+      "suggested_population_seconds": 10,
+      "groups": [
+        {"name": "djd", "cores": "0-1", "ipc": 2},
+        {"name": "phantom", "cores": "2-3", "ipc": 4}
+      ],
+      ...
+    }
+    ```
+    The machine settings must match the snapshot; the population and the [core groups](#core-groups) are
+    defaults you can override.
+
+---
+
+## 2) Create the shared args file
+
+Every command needs the same experiment options. Keep them in `./qflex.args`, **one argument per line**, and
+pass them with `xargs`:
+
 ```text
---prebuilt-workload 16c/dc
---image-folder <MOUNT_DIR>/<IMAGE_DIR>
+--prebuilt-workload 2c/djd
+--image-folder <IMAGE_DIR>
 --mounting-folder <MOUNT_DIR>
---experiment-name experiment_name_001
+--experiment-name djd-2c-001
 --quantum-size-ns 2000
 --llc-size-per-tile-mb 2
 --parallel
 --no-unique
 ```
 
-- `--core-count`, `--double-cores`, `--memory-gb`, `--network` and `--workload-name` come from `config.json`. The snapshot only restores on its own machine, so qflex rejects machine flags that do not match.
-- `--population-seconds` defaults to the workload's `suggested_population_seconds`; pass it to override.
-- `--groups` defaults to the workload's vCPU groups (see [Core groups](#core-groups)).
-- The first command on the experiment copies `root.qcow2` into the experiment's `run/` folder and links `base.zstd` next to it; the choice is recorded in `run/prebuilt.json`, so later commands use that copy.
-- `--loadvm-name` defaults to `base`, so you can run [Init Warm](#3-init-warm) directly.
+<!-- termynal -->
+```bash
+
+$ xargs -a ./qflex.args -- ./qflex <command> [command options]
+
+```
+
+!!! warning "Write full paths"
+    `xargs` passes the lines as they are: it does not expand `~` or `$VARIABLES`, so write absolute paths.
+
+- `--core-count`, `--double-cores`, `--memory-gb`, `--network` and `--workload-name` come from `config.json`.
+  The snapshot only restores on the machine it was taken on, so qflex rejects values that do not match.
+- `--population-seconds` defaults to the workload's `suggested_population_seconds`; set it lower (e.g. `1`) for a
+  quick test.
+- `--groups` defaults to the workload's groups (see [Core groups](#core-groups)).
+- `--no-unique` only silences a deprecation message: the experiment folder is always named `--experiment-name`.
 
 ### Core groups
 
@@ -150,152 +127,65 @@ The vCPUs are split into groups, given as `name:cores[:ipc]`:
 ```text
 --groups "dc:0-7:0.6,ws:8-15:4.2,phantom:16-31:4"
 ```
-- Each measured group runs one workload; more than one group makes a consolidated workload.
+
+- Each measured group runs one workload; more than one group makes a **consolidated** workload.
 - With `--double-cores`, the `phantom` group holds the client vCPUs `N…2N-1` of an `N`-core experiment.
-- The IPC is the starting estimate written to `cfg/core_info.csv` (default 2, phantom 4), until [`train`](#8-updating-core_infocsv) fits the IPC model.
+- The IPC is the starting estimate written to `cfg/core_info.csv` (default 2, phantom 4), until
+  [`train`](#8-next-iteration) fits the IPC model.
 - Without `--groups` (and without a prebuilt workload), all cores form one group.
 - `result` and `train` use the measured groups as their default `--core-groups`.
 
 ---
 
-## 1) Boot to bring up the OS and install requirements
-
-Use the `boot` action to start the OS with your common arguments. Once the VM is up, install your workload’s dependencies inside the qemu image (e.g., package manager installs, copying configs, etc.).
-<!-- termynal -->
-```bash
-
-$ xargs -a ./qflex.args -- ./qflex boot --use-cd-rom
-
-```
-
-- This brings up the VM using the CPU/memory/ defined in `qflex.args`.
-- With `--image-folder` and `--working-directory` pointing to your mount, you can place existing qemu images in `<MOUNT_DIR>` and access them from within the docker contianer and skip this step.
-
----
-
-### Save a snapshot of the image and qemu monitor
-
-Once the VM is in the desired state:
-
-1. Open the QEMU monitor: press **Ctrl+A**, pause briefly, then press **C**.  
-   You should see a prompt like `(qemu)`.
-
-2. Save a snapshot:
-   ```text
-   (qemu) savevm boot
-   ```
-!!! tip "Snapshot name"
-    You can change the snapshot name if you want but this name is used in later steps in this tutorial.
-
-!!! info "What you have now"
-    You’ve created a reusable image snapshot that has your workload dependencies installed and is ready for the next steps.
-
-
----
-
-## 2) Load
-
-**Load** restores the prepared VM state you saved after boot and where you can start the workload, and each core will have a clock.
-
----
-
-## Restore the snapshot and start the workload
-
-Use the snapshot saved in the previous step (created from the QEMU monitor with `savevm boot`) and load it:
-<!-- termynal -->
-```bash
-
-$ xargs -a ./qflex.args -- ./qflex load \
-  --loadvm-name boot
-
-```
-
-Afterwards you can run your commands to start your workload within qemu.
-
-- The value for `--loadvm-name` should match the snapshot you saved in **Section 2 (Boot)**:
-  <!-- termynal -->
-  ```text
-
-  (qemu) savevm boot
-
-  ```
-
-Once you have started your workload started you can save a snapshot by bringing up qemu monitor and saving a snapshot:
-  <!-- termynal -->
-  ```text
-
-  (qemu) savevm loaded
-
-  ```
----
-
-### Why “Load” is needed
-
-Workloads often have multiple components that must respect **order** and **time** as they are starting, i.e. a web server must start after the database is up and running and if the components are running on different cores they need to be started within a certain time window of each other. The **Load** step allows you to script and orchestrate this process.
-
----
-
 ## 3) Init Warm
 
-**Init Warm** initializes long-term microarchitectural states—such as **caches**, **branch predictors**, and **TLBs** so that **functional warming** can start.
-
----
-
-### Run init warm
-
-Load from the prior **loaded** snapshot and initialize the microarchitectural state:
 <!-- termynal -->
 ```bash
 
-$ xargs -a ./qflex.args -- ./qflex initialize \
-  --loadvm-name loaded
+$ xargs -a ./qflex.args -- ./qflex initialize
 
 ```
 
-- `--loadvm-name loaded` should match the snapshot produced in **Section 4 (Load)**.
+The first command of an experiment sets it up from the prebuilt workload: it copies `root.qcow2` into the
+experiment's `run/` folder, links `base.zstd`, and records the workload in `run/prebuilt.json`. Later commands use
+this record, so they keep working even without `--prebuilt-workload`. `--loadvm-name` defaults to `base`.
 
-!!! note "Initialization notes"
-    This step makes sure all long-term state have been initialized, therefore make sure you have started the workload, as without a workload using the resources, this step will execute for a long time.
+Init Warm then generates the configuration, builds the experiment's WormCache plugin (with `cargo`, see
+[Installation](installation.md)), and runs the workload until the long-term state is warm. It saves the result as
+the snapshot **`init_warmed`**.
 
----
+**Check.** In `<MOUNT_DIR>/experiments/djd-2c-001/`:
 
-### Snapshot created automatically
+- `run/` has `root.qcow2`, `base.zstd` (a link), `prebuilt.json`, and at the end `init_warmed.*`
+  (`init_warmed.bxdb`, `.state.zstd`, `.uarch`);
+- `cfg/` has `parameter.rs`, `flexus_configuration.json`, `timing.cfg` and `core_info.csv`, with one row per vCPU
+  (for `2c/djd`, vCPUs 0–1 at ipns 4.0 and the phantom vCPUs 2–3 at 8.0, i.e. IPC × 2 GHz);
+- `lib/` has `libknottykraken.so`, `libsemikraken.so` and `libworm_cache.so`; `bin/` has `checkpoint_conversion`
+  and `bxdb`.
 
-Upon successful initialization, a QEMU snapshot named **`init_warmed`** is created on the image.  
-This snapshot captures the initialized microarchitectural state so subsequent stages can start from a consistent baseline.
-
-!!! info "What you have now"
-    A VM snapshot (**`init_warmed`**) with warmed long-term microarchitectural state, ready for the next step.
-    This step and all the steps before it only need to be done once per workload, unless changing the workload configuration.
+!!! info "Once per experiment"
+    Init Warm only runs once; every iteration below starts again from `init_warmed`.
 
 ---
 
 ## 4) Functional Warming
 
-**Functional warming** runs the VM forward for the configured **population length** (in seconds) and emits **checkpoints** that will be used later for timing (detailed) simulation.
-
----
-
-### Run functional warming
-
-Start from the **init_warmed** snapshot created in the previous step:
 <!-- termynal -->
 ```bash
 
-$ xargs -a ./qflex.args -- ./qflex fw \
-  --loadvm-name init_warmed --sample-size 30
+$ xargs -a ./qflex.args -- ./qflex fw --loadvm-name init_warmed --sample-size 30
 
 ```
 
-- The warm length is controlled by your common args (e.g., `--population-seconds 0.00001`).
-- Output includes **checkpoints** that later stages can load to run short, timing simulation.
-- `--sample-size 30` controls how many checkpoints are created. You can adjust this number based on your needs and the results you get from the timing simulation in later steps.
+Functional warming runs the workload from `init_warmed` over the population and takes `--sample-size` checkpoints,
+evenly spaced, keeping the microarchitectural state warm in between.
+
+**Check.** `run/` has `snapshot_0` … `snapshot_29` (`.bxdb-meta`, `.state.zstd` and `.uarch` each).
 
 ---
 
 ## 5) Partitioning
 
-After checkpoints are created from functional warming, you can split the checkpoints into partitions to be ran in parallel during detailed simulation (using flexus). 
 <!-- termynal -->
 ```bash
 
@@ -303,78 +193,147 @@ $ xargs -a ./qflex.args -- ./qflex partition --partition-count 16
 
 ```
 
-You can adjust the `--partition-count` to fit your needs.
+The checkpoints are split into partitions that are simulated in parallel. All partitions run at the same time, so
+choose at most the number of host cores you can spare.
 
-- This creates folders named `partition_0`, `partition_1`, ..., `partition_15` in the run folder of the experiments folder (for `--partition-count 16`).
+**Check.** `run/partition_0` … `run/partition_15`, each with its share of the checkpoints and a `run_flexus.sh`.
 
+---
+
+## 6) Run Partitions
+
+To run detailed simulation with 200-us detailed warming and 100-us measurement:
+
+<!-- termynal -->
+```bash
+
+$ xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement-ratio 1
+
+```
+
+qflex first builds the index of the checkpoint database (`run/init_warmed.bxdb/index.bxdb`). Then each partition
+simulates its checkpoints one after the other: it converts the checkpoint to Flexus' format
+(`snapshot_<n>-flexus/`), runs the detailed simulation, warming twice as many cycles as it measures, and moves the
+logs to `result_<n>/`.
+
+**Check.** The output of each partition goes to `run/partition_<i>/log` and `err`, not to the terminal:
+<!-- termynal -->
+```bash
+
+$ tail -f <MOUNT_DIR>/experiments/djd-2c-001/run/partition_0/log
+$ ls -d <MOUNT_DIR>/experiments/djd-2c-001/run/partition_*/result_* | wc -l
+
+```
+The second command counts the simulated checkpoints; the step is done when it reaches the sample size.
+
+!!! tip "Debugging one partition"
+    Run a partition by itself, with the same ratios, to see its output directly:
+    ```bash
+    cd <MOUNT_DIR>/experiments/djd-2c-001/run/partition_0 && ./run_flexus.sh 2 1
+    ```
 
 ---
 
-## 6) Running Partitions
-After creating the partitions you will have the script that manages running all partitions in timing simulation using flexus. 
-```
-xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement-ratio 1
-```
-This command will run all the partitions with spending twice as much cycles warming as measuring. You can adjust the `--warming-ratio` and `--measurement-ratio`.
+## 7) Results
 
-Before starting the partitions, it builds the B-tree index (`index.bxdb`) of the checkpoint database in the run folder (e.g. `init_warmed.bxdb`), so that the timing simulations can look up the memory pages of each checkpoint directly.
-
----
-## 7) Collecting Results
-After the detailed simulation is done you can collect the results and decide whether or not you want to reiterate from the functional warming step. 
 <!-- termynal -->
 ```bash
 
 $ xargs -a ./qflex.args -- ./qflex result
 
 ```
-This collects all measurements into `timing.csv` in the experiment folder and checks the sampling error for each core group (by default the measured [groups](#core-groups), or `--core-groups "0-7,8-15"`). The suggested sample size for the next iteration is written to `NEXT_SAMPLE_SIZE`, and the command exits with code 255 if the sampling error bound is not met. It does not modify `core_info.csv`.
 
-## 8) Updating core_info.csv
-Functional warming uses `cfg/core_info.csv` to model the speed of each core. It has one row per vCPU in the following 9-column format:
-```
-host_core_idx,model_type,ipns,bx_private_icache_miss_coeff,bx_private_dcache_miss_coeff,bx_shared_cache_miss_coeff,bx_bp_miss_coeff,bx_drain_store_buffer_coeff,bx_instruction_coeff
-0,constant,4.0,0.0,0.0,0.0,0.0,0.0,0.0
-```
-- `host_core_idx`: the host core the vCPU thread is pinned to.
-- `model_type`: `constant` uses a fixed `ipns` (instructions per ns); `ipc-model` requires `ipns=1.0` and estimates the time from the coefficients (ns per event).
+`result` collects every measurement into `timing.csv` and computes the sampling error of each core group (the
+measured [groups](#core-groups) by default, or `--core-groups "0-7,8-15"`).
 
-The initial file uses the constant model with the IPC of each [group](#core-groups). After the `result` command, train the IPC model for each core group (plus per-ASID models in `run/asid_info.csv`):
+**Check.** The experiment folder has `timing.csv` and `NEXT_SAMPLE_SIZE`, the sample size that meets the error
+bound (`--error`, default 5% at `--confidence` 95%). The exit code tells whether this iteration is enough:
+
+- `0`: the bound is met, the experiment is **finished**;
+- `255`: the bound is not met yet, run the next iteration. This is not a failure.
+
+`result` does not modify `cfg/core_info.csv`; `train` does.
+
+---
+
+## 8) Next iteration
+
+Functional warming models the speed of each vCPU with `cfg/core_info.csv`. The first iteration used the IPC
+estimates of the groups; `train` fits an IPC model from `timing.csv`, which makes the next functional warming more
+accurate. Then clean up and warm again with the suggested sample size:
+
 <!-- termynal -->
 ```bash
 
 $ xargs -a ./qflex.args -- ./qflex train
-
-```
-The previous `cfg/core_info.csv` is backed up with a timestamp before it is replaced.
-
-## 9) Re-iterating
-If you decide to reiterate you should first clean up the checkpoints of this iteration.
-<!-- termynal -->
-```bash
-
 $ xargs -a ./qflex.args -- ./qflex partition-cleanup
+$ xargs -a ./qflex.args -- ./qflex fw --loadvm-name init_warmed --sample-size $(cat <MOUNT_DIR>/experiments/djd-2c-001/NEXT_SAMPLE_SIZE)
+$ xargs -a ./qflex.args -- ./qflex partition --partition-count 16
+$ xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement-ratio 1
+$ xargs -a ./qflex.args -- ./qflex result
 
 ```
-Once `cfg/core_info.csv` is updated, set the sample size (see `NEXT_SAMPLE_SIZE`) and re-iterate from the functional warming step.
-<!-- Warning that this will remove all partition folders and their contents -->
-!!! warning "Warning"
-    This removes all partition folders and their contents, together with the checkpoints. It also drops the B-tree index of the checkpoint database and purges every checkpoint except the base snapshot from it, so that functional warming can append new checkpoints. Make sure you have collected any necessary data before running this command.
 
+Repeat until `result` exits with `0`.
 
+- `train` replaces `cfg/core_info.csv` (the previous one is kept as `core_info.csv.<timestamp>`) and writes the
+  per-ASID models to `run/asid_info.csv`.
+- `partition-cleanup` removes the partitions and the checkpoints, and drops them from the checkpoint database,
+  keeping `init_warmed`. Collect anything you need from the partitions first.
 
-<!-- Tip for debugging -->
-!!! tip "Debugging timing simulation"
-    The previous command runs all the partitions in parallel so you will not see the output of each partition. To debug a specific partition you can run it directly using the following command:
-    <!-- termynal -->
-    ```bash
-
-    $ cd /mnt_folder/experiments/<experiment_name>/run/partition_0/run_flexus.sh
-
+??? info "Format of `core_info.csv`"
+    One row per vCPU:
     ```
-    You can change `partition_0` to the partition you want to debug.
+    host_core_idx,model_type,ipns,bx_private_icache_miss_coeff,bx_private_dcache_miss_coeff,bx_shared_cache_miss_coeff,bx_bp_miss_coeff,bx_drain_store_buffer_coeff,bx_instruction_coeff
+    0,constant,4.0,0.0,0.0,0.0,0.0,0.0,0.0
+    ```
+    - `host_core_idx`: the host core the vCPU thread is pinned to.
+    - `model_type`: `constant` uses a fixed `ipns` (instructions per ns); `ipc-model` requires `ipns=1.0` and
+      estimates the time from the coefficients (ns per event).
 
+---
 
+## The experiment folder
 
+| Path | Content |
+|------|---------|
+| `cfg/` | Generated configuration: `parameter.rs` (WormCache), `flexus_configuration.json`, `timing.cfg`, `core_info.csv` |
+| `lib/` | Flexus simulators and the WormCache plugin; `lib/WormCache/` is the copy it was built from |
+| `bin/` | `checkpoint_conversion` and `bxdb` |
+| `run/` | Disk, snapshots, checkpoints and partitions |
+| `timing.csv`, `NEXT_SAMPLE_SIZE` | Output of `result` |
 
+!!! note "Disk use"
+    Each experiment has its own copy of `root.qcow2` and its own WormCache build (`lib/WormCache/target`, about
+    700 MB). WormCache is built per experiment because its cache configuration (`cfg/parameter.rs`) is compiled
+    into the plugin.
 
+---
+
+## Troubleshooting
+
+??? warning "Common issues"
+    **`Warning: .../run/prebuilt.json differs from .../config.json`**
+    The experiment was set up before the workload's `config.json` changed (e.g. after a new `image pull`). The
+    experiment keeps its own copy; use a new `--experiment-name` to start from the new `config.json`.
+
+    **`Error: functional warming needs --population-seconds`**
+    The workload's `config.json` has no `suggested_population_seconds` (or the experiment was set up from an older
+    one, see above): pass `--population-seconds`.
+
+    **`... prebuilt 64, experiment 32 ... These settings are read from the workload's config.json`**
+    Remove `--core-count`, `--double-cores`, `--memory-gb` and `--network` from `qflex.args`.
+
+    **`run/root.qcow2 already exists`**
+    The experiment name is taken by an experiment set up from another image; choose a new `--experiment-name`.
+
+    **Paths with `~` or `$VAR` are not found**
+    `xargs` does not expand them; write absolute paths in `qflex.args`.
+
+---
+
+## Bring your own workload
+
+To simulate a workload that is not prebuilt, create the image and the snapshot yourself with
+`create-base-image`, `boot` and `load`, then continue with [Init Warm](#3-init-warm). See
+[Your own workload](own-workload.md).

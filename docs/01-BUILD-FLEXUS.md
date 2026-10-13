@@ -11,7 +11,7 @@ Docker builds all follow the same path. The environment only provides the
 toolchain/dependencies:
 
 * **bare**: install the system packages + `rustup`, then run `just ...`
-* **Nix**: `nix develop`, then run `just ...`
+* **Nix**: `nix develop -i --keep HOME` (a pure shell), then run `just ...`
 * **Docker**: `./build docker` (the image runs the same recipes)
 
 ```bash

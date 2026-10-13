@@ -3,7 +3,8 @@
 # commands below are shared by all of them:
 #
 #   * bare    : system packages + rustup                 -> `just all`
-#   * nix     : `nix develop` (Flexus uses CMake there)  -> `just all`
+#   * nix     : `nix develop -i --keep HOME`, a pure shell  -> `just all`
+#               (Flexus uses CMake there)
 #   * docker  : the Dockerfile installs the deps and
 #               calls the same recipes                   -> `just ...`
 #
@@ -42,9 +43,14 @@ profile_flags := "-pr flexus/target/_profile/" + profile + (if extra_profile != 
 
 # ---------------------------------------------------------------------------
 
+# qflex builds WormCache for every experiment; it reads this file to use the same environment (nix or native).
+# Record the build environment in out/build-env.
+_build-env:
+    mkdir -p out && echo {{ if env("IN_NIX_SHELL", "") == "" { "native" } else { "nix" } }} > out/build-env
+
 # The `bxdb` CLI (bxdb-util) indexes and purges checkpoint databases between iterations.
 # Build bxdb, the Rust snapshot database linked by both QEMUs, and the `bxdb` CLI.
-bxdb:
+bxdb: _build-env
     cargo build --manifest-path bxdb/Cargo.toml -p bxdb-core -p bxdb-util --release
 
 # With `mem`, the simulator is built for that many memory controllers and copied to out/kraken/mem<mem>/.

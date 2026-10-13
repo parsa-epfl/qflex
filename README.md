@@ -23,39 +23,33 @@ QFlex can be found in the [documentation](https://parsa-epfl.github.io/qflex/qui
 
 ### 1. Tools
 
-The following tools should be installed to start QFlex
+- [git](https://git-scm.com/)
+- [uv](https://docs.astral.sh/uv/), which runs the `./qflex` CLI
+- [Nix](https://nixos.org/) with flakes or [docker](https://www.docker.com/), to build the simulation stack
 
-- [Python, pip](https://www.python.org/) >= 3.9
-- [docker](https://www.docker.com/)
-
-### 2. Clone repositories
+### 2. Clone the repository
 ```sh
 git clone --recursive https://github.com/parsa-epfl/qflex.git
-```
-
-### 3. Install uv for the python requirements
-The CLI's Python dependencies are locked in `pyproject.toml` / `uv.lock` and managed by [uv](https://docs.astral.sh/uv/).
-Install uv once (e.g. `curl -LsSf https://astral.sh/uv/install.sh | sh`, or `nix profile install nixpkgs#uv`),
-then run the CLI from the repository root. Its shebang runs it through uv, and the first run creates `.venv` from the lock file:
-```sh
 cd qflex
+```
+
+### 3. Build the simulation stack
+With Nix, in a pure shell:
+```sh
+nix develop -i --keep HOME --command just all
+```
+Or start the Docker image, which contains the built stack:
+```sh
+uv run ./dep start-docker --worm --mounting-folder <MOUNT_DIR>
+```
+
+### 4. Run the CLI
+From the repository root (inside the Docker container if you use Docker):
+```sh
 ./qflex --help
 ```
-Inside the Docker image the environment is already installed, so `./qflex` works directly.
 
-
-### 4. Start the docker image
-
-```sh
-uv run ./dep --start-docker --worm
-```
-
-### 5. Show the help from QFlex cli inside the docker image
-```sh
-./qflex --help
-```
-
-### 6. Follow the quick start guide
+### 5. Follow the quick start guide
 Follow the quick start on our documentation page: [Quick Start Guide](https://parsa-epfl.github.io/qflex/quickstart/). The guide will help you start your workload and study it using QFlex. It will also help you understand how statistical sampling helps with both accuracy and speed and how to use it within QFlex.
 
 
