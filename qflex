@@ -148,8 +148,8 @@ def partition_cleanup(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def run_partition(
     experiment_context: ExperimentContext,
-    warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
-    measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
+    warming_ratio: Annotated[int, typer.Option(help="Detailed warming before each measurement, in units of 100 us (100K cycles of the 1 GHz uncore): 2 = 200 us.")] = 2,
+    measurement_ratio: Annotated[int, typer.Option(help="Measurement after the warming, in units of 100 us (100K cycles of the 1 GHz uncore): 1 = 100 us.")] = 1,
 ):
     """
     This command runs the detailed (timing) simulations for each partition created by the partition command.
@@ -165,8 +165,8 @@ def run_partition(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def result(
     experiment_context: ExperimentContext,
-    unit_size: Annotated[int, typer.Option(help="Size of the sampling unit in terms of INTERVAL (100K cycles).")] = 1,
-    index: Annotated[int, typer.Option(help="Index of the sampling unit to analyze.")] = 2,
+    unit_size: Annotated[int, typer.Option(help="Size of the sampling unit in intervals of 100 us (100K uncore cycles); match run-partition --measurement-ratio.")] = 1,
+    index: Annotated[int, typer.Option(help="Index of the sampling unit to analyze, counted in units of --unit-size; the default 2 (with --unit-size 1) skips the warming of run-partition --warming-ratio 2.")] = 2,
     core_groups: Annotated[str, typer.Option(help='Core groups to analyze separately, e.g. "0-7,8-15". Default: the measured groups of the workload (see --groups).')] = "",
     confidence: Annotated[float, typer.Option(help="Confidence level for the sample size calculation.")] = 95.0,
     error: Annotated[float, typer.Option(help="Acceptable sampling error.")] = 0.05,
@@ -194,8 +194,8 @@ def result(
 def train(
     experiment_context: ExperimentContext,
     core_groups: Annotated[str, typer.Option(help='Core groups that each get their own IPC model, e.g. "0-7,8-15". Default: the measured groups of the workload (see --groups).')] = "",
-    interval_index: Annotated[int, typer.Option(help="Index of the sampling interval used to train the per-core IPC model.")] = 2,
-    cycle_range: Annotated[str, typer.Option(help='Cycle range "START-END" used to train the per-ASID models.')] = "200000-300000",
+    interval_index: Annotated[int, typer.Option(help="Index of the 100 us interval used to train the per-core IPC model; the default 2 is the first measured one after --warming-ratio 2.")] = 2,
+    cycle_range: Annotated[str, typer.Option(help='Uncore cycle range "START-END" (1 GHz, so 100000 = 100 us) used to train the per-ASID models; the default is the measurement after --warming-ratio 2.')] = "200000-300000",
 ):
     """
     This command trains the IPC model from the timing.csv produced by the result command.

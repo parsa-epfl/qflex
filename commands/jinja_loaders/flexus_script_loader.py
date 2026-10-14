@@ -2,6 +2,10 @@ import os
 from .parameterloader import ParameterLoader
 from ..config import ExperimentContext
 
+# Flexus counts its cycles (the cycles= stop and stats interval of libqflex) on the uncore clock. At 1 GHz, one
+# cycle is 1 ns, so 100000 cycles are 100 us: the unit of run-partition's --warming-ratio and --measurement-ratio.
+UNCORE_FREQ_GHZ = 1.0
+
 
 class FlexusScriptLoader(ParameterLoader):
     def __init__(self,
@@ -26,4 +30,10 @@ class FlexusScriptLoader(ParameterLoader):
             "DOUBLED_VCPU": self.experiment_context.simulation_context.doubled_vcpu,
             "MEMORY": self.experiment_context.simulation_context.memory_gb * 1024,  # in MB
             "QEMU_NIC": self.experiment_context.simulation_context.qemu_nic.strip().lower(),
+            "FLEXUS_FREQ": self.flexus_freq(),
         }
+
+    def flexus_freq(self) -> str:
+        """libqflex freq=: the GHz of each simulated core, then of the uncore, e.g. "2:2:1" for 2 cores."""
+        simulation = self.experiment_context.simulation_context
+        return ":".join([f"{simulation.machine_freq_ghz:g}"] * simulation.core_count + [f"{UNCORE_FREQ_GHZ:g}"])

@@ -211,10 +211,14 @@ $ xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement
 
 ```
 
+`--warming-ratio` and `--measurement-ratio` are in units of **100 µs** of simulated time: `1` is 100 µs, `2` is
+200 µs. Flexus counts time on the uncore clock (1 GHz, while the cores run at 2 GHz), and one unit is 100,000
+uncore cycles. Each checkpoint is simulated for the warming, then measured; the statistics are recorded every
+100 µs.
+
 qflex first builds the index of the checkpoint database (`run/init_warmed.bxdb/index.bxdb`). Then each partition
 simulates its checkpoints one after the other: it converts the checkpoint to Flexus' format
-(`snapshot_<n>-flexus/`), runs the detailed simulation, warming twice as many cycles as it measures, and moves the
-logs to `result_<n>/`.
+(`snapshot_<n>-flexus/`), runs the detailed simulation, and moves the logs to `result_<n>/`.
 
 **Check.** The output of each partition goes to `run/partition_<i>/log` and `err`, not to the terminal:
 <!-- termynal -->
@@ -253,6 +257,12 @@ bound (`--error`, default 5% at `--confidence` 95%). The exit code tells whether
 - `255`: the bound is not met yet, run the next iteration. This is not a failure.
 
 `result` does not modify `cfg/core_info.csv`; `train` does.
+
+!!! note "Other warming or measurement lengths"
+    By default, `result` analyzes the third 100 µs interval (`--index 2`), the measurement right after
+    `--warming-ratio 2`. With other lengths, point it at the measurement: e.g. after `--warming-ratio 4
+    --measurement-ratio 2`, use `result --unit-size 2 --index 2` (units of 200 µs: the warming is units 0–1), and
+    `train --interval-index 4 --cycle-range 400000-600000`.
 
 ---
 

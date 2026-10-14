@@ -63,14 +63,15 @@ def load_sampling_unit(csv_path: str, unit_size: int, index: int) -> tuple[np.nd
     console.print(f"[green]Snapshots: {shape[0]}, cores: {shape[2]}, measurement points: {shape[1]}[/green]")
 
     def unit_delta(column: str) -> np.ndarray:
-        # Counters are cumulative: sample every unit_size-th point, then take per-unit differences.
-        cumulative = np.zeros(shape)
-        cumulative[snapshot_idx, point_idx, core_idx] = df[column].to_numpy()
+        # Counters are cumulative from cycle 0: with the zero point in front, unit `index` is the difference between
+        # the points at cycles index * unit_size and (index + 1) * unit_size intervals.
+        cumulative = np.zeros((shape[0], shape[1] + 1, shape[2]))
+        cumulative[snapshot_idx, point_idx + 1, core_idx] = df[column].to_numpy()
         cumulative = cumulative[:, ::unit_size, :]
-        if index >= cumulative.shape[1]:
-            console.print(f"[red]Error: Index {index} is out of bounds. Maximum index is {cumulative.shape[1] - 1}[/red]")
+        if index + 1 >= cumulative.shape[1]:
+            console.print(f"[red]Error: Index {index} is out of bounds. Maximum index is {cumulative.shape[1] - 2}[/red]")
             sys.exit(1)
-        return cumulative[:, index, :] - (cumulative[:, index - 1, :] if index > 0 else 0)
+        return cumulative[:, index + 1, :] - cumulative[:, index, :]
 
     return unit_delta("instruction:u"), unit_delta("halted_cycles")
 
