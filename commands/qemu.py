@@ -164,6 +164,7 @@ class QemuCommonArgParser:
         # this parser owns. Callers do not — and must not — append their own;
         # they get the right one for this parser's binary type via dispatch.
         qemu_args += self.quantum_args()
+        qemu_args += f" {self.experiment_context.extra_qemu_args} "
 
         print("="*50+"QEMU command arguments:"+"="*50)
         print(qemu_args)
@@ -242,7 +243,8 @@ class VanillaQemuArgParser(QemuCommonArgParser):
         single_step_command + \
         log_command + \
         lib_qflex_command + \
-        mode_command
+        mode_command + \
+        f" {self.experiment_context.extra_qemu_args} "
         print("="*50+"QEMU command arguments:"+"="*50)
         print(qemu_args)
         return qemu_args

@@ -1,0 +1,365 @@
+#!/usr/bin/env expect
+# SINGLE-NODE MS load over TWO self-connected PDES NICs (conf/MS/ms-single-2nic.yaml).
+# Same server/client flow as load_savevm_loaded_single.exp, but the client container gets its own
+# network namespace holding NIC1 (mac 52:54:00:aa:bb:01), the server stays in the root namespace on
+# NIC0 (mac …:00, 192.168.100.1). The client namespace has only lo + NIC1, so every request can only
+# leave through NIC1 -> PDES ring -> NIC0; hammar's 127.0.0.1 is DNAT'd to 192.168.100.1 in that
+# namespace (no DNAT => connection refused, never a silent loopback fallback).
+# NIC0 IRQs/RPS/XPS pinned to cpu 0 (server), NIC1's to cpu 1 (client). Every check prints a
+# `QFLEX2NIC …` line into expect_log.txt and aborts the load on failure.
+
+set timeout 900
+
+set BUDGET_INITIAL_S        10
+set BUDGET_DEFAULT_S         5
+set BUDGET_PROMPT_S         120
+set BUDGET_WORKLOAD_INIT_S 86400
+set BUDGET_CHECKPOINTING_S 1800
+
+set serial_port  $env(TELNET_SERIAL_PORT)
+set monitor_port $env(TELNET_MONITOR_PORT)
+set exp_folder   $env(EXP_FOLDER)
+
+set MAC_NIC0 "52:54:00:aa:bb:00"
+set MAC_NIC1 "52:54:00:aa:bb:01"
+set MAC_INET "52:54:00:12:34:56"
+
+catch {file mkdir $exp_folder}
+log_file -noappend "$exp_folder/expect_log.txt"
+
+proc connect_telnet {host port {budget_seconds 5}} {
+    global timeout
+    set saved_timeout $timeout
+    set timeout 5
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        spawn telnet $host $port
+        set this_sid $spawn_id
+        set ok 0
+        expect {
+            -re "Escape character is" { set ok 1 }
+            -re "Connection refused" { }
+            timeout { }
+            eof { }
+        }
+        if {$ok} {
+            set timeout $saved_timeout
+            return $this_sid
+        }
+        catch {close -i $this_sid}
+        catch {wait -i $this_sid}
+        sleep 2
+    }
+    set timeout $saved_timeout
+    error "connect_telnet: gave up after ${budget_seconds}s polling $host:$port"
+}
+
+proc quit_qemu {monitor_port} {
+    global BUDGET_DEFAULT_S
+    if {[catch {connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S} sid]} {
+        return
+    }
+    set timeout $BUDGET_DEFAULT_S
+    expect {
+        -i $sid
+        timeout { puts "quit_qemu: monitor didn't prompt" }
+        "(qemu) " {
+            send -i $sid "quit\r"
+            catch {expect -i $sid eof}
+        }
+    }
+}
+
+proc die {msg} {
+    global monitor_port
+    note "ERROR: $msg"
+    quit_qemu $monitor_port
+    exit 1
+}
+
+# Log a line to both stdout (Load.log) and expect_log.txt.
+proc note {msg} { puts $msg; send_log "$msg\n" }
+
+# Run a guest command; the PID-suffixed marker never matches the echoed command line (a trailing `&` needs no `;`).
+proc run {cmd {budget 120}} {
+    set timeout $budget
+    set sep [expr {[string index $cmd end] eq "&" ? " " : "; "}]
+    send "$cmd${sep}printf 'QEOC%s\\n' \"\$\$\"\r"
+    expect {
+        timeout { die "timed out: $cmd" }
+        -re {QEOC[0-9]+}
+    }
+}
+
+# Run a guest command that must succeed.
+proc check {name cmd {budget 120}} {
+    set timeout $budget
+    send "( $cmd ) && printf 'CHKOK%s\\n' \"\$\$\" || printf 'CHKFAIL%s\\n' \"\$\$\"\r"
+    expect {
+        timeout { die "check '$name' timed out" }
+        -re {CHKFAIL[0-9]+} { die "check '$name' failed" }
+        -re {CHKOK[0-9]+} { note "QFLEX2NIC check '$name' ok" }
+    }
+}
+
+# --- 1. Serial prompt (post-loadvm) -------------------------------------------
+
+set serial_sid [connect_telnet 127.0.0.1 $serial_port $BUDGET_INITIAL_S]
+set spawn_id $serial_sid
+set timeout $BUDGET_PROMPT_S
+send "\r"
+expect {
+    timeout { die "shell prompt timed out after loadvm" }
+    -re {[\$#] +}
+}
+sleep 5
+
+# --- 1a. Clear leftover containers (as qflex, BEFORE the root shell: that shell is itself a container) ---------------------------------------------
+run "docker stop \$(docker ps -a -q) 2>/dev/null"
+run "docker rm \$(docker ps -a -q) 2>/dev/null"
+
+# --- 1b. Become root (the image logs in as the unprivileged `qflex` user, no sudo): `su` with the qflex
+# password, else a root shell via docker (qflex is in the docker group): privileged container, / mounted, chroot.
+set root 0
+set timeout 30
+send "su -\r"
+expect {
+    -re {[Pp]assword:} { send "qflex\r"; exp_continue }
+    -re {(incorrect|failed|denied|not found)} { }
+    -re {# +} { set root 1 }
+    timeout { }
+}
+if {!$root} {
+    note "QFLEX2NIC su failed; using docker chroot root shell"
+    send "\r"; expect -re {[\$#] +}
+    set timeout $BUDGET_PROMPT_S
+    send "docker run -it --rm --privileged --pid=host --network host -v /:/host --entrypoint sh cloudsuite/media-streaming:server -c 'exec chroot /host /bin/sh'\r"
+    expect {
+        timeout { die "docker chroot root shell gave no prompt" }
+        -re {# +} { set root 1 }
+    }
+}
+check "root shell" "\[ \$(id -u) = 0 \]"
+run "cd /home/qflex"
+check "videos present in /home/qflex" "\[ -d videos \]"
+
+# --- 3. Find the NICs by MAC, never by name ------------------------------------
+set NIC0 ""; set NIC1 ""; set NICI ""
+set timeout $BUDGET_PROMPT_S
+send "for d in /sys/class/net/*; do echo QNIC \$(basename \$d) \$(cat \$d/address); done; printf 'QEOC%s\\n' \"\$\$\"\r"
+expect {
+    timeout { die "listing NICs timed out" }
+    -re "QNIC (\[a-z0-9]+) ($MAC_NIC0)" { set NIC0 $expect_out(1,string); exp_continue }
+    -re "QNIC (\[a-z0-9]+) ($MAC_NIC1)" { set NIC1 $expect_out(1,string); exp_continue }
+    -re "QNIC (\[a-z0-9]+) ($MAC_INET)" { set NICI $expect_out(1,string); exp_continue }
+    -re {QEOC[0-9]+}
+}
+if {$NIC0 eq "" || $NIC1 eq ""} { die "PDES NICs not found by MAC (nic0='$NIC0' nic1='$NIC1')" }
+note "QFLEX2NIC nic0=$NIC0 ($MAC_NIC0) nic1=$NIC1 ($MAC_NIC1) inet=$NICI"
+
+# Both NICs accessible: link up + carrier.
+check "nic0 up"      "ip link set $NIC0 up && sleep 1 && \[ \$(cat /sys/class/net/$NIC0/carrier) = 1 \]"
+check "nic1 up"      "ip link set $NIC1 up && sleep 1 && \[ \$(cat /sys/class/net/$NIC1/carrier) = 1 \]"
+
+# --- 4. Guest tools (iptables/nsenter needed for the client namespace) ----------
+set timeout $BUDGET_PROMPT_S
+set missing ""
+send "for t in ip nsenter iptables netstat nc; do which \$t >/dev/null 2>&1 || echo QMISSING \$t; done; printf 'QEOC%s\\n' \"\$\$\"\r"
+expect {
+    timeout { die "tool probe timed out" }
+    -re {QMISSING ([a-z]+)} { lappend missing $expect_out(1,string); exp_continue }
+    -re {QEOC[0-9]+}
+}
+note "QFLEX2NIC missing_tools=[join $missing ,]"
+if {[lsearch $missing ip] >= 0} { die "guest has no 'ip'" }
+if {[lsearch $missing iptables] >= 0 || [lsearch $missing nsenter] >= 0} {
+    if {$NICI eq ""} { die "need to install tools but no internet NIC ($MAC_INET) found" }
+    run "ip link set $NICI up"
+    run "udhcpc -i $NICI" 300
+    run "echo 'nameserver 8.8.8.8' > /etc/resolv.conf"
+    check "internet" "ping -c 3 -W 5 8.8.8.8" 120
+    check "apk add iptables util-linux" "apk add iptables util-linux" 1800
+}
+
+# --- 5. Pin NIC0 -> cpu0, NIC1 -> cpu1 (IRQ affinity + RPS/XPS), verified by read-back ----
+send "cat > ./pin_nic.sh <<'WRITE_PIN_EOF'\r"
+send "#!/bin/sh\r"
+send "NIC=\$1; CPU=\$2; MASK=\$((1<<CPU)); rc=0\r"
+send "VDEV=\$(basename \$(readlink /sys/class/net/\$NIC/device))\r"
+send "for irq in \$(grep \"\${VDEV}-\" /proc/interrupts | cut -d: -f1 | tr -d ' '); do\r"
+send "  echo \$CPU > /proc/irq/\$irq/smp_affinity_list; got=\$(cat /proc/irq/\$irq/smp_affinity_list)\r"
+send "  echo \"QFLEX2NIC pin \$NIC \$VDEV irq=\$irq cpu=\$got\"; \[ \"\$got\" = \"\$CPU\" \] || rc=1\r"
+send "done\r"
+send "for q in /sys/class/net/\$NIC/queues/rx-*; do printf '%x' \$MASK > \$q/rps_cpus; echo \"QFLEX2NIC rps \$NIC \$(basename \$q)=\$(cat \$q/rps_cpus)\"; done\r"
+send "for q in /sys/class/net/\$NIC/queues/tx-*; do printf '%x' \$MASK > \$q/xps_cpus; echo \"QFLEX2NIC xps \$NIC \$(basename \$q)=\$(cat \$q/xps_cpus)\"; done\r"
+send "exit \$rc\r"
+send "WRITE_PIN_EOF\r"
+run "chmod +x ./pin_nic.sh"
+check "pin nic0 cpu0" "./pin_nic.sh $NIC0 0"
+check "pin nic1 cpu1" "./pin_nic.sh $NIC1 1"
+
+# --- 6. Server side: NIC0 = 192.168.100.1, client MAC pinned ----------------------
+run "ip addr flush dev $NIC0; ip addr add 192.168.100.1/24 dev $NIC0"
+check "server arp pin" "arp -s 192.168.100.2 $MAC_NIC1 -i $NIC0"
+
+send "cat > ./run_server.sh <<'WRITE_SERVER_EOF'\r"
+send "#!/bin/sh\r"
+send "docker run --rm --net host --cpuset-cpus=0 \\\r"
+send "    -v \$(pwd)/videos:/videos \\\r"
+send "    -v \$(pwd)/entrypoint.sh:/etc/entrypoint.sh \\\r"
+send "    --entrypoint=/etc/entrypoint.sh \\\r"
+send "    cloudsuite/media-streaming:server\r"
+send "WRITE_SERVER_EOF\r"
+run "chmod +x ./run_server.sh"
+run "./run_server.sh > /tmp/ms_server.out 2>&1 < /dev/null &"
+puts "ms: server launched; tailing /tmp/ms_server.out for openssl cert footer '-----'..."
+send "tail -f /tmp/ms_server.out\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { die "server didn't print openssl cert footer '-----'" }
+    -re {-----}
+}
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
+puts "ms: server up. Settling 5s..."
+sleep 5
+
+# --- 7. Client container in its OWN network namespace (--network none), NIC1 moved into it ----
+# The entrypoint waits for /out/go so the network is proven before any workload traffic.
+send "cat > ./ms_client_entry.sh <<'WRITE_CLIENT_ENTRY_EOF'\r"
+send "#!/bin/sh\r"
+send "while \[ ! -f /out/go \]; do sleep 1; done\r"
+send "taskset -c 1 ./hammar/target/release/warm ./videos 1 > /out/ms_warm.out 2>&1\r"
+send "taskset -c 1 ./hammar/target/release/hammar ./videos/logs 4 8 false > /out/ms_load.out 2>&1\r"
+send "WRITE_CLIENT_ENTRY_EOF\r"
+run "chmod +x ./ms_client_entry.sh"
+run "mkdir -p msout; rm -f msout/go msout/ms_warm.out msout/ms_load.out; touch msout/ms_warm.out msout/ms_load.out"
+run "docker run -d --name media-streaming-client --network none --cpuset-cpus=1 -v \$(pwd)/videos:/videos -v \$(pwd)/msout:/out -v \$(pwd)/ms_client_entry.sh:/ms_client_entry.sh --entrypoint=/ms_client_entry.sh xusine/media-streaming:client" 600
+
+set CPID 0
+set timeout $BUDGET_PROMPT_S
+send "echo QPID \$(docker inspect -f '{{.State.Pid}}' media-streaming-client); printf 'QEOC%s\\n' \"\$\$\"\r"
+expect {
+    timeout { die "docker inspect timed out" }
+    -re {QPID ([0-9]+)} { set CPID $expect_out(1,string); exp_continue }
+    -re {QEOC[0-9]+}
+}
+if {$CPID == 0} { die "client container has no pid" }
+note "QFLEX2NIC client_pid=$CPID"
+
+# Namespace plumbing runs with the GUEST's ip/iptables via nsenter (netns is kernel state).
+send "cat > ./client_net.sh <<'WRITE_CNET_EOF'\r"
+send "#!/bin/sh\r"
+send "set -e\r"
+send "PID=\$1; NIC1=\$2; N=\"nsenter -t \$PID -n\"\r"
+send "ip link set \$NIC1 netns \$PID\r"
+send "\$N ip link set lo up\r"
+send "\$N ip link set \$NIC1 up\r"
+send "\$N ip addr add 192.168.100.2/24 dev \$NIC1\r"
+send "\$N ip route add default dev \$NIC1\r"
+send "\$N arp -s 192.168.100.1 $MAC_NIC0 -i \$NIC1\r"
+send "\$N sh -c 'echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet'\r"
+send "\$N iptables -t nat -A OUTPUT -d 127.0.0.1 -j DNAT --to-destination 192.168.100.1\r"
+send "\$N iptables -t nat -A POSTROUTING -d 192.168.100.1 -j SNAT --to-source 192.168.100.2\r"
+send "\$N ip addr show \$NIC1 | sed 's/^/QFLEX2NIC client_addr /'\r"
+send "\$N iptables -t nat -L -v -n | sed 's/^/QFLEX2NIC client_nat /'\r"
+send "WRITE_CNET_EOF\r"
+run "chmod +x ./client_net.sh"
+check "client netns plumbing" "./client_net.sh $CPID $NIC1"
+
+# --- 8. Prove the path before any workload traffic --------------------------------
+# wire RTT >= 0.15 ms (virtual time; 100 us per hop), NIC counters move, client lo does not, MACs pinned, HTTP via DNAT.
+send "cat > ./verify_path.sh <<'WRITE_VERIFY_EOF'\r"
+send "#!/bin/sh\r"
+send "PID=\$1; NIC0=\$2; NIC1=\$3; N=\"nsenter -t \$PID -n\"; rc=0\r"
+send "cnt() { \$1 awk -v i=\"\$2:\" -v f=\$3 \x27\$0 ~ \"^ *\" i {sub(/.*:/,\"\"); print \$f}\x27 /proc/net/dev; }\r"
+send "r0a=\$(cnt \"\" \$NIC0 2); t1a=\$(cnt \"\$N\" \$NIC1 10); loa=\$(cnt \"\$N\" lo 2)\r"
+send "\$N ping -c 5 -i 0.2 -W 5 192.168.100.1 > /tmp/ping_wire.out 2>&1 || rc=1\r"
+send "\$N ping -c 5 -i 0.2 -W 5 127.0.0.1 > /tmp/ping_lo.out 2>&1 || rc=1\r"
+send "r0b=\$(cnt \"\" \$NIC0 2); t1b=\$(cnt \"\$N\" \$NIC1 10); lob=\$(cnt \"\$N\" lo 2)\r"
+send "echo \"QFLEX2NIC counters nic0_rx_delta=\$((r0b-r0a)) nic1_tx_delta=\$((t1b-t1a)) client_lo_rx_delta=\$((lob-loa))\"\r"
+send "\[ \$((r0b-r0a)) -ge 10 \] && \[ \$((t1b-t1a)) -ge 10 \] && \[ \$((lob-loa)) -eq 0 \] || rc=1\r"
+send "for f in wire lo; do m=\$(grep -o 'min/avg/max\[^=\]*= \[0-9.\]*' /tmp/ping_\$f.out | grep -o '\[0-9.\]*\$'); echo \"QFLEX2NIC ping_\$f min_ms=\$m\"; awk -v m=\"\$m\" 'BEGIN{exit !(m+0 >= 0.15)}' || rc=1; done\r"
+send "\$N cat /proc/net/arp | sed 's/^/QFLEX2NIC client_arp /'; cat /proc/net/arp | sed 's/^/QFLEX2NIC server_arp /'\r"
+send "h=\$(\$N sh -c 'printf \"GET / HTTP/1.0\\r\\n\\r\\n\" | nc -w 5 127.0.0.1 80 | head -1'); echo \"QFLEX2NIC http_via_dnat \$h\"; echo \"\$h\" | grep -q HTTP/ || rc=1\r"
+send "echo \"QFLEX2NIC verify_path rc=\$rc\"; exit \$rc\r"
+send "WRITE_VERIFY_EOF\r"
+run "chmod +x ./verify_path.sh"
+check "path over the wire" "./verify_path.sh $CPID $NIC0 $NIC1" 300
+
+# --- 9. Release the client: warm then hammar load (same markers as single-node) -------
+run "touch msout/go"
+puts "ms: client released; tailing msout/ms_warm.out for 'Compressed history:'..."
+send "tail -f msout/ms_warm.out\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+expect {
+    timeout { die "warm didn't print 'Compressed history:'" }
+    -re {Compressed history:}
+}
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
+puts "ms: warm complete."
+
+puts "ms: tailing msout/ms_load.out for 'All tasks are created.' x4..."
+send "tail -f msout/ms_load.out\r"
+set timeout $BUDGET_WORKLOAD_INIT_S
+set tasks_created 0
+expect {
+    timeout { die "hammar load printed 'All tasks are created.' only $tasks_created/4 times" }
+    -re {All tasks are created\.} {
+        incr tasks_created
+        if {$tasks_created < 4} { exp_continue }
+    }
+}
+send "\003"
+set timeout $BUDGET_PROMPT_S
+expect { timeout { } -re {[\$#] +} }
+puts "ms: tasks created."
+
+# --- 10. Post-workload proof: all port-80 peers are 192.168.100.2, never 127.0.0.1 ----------
+send "cat > ./final_check.sh <<'WRITE_FINAL_EOF'\r"
+send "#!/bin/sh\r"
+send "PID=\$1; NIC0=\$2; NIC1=\$3; N=\"nsenter -t \$PID -n\"; rc=0\r"
+send "cnt() { \$1 awk -v i=\"\$2:\" -v f=\$3 \x27\$0 ~ \"^ *\" i {sub(/.*:/,\"\"); print \$f}\x27 /proc/net/dev; }\r"
+send "echo \"QFLEX2NIC final nic0 rx=\$(cnt \"\" \$NIC0 2) tx=\$(cnt \"\" \$NIC0 10)\"\r"
+send "echo \"QFLEX2NIC final nic1 rx=\$(cnt \"\$N\" \$NIC1 2) tx=\$(cnt \"\$N\" \$NIC1 10)\"\r"
+send "echo \"QFLEX2NIC final client_lo rx=\$(cnt \"\$N\" lo 2)\"\r"
+send "\[ \$(cnt \"\" \$NIC0 2) -ge 1000 \] || rc=1\r"
+send "peers=\$(netstat -tn 2>/dev/null | awk '\$4 ~ /:80\$/ {print \$5}' | cut -d: -f1 | sort | uniq -c)\r"
+send "echo \"\$peers\" | sed 's/^/QFLEX2NIC server_port80_peers /'\r"
+send "echo \"\$peers\" | grep -q '127\\.0\\.0\\.1' && rc=1\r"
+send "\$N grep -c 'dst=127.0.0.1' /proc/net/nf_conntrack 2>/dev/null | sed 's/^/QFLEX2NIC client_conntrack_dnat_entries=/'\r"
+send "echo \"QFLEX2NIC final rc=\$rc\"; exit \$rc\r"
+send "WRITE_FINAL_EOF\r"
+run "chmod +x ./final_check.sh"
+check "post-workload path" "./final_check.sh $CPID $NIC0 $NIC1" 300
+puts "ms: settling 5s host time before savevm..."
+sleep 5
+
+catch {close -i $serial_sid}
+catch {wait -i $serial_sid}
+
+# --- 11. savevm loaded via the monitor -------------------------------------------
+set monitor_sid [connect_telnet 127.0.0.1 $monitor_port $BUDGET_DEFAULT_S]
+set spawn_id $monitor_sid
+set timeout $BUDGET_DEFAULT_S
+expect {
+    timeout { puts "ERROR: monitor prompt timed out"; exit 1 }
+    "(qemu) "
+}
+set timeout $BUDGET_CHECKPOINTING_S
+send "delvm loaded\r"
+expect {
+    timeout { puts "WARN: delvm didn't return; continuing anyway" }
+    "(qemu) "
+}
+send "savevm loaded\r"
+expect {
+    timeout { puts "ERROR: savevm didn't return"; exit 1 }
+    "(qemu) "
+}
+send "quit\r"
+catch {expect eof}
+exit 0

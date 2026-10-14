@@ -6,6 +6,8 @@ _leaf_defaults:
   mounting_folder: /mnt/sdc/testing/parity/
   image_folder: /mnt/sdc/testing/parity/images-pre/
   binaries_folder: /mnt/sdc/testing/parity/builds/pre
+  # Determinism: virtio-net TX on a VIRTUAL timer + no ioeventfd (see tmp-non-det.md). Every phase.
+  pdes_nic_opts: ",ioeventfd=off,tx=timer,x-txtimer=0"
 
 components:
   experiment_context:
@@ -14,3 +16,14 @@ components:
     experiment_name: media-streaming-node-0-0-parity-pre
   experiment_context_node_1:
     experiment_name: media-streaming-node-1-0-parity-pre
+
+# Interrupt-trace probe for the timing phases (diagnostic only; lands in qemu-timing.log).
+run_idx:
+  _leaf_defaults:
+    extra_qemu_args: "-d nochain,int -trace enable=gicv3_icc_iar1_read"
+run_single_partition:
+  _leaf_defaults:
+    extra_qemu_args: "-d nochain,int -trace enable=gicv3_icc_iar1_read"
+run_partition:
+  _leaf_defaults:
+    extra_qemu_args: "-d nochain,int -trace enable=gicv3_icc_iar1_read"

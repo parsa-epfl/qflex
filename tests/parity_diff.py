@@ -1,7 +1,7 @@
 """
 Parity diff between two labels of the same experiment (read-only, host-side) — NOT a pytest test.
 
-    python -m tests.parity_diff --level <idx|partition|partitions|fw|load|fw-all|all> --ref <yaml> --cand <yaml>
+    python -m tests.parity_diff --level <idx|partition|partitions|fw|load|fw-all|all> --ref <yaml> --cand <yaml> [--partition P] [--idx I]
 
 Per node, the level selects which outputs must match byte-for-byte:
   timing  — `run/partition_<P>/result_<i>/all.measurement.*.log` (one idx, one partition, or all)
@@ -44,8 +44,11 @@ def by_name(root: str, pattern: str) -> dict:
 
 
 def stats_rows(path: str) -> list:
+    # Drop `ts` (host time) and TargetLocalCycle* (per-vCPU vts, advanced at host-timed exec exits).
     with open(path) as f:
-        return [",".join(line.split(",")[1:]) for line in f]   # drop the `ts` column
+        rows = [line.rstrip("\n").split(",") for line in f]
+    keep = [i for i, h in enumerate(rows[0]) if h != "ts" and not h.startswith("TargetLocalCycle")]
+    return [",".join(r[i] for i in keep) for r in rows]
 
 
 def tag_clocks(image_folder: str) -> dict:
@@ -121,14 +124,16 @@ def check_tag(ref, cand, name: str, diffs: list):
             diffs.append("init_warmed uarch statistics differ")
 
 
-def compare_node(ref, cand, checks: list) -> list:
+def compare_node(ref, cand, checks: list, partition=None, idx=None) -> list:
     diffs = []
     r, c = ref.get_experiment_folder_address(), cand.get_experiment_folder_address()
+    P = cand.partition_number if partition is None else partition
+    I = cand.idx if idx is None else idx
     for chk in checks:
         if chk == "timing_one":
-            check_timing(r, c, diffs, partition=cand.partition_number, idx=cand.idx)
+            check_timing(r, c, diffs, partition=P, idx=I)
         elif chk == "timing_partition":
-            check_timing(r, c, diffs, partition=cand.partition_number)
+            check_timing(r, c, diffs, partition=P)
         elif chk == "timing_all":
             check_timing(r, c, diffs)
         elif chk == "result":
@@ -147,6 +152,8 @@ def main() -> int:
     ap.add_argument("--level", required=True, choices=sorted(LEVELS))
     ap.add_argument("--ref", required=True)
     ap.add_argument("--cand", required=True)
+    ap.add_argument("--partition", type=int, default=None, help="override the YAML's partition_number")
+    ap.add_argument("--idx", type=int, default=None, help="override the YAML's idx")
     args = ap.parse_args()
     # run_idx / run_single_partition phase overlays carry partition_number / idx for the one-idx levels.
     cmd_name = {"idx": "run_idx", "partition": "run_single_partition"}.get(args.level, "result")
@@ -154,12 +161,11 @@ def main() -> int:
     assert set(ref) == set(cand), f"node sets differ: {sorted(ref)} vs {sorted(cand)}"
     all_diffs = []
     for n in sorted(ref):
-        if cand[n].all_phantom_cores and any(c.startswith("timing") or c == "result" for c in LEVELS[args.level]):
-            print(f"node {n}: all-phantom, timing/result checks skipped")
+        # An all-phantom node still emits all.measurement.*.log (libphantomkraken); only `result`
+        # (core_info/timing.csv) is skipped for it, as RunResultCommand does.
         print(f"node {n}: {ref[n].get_experiment_folder_address()}  vs  {cand[n].get_experiment_folder_address()}")
-        checks = [c for c in LEVELS[args.level]
-                  if not (cand[n].all_phantom_cores and (c.startswith("timing") or c == "result"))]
-        all_diffs += [f"node {n}: {x}" for x in compare_node(ref[n], cand[n], checks)]
+        checks = [c for c in LEVELS[args.level] if not (cand[n].all_phantom_cores and c == "result")]
+        all_diffs += [f"node {n}: {x}" for x in compare_node(ref[n], cand[n], checks, args.partition, args.idx)]
     print(f"\nPARITY[{args.level}]: " + ("MATCH" if not all_diffs else "DIFF"))
     for d in all_diffs:
         print("  " + d)

@@ -1,0 +1,33 @@
+extends: ms
+
+# Single-node MS whose guest has TWO PDES NICs wired to each other (self-links: NIC0 <-> NIC1). The
+# client (hammar) and server (nginx) talk over the PDES wire instead of the guest loopback; see
+# expects/load_savevm_loaded_single_2nic.exp. Same image as `ms` (its booted/loaded tags are replaced).
+# The pairing rule for self-links lives in ExperimentContext.get_shm_names (NIC i <-> NIC i^1).
+components:
+  experiment_context:
+    _base_: _leaf_defaults
+    experiment_name: media-streaming-single-node-2nic-0
+    node_number: 0
+    neighbor_node_list: [0, 0]
+    pdes_net_devs: [virtio-net-pci, virtio-net-pci]
+    latencies_ns_list: [100000, 100000]
+    syncs_list: ["true", "true"]
+    pdes_nic_opts: ",ioeventfd=off,tx=timer,x-txtimer=0"
+    # PDES's own per-link tx/rx accounting, one line per link at every savevm and at exit (zero cost when off).
+    extra_qemu_args: "-trace enable=pdes_link_stats"
+    # fresh qemu + parallel-qemu builds (container_compiler output copied from qemu/build, parallel-qemu/build)
+    binaries_folder: /mnt/sdb/multi-node-experiments/builds/single2nic
+
+# boot: high latency, no sync (the multi-node boot convention); no need for link statistics.
+boot:
+  components:
+    experiment_context:
+      latencies_ns_list: [1000000, 1000000]
+      syncs_list: ["false", "false"]
+      extra_qemu_args: ""
+
+load:
+  components:
+    experiment_context:
+      interaction_script: /home/dev/qflex/conf/MS/expects/load_savevm_loaded_single_2nic.exp

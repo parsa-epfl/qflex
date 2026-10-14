@@ -110,6 +110,8 @@ class ExperimentContext(BaseModel):
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     use_gdb: bool = Field(default=False, description="Wrap the qemu invocation in `gdb -ex run --args ...`. Defaults to False so leaves run qemu directly and don't depend on gdb's interactive prompt handling on segfault; opt in (e.g. in a debug YAML) when you actually want the gdb wrap.")
     binaries_folder: str = Field(default="", description="Folder holding qemu-system-aarch64 (FW/parallel) and vanilla-qemu-system-aarch64 (timing) that override the ./*-saved/build/ binaries in run/. Written per label by `make stash-build`; empty = use the -saved trees.")
+    extra_qemu_args: str = Field(default="", description="Verbatim extra arguments appended to the qemu command line of every phase (e.g. '-d nochain,int' for an interrupt trace). Empty = unchanged cmdline.")
+    pdes_nic_opts: str = Field(default="", description="Verbatim options appended to every PDES virtio-net-pci -device clause (e.g. ',ioeventfd=off,tx=timer,x-txtimer=0' to make TX handling virtual-time exact). Empty = unchanged.")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     # TODO these two variables are a bit overkill, see if it can be simplified later
     copy_image_per_node: bool = Field(default=True, description="Whether to copy+rename the image to a per-node -node<N> file. The factory sets this False on a leaf that brought its own distinct image_name, so that image is used directly instead of being overwritten by the -node<N> copy.")
@@ -209,11 +211,14 @@ class ExperimentContext(BaseModel):
         prefix = f"{self.experiment_group_name}_" if self.experiment_group_name else ""
         partition_str = f"part_{self.partition_number}_" if self.partition_number >= 0 else ""
         idx_str = f"idx_{self.idx}_" if self.idx >= 0 else ""
-        for neighbor in self.neighbor_node_list:
+        for i, neighbor in enumerate(self.neighbor_node_list):
+            me, peer = str(self.node_number), str(neighbor)
+            if neighbor == self.node_number:   # self-link: NIC i is wired to NIC i^1 of this same node
+                me, peer = f"{me}n{i}", f"{neighbor}n{i ^ 1}"
             if recieve:
-                shm_names.append(f"{prefix}pdes_{neighbor}_to_{self.node_number}"+partition_str+idx_str)
+                shm_names.append(f"{prefix}pdes_{peer}_to_{me}"+partition_str+idx_str)
             else:
-                shm_names.append(f"{prefix}pdes_{self.node_number}_to_{neighbor}"+partition_str+idx_str)
+                shm_names.append(f"{prefix}pdes_{me}_to_{peer}"+partition_str+idx_str)
         return shm_names
 
     def get_mounting_folder(self) -> str:
@@ -386,13 +391,13 @@ class ExperimentContext(BaseModel):
             print(f"copying {src} to {link_address}...")
             # TODO add checks for when cp fails
             os.system(f"cp -u {src} {link_address}")
-        # Explicit binary set wins regardless of mtime (cp -f, not -u); a missing file must fail here,
-        # not fall back to the -saved binary and silently void a parity run.
+        # Explicit binary set wins regardless of mtime, but only when it differs: rewriting a binary that
+        # parallel partitions are executing gives them ETXTBSY. A missing file must fail here, not fall back.
         if self.binaries_folder:
             for basename in ("qemu-system-aarch64", "vanilla-qemu-system-aarch64"):
                 src = f"{self.binaries_folder}/{basename}"
                 assert os.path.exists(src), f"binaries_folder has no {basename}: {src}"
-                os.system(f"cp -f {src} {self.get_experiment_folder_address()}/run/{basename}")
+                os.system(f"cmp -s {src} {self.get_experiment_folder_address()}/run/{basename} || cp -f {src} {self.get_experiment_folder_address()}/run/{basename}")
         # TODO turn WormCacheQFlex address into a parameter
         # WormCacheQFlex is the FW-only plugin (not used in the timing phase), so materialise it once
         # at node level — timing partition/idx leaves don't need it and must not re-copy it per idx.
@@ -494,7 +499,7 @@ class ExperimentContext(BaseModel):
                     dev = f" -device e1000,netdev=net{i},{mac_address} "
                 elif net_dev == 'virtio-net-pci':
                     pci_addr = 0x10 + i
-                    dev = f" -device virtio-net-pci,netdev=net{i},bus=pcie.0,addr=0x{pci_addr:02x},{mac_address},rx_queue_size=1024,tx_queue_size=256 "
+                    dev = f" -device virtio-net-pci,netdev=net{i},bus=pcie.0,addr=0x{pci_addr:02x},{mac_address},rx_queue_size=1024,tx_queue_size=256{self.pdes_nic_opts} "
                 else:
                     raise ValueError(f"Unsupported network device {net_dev} for neighbor {self.neighbor_node_list[i]}. Supported devices are 'e1000' and 'virtio-net-pci'.")
                 # phantom=on makes the PDES engine seed self_ready at creation (CTRL_READY immediately, then
@@ -638,6 +643,8 @@ def create_experiment_context(
     loadvm_name: Annotated[str, Field(description="Name of the loadvm to use in QEMU, optional.")] = "",
     use_gdb: Annotated[bool, Field(description="Wrap the qemu invocation in `gdb -ex run --args ...`. Defaults to False — qemu runs directly; opt in when you actually want the gdb wrap.")] = False,
     binaries_folder: Annotated[str, Field(description="Folder with qemu-system-aarch64 + vanilla-qemu-system-aarch64 that override the ./*-saved/build/ binaries (parity harness: `make stash-build LABEL=...`). Empty = use the -saved trees.")] = "",
+    extra_qemu_args: Annotated[str, Field(description="Verbatim extra qemu arguments appended to every phase's qemu command line (e.g. '-d nochain,int'). Empty = unchanged.")] = "",
+    pdes_nic_opts: Annotated[str, Field(description="Verbatim options appended to every PDES virtio-net-pci -device clause (e.g. ',ioeventfd=off,tx=timer,x-txtimer=0'). Empty = unchanged.")] = "",
     mounting_folder: Annotated[str, Field(description="Mounting directory where the experiment folders will be created.")] = ".",
     check_period_quantum_coeff: Annotated[float, Field(description="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period.")] = 53.0,
     use_cd_rom: Annotated[bool, Field(description="Whether to use a CD-ROM for initial setup.")] = False,
@@ -693,6 +700,7 @@ def create_experiment_context(
 
         assert len(neighbor_node_list) == len(latencies_ns_list) == len(syncs_list) == len(pdes_net_devs)
         assert node_number != -1, "node_number must be set when neighbor nodes are specified."
+        assert neighbor_node_list.count(node_number) % 2 == 0, "self-links (neighbor == node_number) come in pairs: NIC i is wired to NIC i^1"
         assert neighbers_length > 0, "neighbor_node_list, latencies_ns_list, and syncs_list must have at least one entry when node_number is set."
         for net_devs in set(pdes_net_devs):
             assert net_devs in ['e1000', 'virtio-net-pci'], "pdes_net_devs values must be either 'e1000' or 'virtio-net-pci'"
@@ -768,6 +776,8 @@ def create_experiment_context(
         loadvm_name=loadvm_name,
         use_gdb=use_gdb,
         binaries_folder=binaries_folder,
+        extra_qemu_args=extra_qemu_args,
+        pdes_nic_opts=pdes_nic_opts,
         include_affinity=include_affinity,
         all_phantom_cores=all_phantom_cores,
         multi_modal=multi_modal,
@@ -799,6 +809,10 @@ def create_experiment_context(
     )
 
     e._creation_kwargs = creation_kwargs
+    # A machine whose only neighbors are itself (self-linked NICs) is still one machine: keep its own image.
+    if node_number >= 0 and neighbor_node_list and all(n == node_number for n in neighbor_node_list):
+        e = e.model_copy(update={"copy_image_per_node": False})
+        e._creation_kwargs = creation_kwargs
 
     # TODO add a print config so every one sees the final config
     return e
