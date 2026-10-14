@@ -13,7 +13,7 @@ How this program works:
 4. Move the snapshot files to the corresponding partition folder.
 5. Create symbolic links for the necessary bindary files in the current folder.
 6. Copy the starting_script to each partition folder.
-7. Generate run_partitions.sh, which builds the bxdb B-tree index before running the partitions.
+The partitions are then run by run_partitions.sh (copied into the experiment folder by qflex).
 '''
 
 # By default the partition is equal to the number of CPU cores.
@@ -98,18 +98,3 @@ for p in range(PARTITION_COUNT):
     folder_list.append(f"run/partition_{p}")
 
 print(f"Created {' '.join(folder_list)}.")
-
-cwd_basename = os.path.basename(os.path.dirname(os.getcwd()))
-
-with open('../run_partitions.sh', 'w') as f:
-    f.write("#!/bin/bash\n")
-    # Functional warming appends checkpoints to the bxdb log (chunks.log); build the B-tree
-    # index (index.bxdb) once so the timing runs can look pages up directly.
-    f.write(f"(cd run && ../bin/bxdb convert to-btree {db_folder_name}) || exit 1\n")
-    # generate the script list.
-    f.write("folders=(" + " ".join(folder_list) + ")\n")
-    # use xarg to parallel run the scripts.
-    f.write("printf '%s\\n' \"${folders[@]}\" | xargs -n 1 -P " + str(PARTITION_COUNT) + " -I {} bash -c \"cd {}; ./run_flexus.sh $1 $2 > log 2> err;\"\n")
-
-
-os.system("chmod +x ../run_partitions.sh")

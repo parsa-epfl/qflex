@@ -45,7 +45,7 @@ class RunResultCommand(Executor):
         self.plot = plot
         assert os.path.exists(f"{self.experiment_folder}/result.py"), "Error: result.py not found. Make sure initialization command has been run."
         assert os.path.exists(f"{self.experiment_folder}/collect.py"), "Error: collect.py not found. Make sure initialization command has been run."
-        assert os.path.exists(f"{self.experiment_folder}/run_partitions.sh"), "Error: run_partitions.sh not found. Make sure partition command has been run."
+        assert os.path.exists(f"{self.experiment_folder}/run/partition_0"), "Error: no partitions found. Make sure the partition and run-partition commands have been run."
 
     def cmd(self) -> str | list[str]:
         core_groups_arg = f'--core-groups "{self.core_groups}"' if self.core_groups else ""

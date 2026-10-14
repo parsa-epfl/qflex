@@ -315,6 +315,7 @@ class ExperimentContext(BaseModel):
 
         root_sls = [
            "partition.py",
+           "run_partitions.sh",
            "result.py",
            "collect.py",
            "training_model.py",
