@@ -200,9 +200,11 @@ def result(
     confidence: Annotated[float, typer.Option(help="Confidence level for the sample size calculation.")] = 95.0,
     error: Annotated[float, typer.Option(help="Acceptable sampling error.")] = 0.05,
     plot: Annotated[bool, typer.Option(help="Plot the U-IPC distribution.")] = True,
+    allow_incomplete: Annotated[bool, typer.Option(help="Analyze the results even if some checkpoints failed or are missing (otherwise result stops with the list).")] = False,
 ):
     """
     This command collects the results from the detailed simulations into timing.csv and analyzes the sampling error.
+    It first checks that every checkpoint of functional warming was simulated to the end.
     It writes the suggested sample size to NEXT_SAMPLE_SIZE and exits with 255 if the sampling error bound is not met.
     It does not modify core_info.csv; use train for that.
     """
@@ -214,6 +216,7 @@ def result(
         confidence=confidence,
         error=error,
         plot=plot,
+        allow_incomplete=allow_incomplete,
     )
     r = run_result_executor.execute(to_stdio=True, run_in_background=False)
     raise typer.Exit(r.returncode)

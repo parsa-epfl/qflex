@@ -18,6 +18,9 @@ QFlex has two parts:
 - **Git**
 - **uv**, for the CLI (step 2)
 - **Nix** with flakes enabled, **or** **Docker** (step 4)
+- **Linux** with **userfaultfd** allowed for your user (`vm.unprivileged_userfaultfd = 1`), when running natively:
+  the timing simulation loads checkpoints on demand through it (see the
+  [Quickstart's troubleshooting](quickstart.md#troubleshooting))
 - Disk space for a **working folder** (step 3): prebuilt workloads take a few GB to over 100 GB each
 
 ---

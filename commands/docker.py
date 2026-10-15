@@ -53,6 +53,7 @@ class DockerStarter(Executor):
         assert os.path.exists(f'{cwd}/collect.py'), "collect.py file not found in the current directory."
         assert os.path.exists(f'{cwd}/training_model.py'), "training_model.py file not found in the current directory."
         assert os.path.exists(f'{cwd}/training_by_asid.py'), "training_by_asid.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/run_partitions.sh'), "run_partitions.sh file not found in the current directory."
         
         micro_scripts = ''
         if os.path.exists(f'{cwd}/micro_scripts'):
@@ -70,6 +71,7 @@ class DockerStarter(Executor):
         -v {cwd}/commands:/home/dev/qflex/commands \
         {qflex_args} \
         -v {cwd}/partition.py:/home/dev/qflex/partition.py \
+        -v {cwd}/run_partitions.sh:/home/dev/qflex/run_partitions.sh \
         -v {cwd}/result.py:/home/dev/qflex/result.py \
         -v {cwd}/collect.py:/home/dev/qflex/collect.py \
         -v {cwd}/training_model.py:/home/dev/qflex/training_model.py \

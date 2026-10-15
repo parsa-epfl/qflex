@@ -4,6 +4,32 @@ import subprocess
 from commands import Executor
 from .config import ExperimentContext
 
+CAP_SYS_PTRACE = 19
+
+
+def userfaultfd_problem() -> str | None:
+    """
+    Why the timing runs cannot create a userfaultfd, or None. They load each checkpoint with
+    `-loadvm snapshot_<n>,on-demand`, which fetches the guest memory on page faults through a userfaultfd;
+    without one, QEMU stops on an assertion (on_demand_uffd_fd >= 0).
+    """
+    if os.geteuid() == 0 or os.access("/dev/userfaultfd", os.R_OK | os.W_OK):
+        return None
+    try:
+        with open("/proc/sys/vm/unprivileged_userfaultfd") as f:
+            if f.read().strip() == "1":
+                return None
+        with open("/proc/self/status") as f:
+            capabilities = next(int(line.split()[1], 16) for line in f if line.startswith("CapEff:"))
+        if capabilities & (1 << CAP_SYS_PTRACE):
+            return None
+    except (OSError, StopIteration):
+        return None  # cannot tell; let QEMU try
+    return ("Error: the timing runs need userfaultfd (on-demand loading of the checkpoints), which this user cannot create. "
+            "Allow it with `sudo sysctl -w vm.unprivileged_userfaultfd=1` (add `vm.unprivileged_userfaultfd = 1` to "
+            "/etc/sysctl.d/99-userfaultfd.conf to keep it after a reboot), or give your user access to /dev/userfaultfd.")
+
+
 class RunPartitionCommand(Executor):
 
     def __init__(self,
@@ -16,6 +42,9 @@ class RunPartitionCommand(Executor):
         self.experiment_folder = self.experiment_context.get_experiment_folder_address()
         assert os.path.exists(f"{self.experiment_folder}/scripts/run_flexus.sh"), "Error: run_flexus.sh not found. Please run the init_warm command first to generate necessary scripts."
         assert os.path.exists(f"{self.experiment_folder}/run/partition_0"), "Error: no partitions found. Make sure partition command has been run."
+        problem = userfaultfd_problem()
+        if problem:
+            raise RuntimeError(problem)
 
 
     def cmd(self) -> str | list[str]:

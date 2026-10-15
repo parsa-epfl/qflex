@@ -253,6 +253,13 @@ $ ls -d <WORK_DIR>/experiments/djd-2c-001/run/partition_*/result_* | wc -l
 ```
 The second command counts the simulated checkpoints; the step is done when it reaches the sample size.
 
+!!! warning "If `run-partition` finishes early, check for failures"
+    A partition stops at its first failed checkpoint, and `run-partition` returns once every partition has
+    stopped, so failures show up as a run that ends much sooner than expected, or with fewer `result_*` folders
+    than the sample size. Look at the `log` and `err` of a partition, e.g.
+    `<WORK_DIR>/experiments/djd-2c-001/run/partition_0/`, before going on. `err` ending with an assertion on
+    `on_demand_uffd_fd` means that userfaultfd is not allowed (see [Troubleshooting](#troubleshooting)).
+
 To stop the run, press **Ctrl+C** or kill `./qflex`: every partition and its QEMU stop with it.
 
 !!! tip "Debugging one partition"
@@ -274,6 +281,11 @@ $ xargs -a ./qflex.args -- ./qflex result
 
 `result` collects every measurement into `timing.csv` and computes the sampling error of each core group (the
 measured [groups](#core-groups) by default, or `--core-groups "0-7,8-15"`).
+
+It first checks that the sample is complete, i.e. that it has as many sampling units as the `--sample-size` of
+functional warming: every checkpoint must have a result that reaches the end of the measurement. Otherwise it
+stops and lists the failed checkpoints with their partitions; check their `log` and `err` (see
+[Run Partitions](#6-run-partitions)). `--allow-incomplete` analyzes the results anyway, with a smaller sample.
 
 **Check.** The experiment folder has `timing.csv` and `NEXT_SAMPLE_SIZE`, the sample size that meets the error
 bound (`--error`, default 5% at `--confidence` 95%). The exit code tells whether this iteration is enough:
@@ -375,6 +387,21 @@ Repeat until `result` exits with `0`.
     **`Error: partitions of ... are still running`**
     `unpartition`, `partition-cleanup` and `refresh-scripts` refuse to change partitions while a simulation runs in
     them. Stop `run-partition` first.
+
+    **`Error: the timing runs need userfaultfd`, or `err` ends with an assertion on `on_demand_uffd_fd`**
+    The timing runs load each checkpoint on demand (`-loadvm snapshot_<n>,on-demand`): QEMU fetches the guest
+    memory on page faults, through a userfaultfd. Linux only lets unprivileged users create one when
+    `vm.unprivileged_userfaultfd` is `1`:
+    ```bash
+    sudo sysctl -w vm.unprivileged_userfaultfd=1
+    echo 'vm.unprivileged_userfaultfd = 1' | sudo tee /etc/sysctl.d/99-userfaultfd.conf   # keep it after a reboot
+    ```
+    The Docker container does not need it: it runs with `SYS_PTRACE`, which allows userfaultfd.
+
+    **`Error: the sample is incomplete`**
+    Some checkpoints failed in the timing runs, or functional warming created fewer than requested. Check the
+    partitions listed in the message, fix the cause, then `unpartition --force`, `partition` and `run-partition`
+    again; or pass `--allow-incomplete` to `result` to analyze the results you have.
 
     **Paths with `~` or `$VAR` are not found**
     `xargs` does not expand them; write absolute paths in `qflex.args`.

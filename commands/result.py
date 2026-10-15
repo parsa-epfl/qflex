@@ -1,7 +1,51 @@
+import glob
 import os
+import re
 import sys
 from commands import Executor
 from .config import ExperimentContext
+from .functional_warming import FW_SAMPLE_SIZE_FILE
+
+# Measurement points are taken every INTERVAL uncore cycles (100 us), see templates/run_flexus.sh.j2.
+INTERVAL = 100000
+
+
+def find_incomplete_results(experiment_folder: str) -> list[str]:
+    """
+    Problems that make the sample smaller than functional warming's sample size: checkpoints that produced no
+    result (a failed run_flexus.sh stops its partition), results that stop early, and checkpoints that were never
+    created. Empty when every requested checkpoint was simulated to the end.
+    """
+    run = f"{experiment_folder}/run"
+    checkpoints = {}  # index -> partition
+    for meta in glob.glob(f"{run}/partition_*/snapshot_*.bxdb-meta"):
+        if m := re.fullmatch(r"snapshot_(\d+)\.bxdb-meta", os.path.basename(meta)):
+            checkpoints[int(m.group(1))] = os.path.basename(os.path.dirname(meta))
+    last_points = {}  # index -> last regular measurement point
+    for folder in glob.glob(f"{run}/partition_*/result_*"):
+        index = int(os.path.basename(folder).removeprefix("result_"))
+        points = [int(m.group(1)) for log in glob.glob(f"{folder}/all.measurement.*.log")
+                  if (m := re.fullmatch(r"all\.measurement\.(\d+)\.log", os.path.basename(log))) and int(m.group(1)) % INTERVAL == 0]
+        last_points[index] = max(points, default=0)
+
+    def where(indices: list[int]) -> str:
+        shown = ", ".join(f"{i} ({checkpoints.get(i, '?')})" for i in indices[:10])
+        return shown + (f" and {len(indices) - 10} more" if len(indices) > 10 else "")
+
+    problems = []
+    if os.path.isfile(f"{run}/{FW_SAMPLE_SIZE_FILE}"):
+        requested = int(open(f"{run}/{FW_SAMPLE_SIZE_FILE}").read())
+        if len(checkpoints) != requested:
+            problems.append(f"functional warming was asked for {requested} checkpoints, the partitions hold {len(checkpoints)} "
+                            f"(see run/fp_gen_speed/ for the functional warming logs)")
+    missing = sorted(set(checkpoints) - set(last_points))
+    if missing:
+        problems.append(f"{len(missing)} checkpoints have no result: {where(missing)}")
+    expected = max(last_points.values(), default=0)
+    short = sorted(i for i, last in last_points.items() if last < expected)
+    if short:
+        problems.append(f"{len(short)} results stop before cycle {expected}: {where(short)}")
+    return problems
 
 def backup_and_replace_core_info(new_core_info: str) -> list[str]:
     """
@@ -34,7 +78,8 @@ class RunResultCommand(Executor):
                  core_groups: str = "",
                  confidence: float = 95.0,
                  error: float = 0.05,
-                 plot: bool = True):
+                 plot: bool = True,
+                 allow_incomplete: bool = False):
         self.experiment_context = experiment_context
         self.experiment_folder = self.experiment_context.get_experiment_folder_address()
         self.unit_size = unit_size
@@ -46,6 +91,13 @@ class RunResultCommand(Executor):
         assert os.path.exists(f"{self.experiment_folder}/result.py"), "Error: result.py not found. Make sure initialization command has been run."
         assert os.path.exists(f"{self.experiment_folder}/collect.py"), "Error: collect.py not found. Make sure initialization command has been run."
         assert os.path.exists(f"{self.experiment_folder}/run/partition_0"), "Error: no partitions found. Make sure the partition and run-partition commands have been run."
+        problems = find_incomplete_results(self.experiment_folder)
+        if problems:
+            message = ("the sample is incomplete:\n" + "\n".join(f"  - {p}" for p in problems)
+                       + f"\nCheck run/partition_<i>/log and err of the partitions listed above, in {self.experiment_folder}/run.")
+            if not allow_incomplete:
+                raise RuntimeError(f"Error: {message}\nFix the failures and run them again, or pass --allow-incomplete to analyze the results anyway.")
+            print(f"Warning: {message}", file=sys.stderr)
 
     def cmd(self) -> str | list[str]:
         core_groups_arg = f'--core-groups "{self.core_groups}"' if self.core_groups else ""

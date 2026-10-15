@@ -4,6 +4,10 @@ from commands import Executor
 from .config import ExperimentContext
 from commands.qemu import QemuCommonArgParser   
 
+# Sample size requested from the last functional warming, in the run folder.
+FW_SAMPLE_SIZE_FILE = "fw_sample_size"
+
+
 class FunctionalWarming(Executor):
     """
     This class handles the functional warming phase of the experiment and generates checkpoints.
@@ -38,6 +42,8 @@ class FunctionalWarming(Executor):
         print(fw_cmd)
         return [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run",
+            # Read by `result` to check that every requested checkpoint was simulated.
+            f"echo {self.sample_size} > {FW_SAMPLE_SIZE_FILE}",
             fw_cmd,
             # TODO add the proper conditions to only create log and fp_gen_speed at the right time
             "rm -rf fp_gen_speed",
