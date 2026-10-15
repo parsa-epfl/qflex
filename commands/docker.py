@@ -10,7 +10,7 @@ class DockerStarter(Executor):
                  mounting_folder: str,
                  debug: bool = False,
                  worm: bool = False,
-                 start_directory: str = None):
+                 start_directory: str | None = None):
         self.debug = debug
         self.worm = worm
         self.version = get_version()
@@ -23,7 +23,7 @@ class DockerStarter(Executor):
             self.start_directory = f" -w {start_directory} "
 
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         cwd = os.getcwd()
         
         # if images folder doesn't exist load it
@@ -50,6 +50,10 @@ class DockerStarter(Executor):
         assert os.path.exists(f'{cwd}/commands'), "commands folder not found in the current directory."
         assert os.path.exists(f'{cwd}/partition.py'), "partition.py file not found in the current directory."
         assert os.path.exists(f'{cwd}/result.py'), "result.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/collect.py'), "collect.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/training_model.py'), "training_model.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/training_by_asid.py'), "training_by_asid.py file not found in the current directory."
+        assert os.path.exists(f'{cwd}/run_partitions.sh'), "run_partitions.sh file not found in the current directory."
         
         micro_scripts = ''
         if os.path.exists(f'{cwd}/micro_scripts'):
@@ -67,7 +71,11 @@ class DockerStarter(Executor):
         -v {cwd}/commands:/home/dev/qflex/commands \
         {qflex_args} \
         -v {cwd}/partition.py:/home/dev/qflex/partition.py \
+        -v {cwd}/run_partitions.sh:/home/dev/qflex/run_partitions.sh \
         -v {cwd}/result.py:/home/dev/qflex/result.py \
+        -v {cwd}/collect.py:/home/dev/qflex/collect.py \
+        -v {cwd}/training_model.py:/home/dev/qflex/training_model.py \
+        -v {cwd}/training_by_asid.py:/home/dev/qflex/training_by_asid.py \
         {micro_scripts} \
         --security-opt seccomp=unconfined \
         --cap-add SYS_PTRACE \
@@ -86,8 +94,8 @@ class DockerBuild(Executor):
         self.debug = debug
         self.worm = worm
         if self.worm:
-            # Check if folder "WormCacheQFlex" exists
-            assert os.path.isdir('./WormCacheQFlex'), "WormCacheQFlex folder not found. Please clone the WormCacheQFlex repository."
+            # Check if folder "WormCache" exists
+            assert os.path.isdir('./WormCache'), "WormCache folder not found. Please clone the WormCache repository."
         self.docker_base_image_name = get_docker_image_name(debug=self.debug, worm=False)
         self.docker_image_name_with_worm = get_docker_image_name(debug=self.debug, worm=True)
         self.build_type = 'release'
@@ -99,7 +107,7 @@ class DockerBuild(Executor):
         # TODO add checks to prevent overwriting existing images
         print(f"============== Building QFlex version: {self.version} ==============")
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         # TODO add a debug build with all the files so it can be used for development without remaking the image and compiled again
         
         local_qflex_name = f"{self.docker_base_image_name}:{self.version}"
@@ -129,7 +137,7 @@ class DockerBuild(Executor):
 
         worm_image_cmd = [
             f"""
-            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.WormCacheQFlex .
+            docker buildx build -t {local_worm_name} --build-arg BASE_IMAGE={ghcr_qflex_name} -f Dockerfile.WormCache .
             """,
             f"docker tag {local_worm_name} {ghcr_worm_name}"
         ]

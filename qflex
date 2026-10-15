@@ -1,17 +1,22 @@
-#!/usr/bin/env python
+#!/usr/bin/env -S uv run python
 
+import os
 import typer
 from typing import Annotated
 from commands.createimage import CreateImage
 from commands.boot import Boot
-from commands.config import ExperimentContext
+from commands.config import ExperimentContext, get_images_folder
 from commands.load import Load
 from commands.init_warm import InitWarm
 from commands.functional_warming import FunctionalWarming
-from commands.partition import PartitionCommand, CleanPartitionCommand
+from commands.partition import PartitionCommand, CleanPartitionCommand, unpartition as unpartition_checkpoints
+from commands.refresh_scripts import refresh_scripts as refresh_experiment_scripts
 from commands.run_partition import RunPartitionCommand
-from commands.result import RunResultCommand
-from typer_inputs.config import ExperimentContextTyper
+from commands.result import RunResultCommand, TrainCommand
+from commands import prebuilt
+from rich.console import Console
+from rich.table import Table
+from typer_inputs.config import ExperimentContextTyper, WorkingFolderOption, RemovedImageFolderOption, reject_removed_folder_options
 from typer_inputs.config_wrapper import data_class_wrap
 
 app = typer.Typer(
@@ -20,23 +25,23 @@ app = typer.Typer(
 )
 
 
-@app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
+@app.command(help='creates an empty base image for qemu in <working-folder>/images, to install alpine on with boot --use-cd-rom')
 def create_base_image(
-    image_folder: Annotated[str, typer.Option(
-        help="Where to create the image"
-    )] = ".",
+    working_folder: WorkingFolderOption = ".",
     image_name: Annotated[str,typer.Option(
         help="Name of the base image file to create."
     )] = "root.qcow2",
-    image_size_gb: Annotated[int, typer.Option(help="Size of the base image in GB.")] = 8 
+    image_size_gb: Annotated[int, typer.Option(help="Size of the base image in GB.")] = 8,
+    image_folder: RemovedImageFolderOption = None,
 ):
     """
-    Create a base image for QEMU. 
+    Create a base image for QEMU.
     This is the first step to create the images for an experiment.
-    """ 
+    """
+    reject_removed_folder_options(image_folder=image_folder)
     create_image_executor = CreateImage(
-        image_folder=image_folder,
-        image_name=image_name, 
+        image_folder=get_images_folder(working_folder),
+        image_name=image_name,
         size_gb=image_size_gb
     )
     create_image_executor.execute(to_stdio=True, run_in_background=False)
@@ -50,7 +55,7 @@ def boot(
     Boot a QEMU virtual machine with specified parameters.
     Once booted, you can log in with username 'root' and no password.
     After installing your desired packages and making changes,
-    you can save the state with Ctrl+A, then C to create a snapshot named 'base' by savevm base, 
+    you can save the state with Ctrl+A, then C to create a snapshot named 'base' by savevm base,
     then exit with Ctrl+C, then quit.
     This is the second step to create the images for an experiment, with all the necessary packages installed.
     """
@@ -140,13 +145,40 @@ def partition_cleanup(
 
 
 
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def unpartition(
+    experiment_context: ExperimentContext,
+    force: Annotated[bool, typer.Option(help="Also delete the simulation results (result_*) in the partitions.")] = False,
+):
+    """
+    This command moves the checkpoints of every partition back to the run folder and removes the partitions,
+    so they can be partitioned and simulated again (e.g. with another partition count, or after refresh-scripts).
+    Unlike partition-cleanup, it keeps the checkpoints.
+    """
+    unpartition_checkpoints(experiment_context.get_experiment_folder_address(), force)
+
+
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def refresh_scripts(
+    experiment_context: ExperimentContext,
+):
+    """
+    This command regenerates the run_flexus.sh script of an existing experiment from the current template,
+    including the copies in its partitions, so that it picks up fixes made after the experiment was initialized.
+    The configuration in cfg/ is not changed.
+    """
+    refresh_experiment_scripts(experiment_context)
+
+
 # TODO add formatting for the new variables outside exp_context
 @app.command()
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def run_partition(
     experiment_context: ExperimentContext,
-    warming_ratio: Annotated[int, typer.Option(help="Ratio of warming instructions before measurement.")] = 2,
-    measurement_ratio: Annotated[int, typer.Option(help="Ratio of timing measurement instructions.")] = 1,
+    warming_ratio: Annotated[int, typer.Option(help="Detailed warming before each measurement, in units of 100 us (100K cycles of the 1 GHz uncore): 2 = 200 us.")] = 2,
+    measurement_ratio: Annotated[int, typer.Option(help="Measurement after the warming, in units of 100 us (100K cycles of the 1 GHz uncore): 1 = 100 us.")] = 1,
 ):
     """
     This command runs the detailed (timing) simulations for each partition created by the partition command.
@@ -162,16 +194,113 @@ def run_partition(
 @data_class_wrap(ExperimentContextTyper("experiment_context"))
 def result(
     experiment_context: ExperimentContext,
+    unit_size: Annotated[int, typer.Option(help="Size of the sampling unit in intervals of 100 us (100K uncore cycles); match run-partition --measurement-ratio.")] = 1,
+    index: Annotated[int, typer.Option(help="Index of the sampling unit to analyze, counted in units of --unit-size; the default 2 (with --unit-size 1) skips the warming of run-partition --warming-ratio 2.")] = 2,
+    core_groups: Annotated[str, typer.Option(help='Core groups to analyze separately, e.g. "0-7,8-15". Default: the measured groups of the workload (see --groups).')] = "",
+    confidence: Annotated[float, typer.Option(help="Confidence level for the sample size calculation.")] = 95.0,
+    error: Annotated[float, typer.Option(help="Acceptable sampling error.")] = 0.05,
+    plot: Annotated[bool, typer.Option(help="Plot the U-IPC distribution.")] = True,
+    allow_incomplete: Annotated[bool, typer.Option(help="Analyze the results even if some checkpoints failed or are missing (otherwise result stops with the list).")] = False,
 ):
     """
-    This command aggregates and processes the results from the detailed simulations.
-    It generates a core_info.csv file with the simulation results.
+    This command collects the results from the detailed simulations into timing.csv and analyzes the sampling error.
+    It first checks that every checkpoint of functional warming was simulated to the end.
+    It writes the suggested sample size to NEXT_SAMPLE_SIZE and exits with 255 if the sampling error bound is not met.
+    It does not modify core_info.csv; use train for that.
     """
     run_result_executor = RunResultCommand(
         experiment_context=experiment_context,
+        unit_size=unit_size,
+        index=index,
+        core_groups=core_groups or experiment_context.workload.core_groups_arg(),
+        confidence=confidence,
+        error=error,
+        plot=plot,
+        allow_incomplete=allow_incomplete,
     )
-    run_result_executor.execute(to_stdio=True, run_in_background=False)
+    r = run_result_executor.execute(to_stdio=True, run_in_background=False)
+    raise typer.Exit(r.returncode)
 
+@app.command()
+@data_class_wrap(ExperimentContextTyper("experiment_context"))
+def train(
+    experiment_context: ExperimentContext,
+    core_groups: Annotated[str, typer.Option(help='Core groups that each get their own IPC model, e.g. "0-7,8-15". Default: the measured groups of the workload (see --groups).')] = "",
+    interval_index: Annotated[int, typer.Option(help="Index of the 100 us interval used to train the per-core IPC model; the default 2 is the first measured one after --warming-ratio 2.")] = 2,
+    cycle_range: Annotated[str, typer.Option(help='Uncore cycle range "START-END" (1 GHz, so 100000 = 100 us) used to train the per-ASID models; the default is the measurement after --warming-ratio 2.')] = "200000-300000",
+):
+    """
+    This command trains the IPC model from the timing.csv produced by the result command.
+    The per-ASID models are written to run/asid_info.csv, and the trained cores in cfg/core_info.csv switch to the ipc-model.
+    The previous core_info.csv is backed up with a timestamp.
+    """
+    train_executor = TrainCommand(
+        experiment_context=experiment_context,
+        core_groups=core_groups or experiment_context.workload.core_groups_arg(),
+        interval_index=interval_index,
+        cycle_range=cycle_range,
+    )
+    train_executor.execute(to_stdio=True, run_in_background=False)
+
+image_app = typer.Typer(help="List and download prebuilt workloads (disk + base snapshot), to start experiments directly from initialize with --prebuilt-workload.")
+app.add_typer(image_app, name="image")
+
+CatalogUrlOption = Annotated[str, typer.Option(help="Base URL of the prebuilt workload bucket (or set QFLEX_PREBUILT_URL).")]
+
+
+def print_prebuilt_table(catalog: list[prebuilt.PrebuiltWorkload], image_folder: str, numbered: bool = False):
+    table = Table()
+    if numbered:
+        table.add_column("#", justify="right")
+    for column in ["ID", "root.qcow2", "base.zstd", "Total", "Downloaded"]:
+        table.add_column(column, justify="left" if column == "ID" else "right")
+    for i, w in enumerate(catalog):
+        row = [w.id] + [f"{size / 1e9:.1f} GB" for size in (w.sizes["root.qcow2"], w.sizes["base.zstd"], w.total_size)]
+        row.append("yes" if prebuilt.is_downloaded(image_folder, w.id) else "")
+        table.add_row(*([str(i + 1)] if numbered else []) + row)
+    Console().print(table)
+
+
+@image_app.command("list")
+def image_list(
+    working_folder: WorkingFolderOption = ".",
+    url: CatalogUrlOption = prebuilt.PREBUILT_URL,
+    image_folder: RemovedImageFolderOption = None,
+):
+    """
+    List the prebuilt workloads available online, and whether they are downloaded in the working folder.
+    IDs are <core count>/<workload>, e.g. 16c/dc.
+    """
+    reject_removed_folder_options(image_folder=image_folder)
+    print_prebuilt_table(prebuilt.fetch_catalog(url), get_images_folder(working_folder))
+
+
+@image_app.command("pull")
+def image_pull(
+    workload_id: Annotated[str, typer.Argument(help="ID of the prebuilt workload, e.g. 16c/dc. Omit to choose from a list.")] = "",
+    working_folder: WorkingFolderOption = ".",
+    url: CatalogUrlOption = prebuilt.PREBUILT_URL,
+    image_folder: RemovedImageFolderOption = None,
+):
+    """
+    Download a prebuilt workload to <working-folder>/images/prebuilt/<id>. Interrupted downloads resume when pulled again.
+    """
+    reject_removed_folder_options(image_folder=image_folder)
+    image_folder = get_images_folder(working_folder)
+    catalog = prebuilt.fetch_catalog(url)
+    if workload_id:
+        workload = prebuilt.find_workload(catalog, workload_id)
+    else:
+        print_prebuilt_table(catalog, image_folder, numbered=True)
+        choice = typer.prompt("Number of the workload to download", type=int)
+        while not 1 <= choice <= len(catalog):
+            choice = typer.prompt(f"Enter a number between 1 and {len(catalog)}", type=int)
+        workload = catalog[choice - 1]
+    folder = prebuilt.pull(workload, image_folder, url)
+    config = prebuilt.load_prebuilt_config(folder)
+    print(f"Downloaded {workload.id} to {folder}:")
+    print(f"  cpu_cores={config['cpu_cores']} measured_core_count={config['measured_core_count']} memory={config['memory']} network_card={config['network_card']}")
+    print(f"Start an experiment from it with --prebuilt-workload {workload.id} --working-folder {os.path.abspath(working_folder)}")
 
 
 if __name__ == "__main__":

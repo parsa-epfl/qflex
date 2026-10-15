@@ -1,0 +1,37 @@
+[project]
+name = "qflex"
+version = "3.2.1"
+description = "CLI and experiment scripts for QFlex"
+requires-python = ">=3.12"
+dependencies = [
+    # CLI (./qflex, ./dep)
+    "jinja2",
+    "pydantic",
+    "typer",
+    # Experiment scripts (result.py, collect.py, training_*.py)
+    "numpy",
+    "pandas",
+    "plotille",
+    "rich",
+    "scipy",
+]
+
+[dependency-groups]
+docs = [
+    "mkdocs-material",
+    "mkdocstrings[python]",
+    "mkdocs-click",
+    "mkdocs-section-index",
+    "mkdocs-literate-nav",
+    "mkdocs-gen-files",
+    "mkdocs-mermaid2-plugin",
+    "termynal",
+]
+
+[tool.uv]
+# The CLI runs from the repository as scripts; there is no package to build or install.
+package = false
+
+[tool.ty.src]
+# Only check qflex itself, not the vendored submodules (QEMUs, Flexus, WormCache, bxdb).
+exclude = ["fw-qemu", "timing-qemu", "flexus", "WormCache", "bxdb"]

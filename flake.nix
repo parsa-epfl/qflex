@@ -1,48 +1,66 @@
 {
-  description = "A flake for building QEMU";
+  description = "QFlex build environment (flexus, timing-qemu, fw-qemu and bxdb)";
 
-  # Each time this url is changed, please rerun `nix flake lock --update-input nixpkgs` to update the lock file
+  # Each time this url is changed, please rerun `nix flake update nixpkgs`
+  # to update the lock file.
   inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
 
   outputs = { self, nixpkgs }:
   let
     system = "x86_64-linux";
     pkgs = import nixpkgs { inherit system; };
+
+    # Dependencies required by the recipes in ./justfile. The build commands
+    # themselves live there so that the bare, Nix and Docker builds all follow
+    # the same path.
+    buildInputs = with pkgs; [
+      # Build tooling
+      ninja
+      cmake
+      pkg-config
+
+      # QEMU + Flexus native dependencies
+      glib
+      pixman
+      capstone
+      libslirp
+      libgcrypt
+      zstd
+
+      # QEMU's mkvenv bootstraps its build venv and needs distlib.
+      (python3.withPackages (ps: [ ps.distlib ]))
+      git
+      pbzip2
+
+      flex
+      bison
+
+      # Boost 1.83 matches the Conan profile. Newer Boost made Boost.System
+      # header-only and dropped its CMake component config, which breaks
+      # flexus' find_package(Boost ... COMPONENTS system ...).
+      boost183
+
+      libtinfo
+      ncurses6
+
+      # Rust toolchain: builds bxdb (and WormCache at runtime)
+      cargo
+      rustc
+
+      # Single build recipe runner
+      just
+    ];
   in
   {
-
-    devShells.${system}.default = pkgs.llvmPackages_19.stdenv.mkDerivation {
-      pname = "QFlex";
-      version = "1";
-      src = ".";
-
-      buildInputs = [
-        pkgs.ninja
-
-        pkgs.glib
-        pkgs.pkg-config
-        pkgs.pixman
-        pkgs.capstone
-        pkgs.libslirp
-        pkgs.libgcrypt
-        pkgs.zstd
-
-        pkgs.python3
-        pkgs.git
-        pkgs.pbzip2
-
-        pkgs.flex
-        pkgs.bison
-
-        pkgs.cmake
-        pkgs.boost
-
-        pkgs.libtinfo
-        pkgs.ncurses6
-      ];
-
-      # This property is not required by mkDerivation, but appears as a environmental variable.
-      # They can be used directly in the develop shell.
+    devShells.${system}.default = pkgs.mkShell.override {
+      stdenv = pkgs.llvmPackages_19.stdenv;
+    } {
+      packages = buildInputs;
+      # Certificates for cargo to download crates in a pure shell (`nix develop -i`), which drops the host's.
+      SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+      shellHook = ''
+        echo "QFlex Nix shell ready. Build the whole stack with: just all"
+      '';
     };
   };
 }

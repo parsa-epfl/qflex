@@ -3,16 +3,18 @@
 # Quit when any command fails
 set -e
 
+# $1 (warming) and $2 (measurement) are in units of 100 us: 100000 cycles of the 1 GHz uncore, the clock Flexus
+# counts its cycles on (freq= below: one entry per core, then the uncore).
 DW=$(($1 * 100000))
 SU=$(($2 * 100000))
 TOTAL=$(($DW + $SU + 1))
 
 # Get the number of snapshots in the current folder.
 
-for f in snapshot_*.loc
+for f in snapshot_*.bxdb-meta
 do
     idx=${f#snapshot_}
-    idx=${idx%.loc}
+    idx=${idx%.bxdb-meta}
 
     echo "Simulate snapshot $idx"
     
@@ -49,8 +51,9 @@ do
         -nographic -no-reboot \
         -singlestep -d nochain \
         -D "qemu-timing.log" \
+        -plugin ../../lib/libworm_cache.so \
         -libqflex \
-        mode=timing,lib-path=../../lib/{{ "libsemikraken" if DOUBLED_VCPU else "libknottykraken" }}.so,cfg-path=../../cfg/timing.cfg,cycles=$TOTAL:100000,debug=crit,ckpt-path=./snapshot_$idx-flexus,freq=2
+        mode=timing,lib-path=../../lib/{{ "libsemikraken" if DOUBLED_VCPU else "libknottykraken" }}.so,cfg-path=../../cfg/timing.cfg,cycles=$TOTAL:100000,debug=crit,ckpt-path=./snapshot_$idx-flexus,freq={{ FLEXUS_FREQ }}
     
     # 3. Backup results to the result directory
     # if we have the directory, we remove it.
@@ -61,6 +64,15 @@ do
 
     # 4. Copy these log files
     mv *.log "result_$idx/"
+
+    # 5. Copy the per-measurement statistics (bx_* counters from the WormCache plugin) and
+    #    ASID snapshots, which collect.py turns into timing.csv for result/train.
+    if ls all.*.csv 1> /dev/null 2>&1; then
+        mv all.*.csv "result_$idx/"
+    fi
+    if ls all.*.asid.json 1> /dev/null 2>&1; then
+        mv all.*.asid.json "result_$idx/"
+    fi
 
     # 7. Remove the output state.
     rm -rf output_state

@@ -1,26 +1,89 @@
 from pydantic import BaseModel, Field
+import json
 import os
+import shutil
+import subprocess
+import sys
 import pandas
 
-from .host import Host, SMTHost, HOSTS, HostType
-from .workload import Workload, create_workload
+from .workload import Workload, CoreGroup, create_workload
+from .prebuilt import get_prebuilt_folder, load_prebuilt_config, parse_memory_gb
 import datetime
+
+# IPC-model coefficient columns of core_info.csv, in the order fw-qemu parses them
+# (must match bx_coeff_t in fw-qemu/include/sysemu/asid-coeff.h).
+CORE_INFO_COEFF_COLUMNS = [
+    "bx_private_icache_miss_coeff",
+    "bx_private_dcache_miss_coeff",
+    "bx_shared_cache_miss_coeff",
+    "bx_bp_miss_coeff",
+    "bx_drain_store_buffer_coeff",
+    "bx_instruction_coeff",
+]
+
+# Memory controller locations (mesh node ids) per supported core count. Flexus and WormCache lay the cores out
+# as a mesh numbered row by row (buildMesh in flexus/components/NetShim/netcontainer.cpp, mesh_size in
+# WormCache's hop_calculator.rs): 2 cores 1x2, 4 cores 2x2, 8 cores 2x4, 16 cores 4x4, 32 cores 4x8,
+# 48 cores 8x6 and 64 cores 8x8 (rows x columns). Up to 4 cores, every core has a controller; from 16 cores
+# on, there is one per 8 cores, in pairs on the left and right edges (the same positions as experiment-scripts,
+# except for 48 cores, whose mesh is 6 columns wide).
+# Flexus is compiled for a fixed controller count: `just kraken` builds a variant per count into out/kraken/mem<N>/.
+MEMORY_CONTROLLER_POSITIONS = {
+    1: "0",
+    2: "0,1",
+    4: "0,1,2,3",
+    8: "0",
+    16: "8,15",
+    32: "8,15,24,31",
+    48: "6,11,24,29,36,41",
+    64: "8,15,24,31,32,39,48,55",
+}
+# Where `just kraken` puts the Flexus simulators (the Docker image copies them to /home/dev/qflex/kraken_out).
+KRAKEN_FOLDERS = ["./out/kraken", "/home/dev/qflex/kraken_out"]
+
+# Files copied into each experiment's run folder: name in run/ -> (candidate sources, recipe that builds them).
+# The Docker image keeps the QEMU builds in ./*-qemu-saved/ (the QEMU sources are not part of the image),
+# while a native build leaves them in the submodules; the first existing candidate is used.
+RUN_FILES = {
+    "qemu-system-aarch64": (["./fw-qemu-saved/build/qemu-system-aarch64", "./fw-qemu/build/qemu-system-aarch64"], "just fw-qemu"),
+    "vanilla-qemu-system-aarch64": (["./timing-qemu-saved/build/qemu-system-aarch64", "./timing-qemu/build/qemu-system-aarch64"], "just timing-qemu"),
+    "efi-virtio.rom": (["./fw-qemu-saved/pc-bios/efi-virtio.rom", "./fw-qemu/pc-bios/efi-virtio.rom"], "git submodule update --init fw-qemu"),
+    "qemu-img": (["./qemu-img", "./fw-qemu/build/qemu-img"], "just fw-qemu"),
+    "QEMU_EFI.fd": (["./QEMU_EFI.fd"], "git checkout QEMU_EFI.fd"),
+    "debug.cfg": (["./debug.cfg"], "git checkout debug.cfg"),
+}
+# bxdb CLI (built by `just bxdb`), used by run_partitions.sh and partition-cleanup
+BXDB_CLI = "./bxdb/target/release/bxdb"
+
+
+def find_run_file(name: str) -> str:
+    """Returns the first existing source of RUN_FILES[name], or raises with the recipe that builds it."""
+    candidates, recipe = RUN_FILES[name]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    raise FileNotFoundError(f"Error: {name} not found (looked for {', '.join(candidates)}). Get it with `{recipe}`.")
 
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
 # For anyone checking this with old scripts, all worklaod, and core information is combined into the cli, as it's part of the CLI paramers now
 
+def get_images_folder(working_folder: str) -> str:
+    """Images of the working folder: disks created with create-base-image, and prebuilt workloads in prebuilt/<id>."""
+    return os.path.join(os.path.abspath(working_folder), "images")
+
+
 def get_experiment_folder_address(
-    mounting_folder: str,
+    working_folder: str,
     experiment_name: str
 ) -> str:
     # check if working directory exists
-    if not os.path.isdir(mounting_folder):
-        raise ValueError(f"Working directory {mounting_folder} does not exist.")
+    if not os.path.isdir(working_folder):
+        raise ValueError(f"Working folder {working_folder} does not exist.")
     # create experiments if it doesn't exist
-    if not os.path.isdir(f'{mounting_folder}/experiments'):
-        os.makedirs(f'{mounting_folder}/experiments', exist_ok=False)
-    path = f'{mounting_folder}/experiments/{experiment_name}'
+    if not os.path.isdir(f'{working_folder}/experiments'):
+        os.makedirs(f'{working_folder}/experiments', exist_ok=False)
+    path = f'{working_folder}/experiments/{experiment_name}'
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=False)
     return os.path.abspath(path)
@@ -44,6 +107,15 @@ class SimulationContext(BaseModel):
     is_parallel: bool = Field(default=True, description="whether the simulation is parallel or not")
     check_period_quantum_coeff: float = Field(default=53.0, description="Coefficient to determine the check period based on quantum size")
     use_cd_rom: bool = Field(default=False, description="Whether to use a CD-ROM for initial setup.")
+    machine_freq_ghz: float = Field(default=2.0, description="Frequency of the simulated cores in GHz, converts IPC to instructions per ns")
+
+def get_qemu_nic_option(network: str) -> str:
+    if 'none' == network.strip().lower():
+        return "-nic none"
+    elif 'user' == network.strip().lower():
+        return "-nic user,model=virtio-net-pci"
+    else:
+        raise ValueError("Unsupported network type. Supported types are 'none' and 'user'.")
 
 def create_simulation_context(
     core_count: int,
@@ -55,27 +127,15 @@ def create_simulation_context(
     memory_gb: int,
     check_period_quantum_coeff: float=53.0,
     use_cd_rom: bool=False,
+    machine_freq_ghz: float=2.0,
 ) -> SimulationContext:
     l2_way = 16
-    if core_count == 64:
-        memory_controller_count = 8
-        memory_controller_positions = "8,15,24,31,32,40,47,56"
-    elif core_count == 16:
-        memory_controller_count = 2
-        memory_controller_positions = "8,15"
-    # TODO check the memory for 8 and the other values
-    elif core_count <= 8:
-        memory_controller_count = 1
-        memory_controller_positions = "0"
-    else:
-        raise ValueError("Unsupported core count")
+    if core_count not in MEMORY_CONTROLLER_POSITIONS:
+        raise ValueError(f"Unsupported core count {core_count}. Supported: {', '.join(map(str, MEMORY_CONTROLLER_POSITIONS))}.")
+    memory_controller_positions = MEMORY_CONTROLLER_POSITIONS[core_count]
+    memory_controller_count = len(memory_controller_positions.split(","))
 
-    if 'none' == network.strip().lower():
-        network = "-nic none"
-    elif 'user' == network.strip().lower():
-        network = "-nic user,model=virtio-net-pci"
-    else:
-        raise ValueError("Unsupported network type. Supported types are 'none' and 'user'.")
+    network = get_qemu_nic_option(network)
     return SimulationContext(
         core_count=core_count,
         doubled_vcpu=doubled_vcpu,
@@ -91,11 +151,8 @@ def create_simulation_context(
         is_parallel=is_parallel,
         check_period_quantum_coeff=check_period_quantum_coeff,
         use_cd_rom=use_cd_rom,
+        machine_freq_ghz=machine_freq_ghz,
     )
-
-class IPNSInfo(BaseModel):
-    core_index: int = Field(description="Index of the core")
-    ipns: float = Field(description="IPNs for the core")
 
 class ExperimentContext(BaseModel):
     """
@@ -103,20 +160,19 @@ class ExperimentContext(BaseModel):
     """
     experiment_name: str = Field(description="Name of the experiment")
     # TODO move image name to the workload section
-    image_folder: str = Field(description="Address of the image to use")
+    image_folder: str = Field(description="Images of the working folder, <working_folder>/images")
     image_name: str = Field(description="Name of the image to use")
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
-    host: Host | SMTHost = Field(description="Host configuration")
     workload: Workload = Field(description="Workload configuration")
-    mounting_folder: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
+    working_folder: str = Field(default=".", description="Working folder of qflex, holding images/ and experiments/")
     keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
-    include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
+    prebuilt_workload: str = Field(default="", description="ID of a prebuilt workload (e.g. 16c/dc) to start the experiment from, see ./qflex image list.")
 
-    def get_mounting_folder(self) -> str:
-        return self.mounting_folder
+    def get_working_folder(self) -> str:
+        return self.working_folder
 
     def get_experiment_folder_address(self) -> str:
         """
@@ -124,18 +180,20 @@ class ExperimentContext(BaseModel):
         """
         # TODO add some more document on how the folder structure works and why this is good that these folders get repeated for each experiment as it keeps them isolated and easy to copy and move
         # TODO clean this up later, but done this for when need to make a directory but don't have the full context
-        return get_experiment_folder_address(self.get_mounting_folder(), self.experiment_name)
+        return get_experiment_folder_address(self.get_working_folder(), self.experiment_name)
 
     def get_local_image_address(self) -> str:
         return self.image_address
     def get_vanila_qemu_build_folder(self) -> str:
-        return f'{self.get_experiment_folder_address()}/qemu-saved'
+        return f'{self.get_experiment_folder_address()}/timing-qemu-saved'
     def get_pflex_qemu_build_folder(self) -> str:
-        return f'{self.get_experiment_folder_address()}/parallel-qemu-saved'
+        return f'{self.get_experiment_folder_address()}/fw-qemu-saved'
     
     def set_up_image(self):
 
-        if self.use_image_directly:
+        if self.prebuilt_workload or os.path.exists(self.get_prebuilt_record_address()):
+            self.set_up_prebuilt_image()
+        elif self.use_image_directly:
             self.image_address = f"{self.image_folder}/{self.image_name}"
         else:
             # TODO add some checks for this
@@ -160,26 +218,86 @@ class ExperimentContext(BaseModel):
                 os.makedirs(f"{self.image_folder}/experiments/{self.experiment_name}", exist_ok=not self.keep_experiment_unique)
                 print("created folder in images folder for this experiment, copying image...")
                 # Copy file to the new folder
-                print(f"cp {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
-                os.system(f"cp -u {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
-                print("copied image, creating symlink...")
-                # Create a symlink to the new image in the experiment folder
-                os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
-                print(f"Linked image to")
+                print(f"cp {self.image_folder}/{self.image_name} {self.get_local_image_address()}")
+                if os.system(f"cp -u {self.image_folder}/{self.image_name} {self.get_local_image_address()}") != 0:
+                    raise RuntimeError(f"Error: failed to copy {self.image_folder}/{self.image_name} to {self.get_local_image_address()}")
+                print("copied image.")
 
-            
+    def get_prebuilt_record_address(self) -> str:
+        """config.json of the prebuilt workload the experiment was set up from (absent otherwise)."""
+        return f"{self.get_experiment_folder_address()}/run/prebuilt.json"
+
+    def set_up_prebuilt_image(self):
+        """
+        Sets the experiment up from a prebuilt workload (./qflex image pull). The first command copies the
+        disk into run/ (the experiment writes snapshot entries into it) and links the read-only base.zstd;
+        the choice is recorded in run/prebuilt.json, so later commands keep using run/root.qcow2 and ignore
+        --image-name.
+        """
+        run = f"{self.get_experiment_folder_address()}/run"
+        record = self.get_prebuilt_record_address()
+        if os.path.exists(record):
+            with open(record) as f:
+                config = json.load(f)
+            if self.prebuilt_workload and self.prebuilt_workload != config["id"]:
+                raise ValueError(f"Error: experiment {self.experiment_name} was set up from prebuilt workload {config['id']}, not {self.prebuilt_workload}.")
+            self.prebuilt_workload = config["id"]
+            self.validate_prebuilt_config(config)
+        else:
+            if self.use_image_directly:
+                raise ValueError("Error: --prebuilt-workload cannot be combined with --use-image-directly.")
+            source = get_prebuilt_folder(self.image_folder, self.prebuilt_workload)
+            if not os.path.isfile(f"{source}/config.json"):
+                raise FileNotFoundError(f"Error: prebuilt workload {self.prebuilt_workload} not found in {source}. Download it with `./qflex image pull {self.prebuilt_workload} --working-folder {self.working_folder}`.")
+            config = load_prebuilt_config(source)
+            self.validate_prebuilt_config(config)
+            os.makedirs(run, exist_ok=True)
+            for file in ["root.qcow2", "base.zstd"]:
+                if os.path.lexists(f"{run}/{file}"):
+                    raise FileExistsError(f"Error: {run}/{file} already exists; the experiment was already set up from another image. Use a new --experiment-name.")
+            print(f"Copying {source}/root.qcow2 to {run}/root.qcow2 ...")
+            # The downloaded files are read-only; reflink makes the copy free on filesystems that support it.
+            subprocess.run(["cp", "--reflink=auto", f"{source}/root.qcow2", f"{run}/root.qcow2.part"], check=True)
+            os.chmod(f"{run}/root.qcow2.part", 0o644)
+            os.replace(f"{run}/root.qcow2.part", f"{run}/root.qcow2")
+            # base.zstd is only read by -loadvm base, so all experiments share the downloaded file.
+            os.symlink(f"{source}/base.zstd", f"{run}/base.zstd")
+            with open(record, "w") as f:
+                json.dump({"id": self.prebuilt_workload, **config}, f, indent=2)
+        self.image_name = "root.qcow2"
+        self.image_address = f"{run}/root.qcow2"
+        if not self.loadvm_name:
+            self.loadvm_name = "base"
+
+    def validate_prebuilt_config(self, config: dict):
+        """The base snapshot only restores on the machine it was taken with."""
+        sim = self.simulation_context
+        cpu_cores = sim.core_count * (2 if sim.doubled_vcpu else 1)
+        expected = {
+            "core count (--core-count)": (config["measured_core_count"], sim.core_count),
+            "vCPU count (--core-count, --double-cores)": (config["cpu_cores"], cpu_cores),
+            "memory (--memory-gb)": (parse_memory_gb(config["memory"]), sim.memory_gb),
+            "network (--network)": (get_qemu_nic_option(config["network_card"]), sim.qemu_nic),
+        }
+        mismatches = [f"  {name}: prebuilt {want}, experiment {got}" for name, (want, got) in expected.items() if want != got]
+        if mismatches:
+            raise ValueError(
+                f"Error: the experiment does not match prebuilt workload {self.prebuilt_workload}:\n" + "\n".join(mismatches)
+                + "\nThese settings are read from the workload's config.json: remove --core-count, --double-cores, --memory-gb and --network."
+            )
 
     def set_up_folders(self):
         # TODO go through all the files being copied with shanqing
 
-        if not os.path.exists(f"{self.get_mounting_folder()}/experiments"):
-            os.makedirs(f"{self.get_mounting_folder()}/experiments", exist_ok=False)
-        if not os.path.exists(f"{self.get_mounting_folder()}/images"):
-            os.makedirs(f"{self.get_mounting_folder()}/images", exist_ok=False)
+        os.makedirs(f"{self.get_working_folder()}/experiments", exist_ok=True)
+        os.makedirs(self.image_folder, exist_ok=True)
         if not os.path.exists(self.get_experiment_folder_address()):
             os.makedirs(self.get_experiment_folder_address(), exist_ok=False)
-        if not os.path.exists(f"{self.image_folder}"):
-            os.makedirs(f"{self.image_folder}")
+
+        # Find the built files first, so a missing build fails before the image is copied.
+        run_files = {name: find_run_file(name) for name in RUN_FILES}
+        if not os.path.exists(BXDB_CLI):
+            raise FileNotFoundError(f"Error: bxdb CLI not found at {BXDB_CLI}. Build it with `just bxdb`.")
 
         self.set_up_image()
 
@@ -198,114 +316,66 @@ class ExperimentContext(BaseModel):
 
         root_sls = [
            "partition.py",
-           "result.py"
+           "run_partitions.sh",
+           "result.py",
+           "collect.py",
+           "training_model.py",
+           "training_by_asid.py",
         ]
         for file in root_sls:
             os.system(f"cp -u ./{file} {self.get_experiment_folder_address()}/{file}")
             print(f"moved {file} to experiment folder")
 
 
-        # check that both build/qemu-system-aarch64 exists in run folder plus efi-virtio.rom
-        # link all of them
-        # TODO check if rom and bios files can be linked from parallel-qemu-saved when using qemu
-        # TODO check why files are being turned into bz2
-        
-        run_files = [
-            "./parallel-qemu-saved/build/qemu-system-aarch64", 
-            # TODO if we ever decide to change EFI and bios, this needs to change
-            "./QEMU_EFI.fd", 
-            "./qemu-saved/build/qemu-system-aarch64",
-            "./parallel-qemu-saved/pc-bios/efi-virtio.rom",
-            "./qemu-img",
-            "debug.cfg",
-        ]
-        for f in run_files:
+        # TODO check if rom and bios files can be linked from fw-qemu-saved when using timing-qemu
+        for name, source in run_files.items():
+            target = f"{self.get_experiment_folder_address()}/run/{name}"
+            if not os.path.exists(target):
+                shutil.copy2(source, target)
+        # TODO turn WormCache address into a parameter
+        # Copy WormCache to lib folder, if it doesn't exist we should throw an error
+        if not os.path.exists(f"./WormCache"):
+            raise FileNotFoundError("WormCache folder not found in the working directory.")
+        if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/WormCache"):
+            os.system(f"cp -r ./WormCache {self.get_experiment_folder_address()}/lib/WormCache")
 
-            if "parallel-qemu-saved/" in f:
-                # Link as the name of the file to run folder
-                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-            elif "qemu-saved/" in f:
-                # Link as the name of the file to run folder with
-                link_address = f"{self.get_experiment_folder_address()}/run/vanilla-{f.split('/')[-1]}"
-            else:
-                link_address = f"{self.get_experiment_folder_address()}/run/{f.split('/')[-1]}"
-
-            if not os.path.exists(link_address):
-                os.system(f"cp -u {f} {link_address}")
-        # TODO turn WormCacheQFlex address into a parameter
-        # Copy WormCacheQFlex to lib folder, if it doesn't exist we should throw an error
-        if not os.path.exists(f"./WormCacheQFlex"):
-            raise FileNotFoundError("WormCacheQFlex folder not found in the working directory.")
-        if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/WormCacheQFlex"):
-            os.system(f"cp -r ./WormCacheQFlex {self.get_experiment_folder_address()}/lib/WormCacheQFlex")
-
-        # Move files to lib
-        lib_files = [
-            "libknottykraken.so", 
-            "libsemikraken.so"
-        ]
-        for f in lib_files:
-            if not os.path.exists(f"/home/dev/qflex/kraken_out/{f}"):
-                raise FileNotFoundError(f"Error: {f} not found in ./home/dev/qflex/kraken_out/")
+        # Copy the Flexus simulators built for the experiment's memory controller count to lib
+        kraken_folder = self.get_kraken_folder()
+        for f in ["libknottykraken.so", "libsemikraken.so"]:
+            if not os.path.exists(f"{kraken_folder}/{f}"):
+                raise FileNotFoundError(f"Error: {f} not found in {kraken_folder}. Build it with `just kraken`.")
             if not os.path.exists(f"{self.get_experiment_folder_address()}/lib/{f}"):
-                os.system(f"cp /home/dev/qflex/kraken_out/{f} {self.get_experiment_folder_address()}/lib/{f}")
+                os.system(f"cp {kraken_folder}/{f} {self.get_experiment_folder_address()}/lib/{f}")
+
+        os.system(f"cp -u {BXDB_CLI} {self.get_experiment_folder_address()}/bin/bxdb")
 
         
 
 
 
-    def get_ipns_per_core(self) -> list[IPNSInfo]:
+    def get_kraken_folder(self) -> str:
+        """Folder with the Flexus simulators compiled for this experiment's memory controller count."""
+        variant = f"mem{self.simulation_context.mem_controller_count}"
+        for folder in KRAKEN_FOLDERS:
+            if os.path.isdir(f"{folder}/{variant}"):
+                return os.path.abspath(f"{folder}/{variant}")
+        raise FileNotFoundError(f"Error: no Flexus simulators for {self.simulation_context.mem_controller_count} memory controllers ({variant}) in {' or '.join(KRAKEN_FOLDERS)}. Build them with `just kraken`.")
 
-        # TODO This part looks messy to me, we need to revisit it later 
-        is_consolidated = self.workload.IPC_info.is_consolidated
-        has_client = self.simulation_context.doubled_vcpu
-        core_list = self.host.get_core_sequence_as_list()
-        results: list[IPNSInfo] = []
-        
-        core_count = self.simulation_context.core_count
-
-        primary_ipc = self.workload.IPC_info.primary_ipc
-        secondary_ipc = self.workload.IPC_info.secondary_ipc
-        phantom_ipc = self.workload.IPC_info.phantom_cpu_ipc
-        min_ipc = self.workload.IPC_info.min_ipc
-        machine_freq_ghz = self.workload.IPC_info.machine_freq_ghz
-        ipns_primary = round(primary_ipc * machine_freq_ghz, 2)
-        ipns_secondary = round(secondary_ipc * machine_freq_ghz, 2)
-        ipns_phantom = round(
-            phantom_ipc * machine_freq_ghz / min_ipc * primary_ipc,
-            2
-        )
-
-        if not is_consolidated:
-            for core_idx in range(core_count):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_primary))
-        else:
-            primary_core_start = self.workload.core_range.primary_core_start
-            secondary_core_start = self.workload.core_range.secondary_core_start
-            # TODO check this with shanqing, changed this so you can give core numbers that are actually used unlike the og script
-            for core_idx in range(primary_core_start, secondary_core_start):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_primary))
-            for core_idx in range(secondary_core_start, core_count):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_secondary))
-            
-        if has_client:
-            for core_idx in range (core_count, core_count * 2):
-                results.append(IPNSInfo(core_index=core_list[core_idx], ipns=ipns_phantom))
-
-        return results
-    
-    def get_ipns_csv(self) -> str:
+    def get_ipns_csv(self) -> None:
         """
         Generates a CSV file containing IPNS information for each core to both cfg and run folders.
         """
-        # TODO check on this as well as we talked about removing the dependancy between host and target
         # Check if file exists, if it does not exist create a default one
         target = f'{self.get_experiment_folder_address()}/cfg/core_info.csv'
         if not os.path.exists(target):
-            if self.include_affinity:
-                df = pandas.DataFrame([[ipns_info.ipns, ipns_info.core_index] for ipns_info in self.get_ipns_per_core()], columns=["ipns", "affinity_core_idx"])
-            else:
-                df = pandas.DataFrame([[ipns_info.ipns] for ipns_info in self.get_ipns_per_core()], columns=["ipns"])
+            # 9-column format parsed by fw-qemu (tcg_parse_core_info_file). Every vCPU starts
+            # with the constant model at the IPC of its group; `./qflex train` later switches cores
+            # to the ipc-model. fw-qemu pins vCPU i to host_core_idx, here host core i.
+            rows = []
+            for vcpu_idx, ipc in enumerate(self.workload.ipc_per_vcpu()):
+                ipns = round(ipc * self.simulation_context.machine_freq_ghz, 2)
+                rows.append([vcpu_idx, "constant", ipns] + [0.0] * len(CORE_INFO_COEFF_COLUMNS))
+            df = pandas.DataFrame(rows, columns=["host_core_idx", "model_type", "ipns"] + CORE_INFO_COEFF_COLUMNS)
             df.to_csv(target, index=False)
         else:
             print(f"============== core_info.csv already exists at {target}, not overwriting it. ==============")
@@ -322,59 +392,59 @@ class ExperimentContext(BaseModel):
         
 
 
+def find_prebuilt_config(working_folder: str, experiment_name: str, prebuilt_workload: str) -> dict | None:
+    """
+    config.json of the prebuilt workload of the experiment: run/prebuilt.json once the experiment is set up
+    (so later commands do not need --prebuilt-workload), else the downloaded one. None without a prebuilt workload.
+    """
+    image_folder = get_images_folder(working_folder)
+    record = f"{working_folder}/experiments/{experiment_name}/run/prebuilt.json"
+    if os.path.exists(record):
+        with open(record) as f:
+            config = json.load(f)
+        # The experiment keeps the config.json it was set up with; tell the user when the download changed since.
+        source = get_prebuilt_folder(image_folder, config["id"])
+        if os.path.isfile(f"{source}/config.json") and load_prebuilt_config(source) != {k: v for k, v in config.items() if k != "id"}:
+            downloaded = f"{source}/config.json"
+            print(f"Warning: {record} differs from {downloaded}, which changed after the experiment was set up. "
+                  f"The experiment keeps using {record}; start a new experiment to use the new config.json.", file=sys.stderr)
+        return config
+    if not prebuilt_workload:
+        return None
+    source = get_prebuilt_folder(image_folder, prebuilt_workload)
+    if not os.path.isfile(f"{source}/config.json"):
+        raise FileNotFoundError(f"Error: prebuilt workload {prebuilt_workload} not found in {source}. Download it with `./qflex image pull {prebuilt_workload} --working-folder {working_folder}`.")
+    return load_prebuilt_config(source)
+
+
 def create_experiment_context(
-    core_count: int,
     quantum_size: int,
-    doubled_vcpu: bool,
     llc_size_per_tile_mb: int,
     is_parallel: bool,
-    network: str,
-    memory_gb: int,
-    # Host section:
-    host_name: str,
-    # Workload section:
-    workload_name: str,
-    primary_core_start: int,
-    secondary_core_start: int,
-    is_consolidated: bool,
-    primary_ipc: float,
-    secondary_ipc: float,
-    population_seconds: int,
-    phantom_cpu_ipc: float,
-    # experiment sections
-    image_folder: str,
+    # Machine and workload: read from the config.json of --prebuilt-workload when not given
+    core_count: int | None,
+    doubled_vcpu: bool | None,
+    network: str | None,
+    memory_gb: int | None,
+    workload_name: str | None,
+    groups: list[CoreGroup] | None,
+    population_seconds: float | None,
     # Default parameters that can be induced from others
     experiment_name=None,
-    image_name: str=None,
+    image_name: str | None=None,
     keep_experiment_unique: bool = True,
     use_image_directly: bool = False,
     loadvm_name: str = "",
-    mounting_folder: str = ".",
+    working_folder: str = ".",
     # Default for simulation context
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
-    machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
-    include_affinity: bool = False
+    machine_freq_ghz: float = 2.0,
+    prebuilt_workload: str = "",
 ) -> ExperimentContext:
-    # assert False
-    # TODO add how to create experiment name
-
-    
     # TODO check this to make sure it doesn't have edge cases
-    mounting_folder = os.path.abspath(mounting_folder)
-    image_folder = os.path.abspath(image_folder)
-
-    workload = create_workload(
-        workload_name=workload_name,
-        primary_core_start=primary_core_start,
-        secondary_core_start=secondary_core_start,
-        is_consolidated=is_consolidated,
-        primary_ipc=primary_ipc,
-        secondary_ipc=secondary_ipc,
-        phantom_cpu_ipc=phantom_cpu_ipc,
-        population_seconds=population_seconds,
-        machine_freq_ghz=machine_freq_ghz,
-    )
+    working_folder = os.path.abspath(working_folder)
+    image_folder = get_images_folder(working_folder)
 
     if image_name is None:
         image_name = f"root.qcow2"
@@ -386,6 +456,27 @@ def create_experiment_context(
         # Add date time to prevent overwriting
         experiment_name = experiment_name + '-' + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
+    # A prebuilt workload describes its machine and workload; given flags take precedence
+    # (set_up_prebuilt_image rejects machine flags that do not match the snapshot).
+    config = find_prebuilt_config(working_folder, experiment_name, prebuilt_workload)
+    if config is not None:
+        measured = config["measured_core_count"]
+        core_count = measured if core_count is None else core_count
+        doubled_vcpu = config["cpu_cores"] == 2 * measured if doubled_vcpu is None else doubled_vcpu
+        network = config["network_card"] if network is None else network
+        memory_gb = parse_memory_gb(config["memory"]) if memory_gb is None else memory_gb
+        workload_name = workload_name or config["workload"]
+        # Older config.json files have no groups nor population: one group with the default IPCs.
+        if groups is None and "groups" in config:
+            groups = [CoreGroup(**g) for g in config["groups"]]
+        if population_seconds is None:
+            population_seconds = config.get("suggested_population_seconds")
+    missing = [flag for flag, value in [("--core-count", core_count), ("--double-cores/--no-double-cores", doubled_vcpu),
+                                        ("--network", network), ("--memory-gb", memory_gb)] if value is None]
+    if missing:
+        raise ValueError(f"Error: missing {', '.join(missing)} (required without --prebuilt-workload).")
+    assert core_count is not None and doubled_vcpu is not None and network is not None and memory_gb is not None
+
     simulation_context = create_simulation_context(
         core_count=core_count,
         quantum_size=quantum_size,
@@ -396,29 +487,29 @@ def create_experiment_context(
         memory_gb=memory_gb,
         check_period_quantum_coeff=check_period_quantum_coeff,
         use_cd_rom=use_cd_rom,
+        machine_freq_ghz=machine_freq_ghz,
     )
 
-    if host_name.upper() not in HostType.__members__.keys():
-        raise ValueError(f"Host type {host_name} not recognized. Available types: {list(HostType.__members__.keys())}")
-    host_type = HostType[host_name.upper()]
-    host = HOSTS[host_type]
+    workload = create_workload(
+        workload_name=workload_name or "workload",
+        groups=groups,
+        core_count=core_count,
+        doubled_vcpu=doubled_vcpu,
+        population_seconds=population_seconds,
+    )
 
-    
-
-    
     e = ExperimentContext(
         experiment_name=experiment_name,
         image_folder=image_folder,
         image_name=image_name,
         keep_experiment_unique=keep_experiment_unique,
         simulation_context=simulation_context,
-        host=host,
         workload=workload,
-        mounting_folder=mounting_folder,
+        working_folder=working_folder,
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
-        include_affinity=include_affinity
+        prebuilt_workload=prebuilt_workload,
     )
 
     e.set_up_folders()
@@ -432,4 +523,4 @@ def get_capital_dict(variable: BaseModel):
     """
     Converts a list of variable names to a dictionary with uppercase keys.
     """
-    return {var.upper(): getattr(variable, var) for var in variable.__fields__.keys()}
+    return {var.upper(): getattr(variable, var) for var in type(variable).model_fields.keys()}

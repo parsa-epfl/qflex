@@ -1,13 +1,17 @@
 .git/
 WormCache/.git/
-p-qemu/.git/
+WormCache/target/
+fw-qemu/.git/
+timing-qemu/.git/
+bxdb/.git/
+bxdb/target/
 replica/.git/
 replica/
 qflex.args
 
 include .gitignore
 include flexus/.gitignore
-include qemu/.gitignore
+include timing-qemu/.gitignore
 
 out/
 qemu-*
@@ -19,3 +23,4 @@ cfg/
 experiments/
 *.qcow2
 tmp_results/
+.venv/

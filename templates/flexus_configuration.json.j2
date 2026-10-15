@@ -1,32 +1,35 @@
 {
-  "l1i_sets": 128,
-  "l1i_associativity": 8,
+  "l1i_sets": {{ L1I_SET }},
+  "l1i_associativity": {{ L1I_WAY }},
 
-  "l1d_sets": 128,
-  "l1d_associativity": 8,
+  "l1d_sets": {{ L1D_SET }},
+  "l1d_associativity": {{ L1D_WAY }},
 
   "l2_sets": {{ L2_SET }},
   "l2_associativity": {{ L2_WAY }},
-  "l2_slice_count": {{ CORE_COUNT }},
+  "l2_slice_count": {{ SLICE_COUNT }},
 
   "itlb_sets": 1,
-  "itlb_associativity": 48,
+  "itlb_associativity": 64,
 
   "dtlb_sets": 1,
-  "dtlb_associativity": 48,
+  "dtlb_associativity": 64,
 
-  "stlb_sets": 1024,
-  "stlb_associativity": 4,
+  "stlb_sets": {{ STLB_SET }},
+  "stlb_associativity": {{ STLB_WAY }},
   "stlb_inclusion": "Exclusive",
 
   "directory": {
     "type": "Standard",
-    "sets": {{ DIRECTORY_SET }},
-    "associativity": {{ DIRECTORY_WAY }}
+    "sets": {{ DIR_SET }},
+    "associativity": {{ DIR_WAY }}
   },
 
-  "directory_slice_count": {{ CORE_COUNT }},
+  "directory_slice_count": {{ SLICE_COUNT }},
 
-  "btb_sets": 4096,
-  "btb_associativity": 4
+  "btb_sets": {{ BTB_SET }},
+  "btb_associativity": {{ BTB_WAY }},
+
+  "pht_sets": {{ SMS_PHT_SET }},
+  "pht_associativity": {{ SMS_PHT_WAY }}
 }

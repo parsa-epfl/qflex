@@ -1,4 +1,4 @@
-from .parameterloader import ParameterLoader
+from .parameterloader import ParameterLoader, get_microarchitecture_context
 from ..config import ExperimentContext
 
 class TimingLoader(ParameterLoader):
@@ -11,12 +11,4 @@ class TimingLoader(ParameterLoader):
                 out_folder='cfg'
             )
     def get_context(self):
-        return {
-            "L2_SET" : self.experiment_context.simulation_context.l2_set,
-            "L2_WAY" : self.experiment_context.simulation_context.l2_way,
-            "DIRECTORY_SET" : self.experiment_context.simulation_context.directory_set,
-            "DIRECTORY_WAY": self.experiment_context.simulation_context.directory_way,
-            "MEM_CONTROLLER_COUNT": self.experiment_context.simulation_context.mem_controller_count,
-            "MEM_CONTROLLER_POSITIONS" : self.experiment_context.simulation_context.mem_controller_positions,
-            "PHANTOM_CPU_IPC": self.experiment_context.workload.IPC_info.phantom_cpu_ipc,
-        }
+        return get_microarchitecture_context(self.experiment_context)

@@ -57,6 +57,22 @@ pub const MEASURE_HALF_OF_CORES: bool = {{ "true" if DOUBLED_VCPU else "false" }
 // An assertion checker to make sure the CORE_COUNT is even if we use the CACHE_HIERARCHY_FOR_HALF_OF_CORES.
 static_assertions::const_assert!(!MEASURE_HALF_OF_CORES || CORE_COUNT % 2 == 0);
 
+pub const SIMULATED_CORE_COUNT: usize = if MEASURE_HALF_OF_CORES {
+    CORE_COUNT / 2
+} else {
+    CORE_COUNT
+};
+
+/**
+ * CHECKPOINT_POOL_SIZE
+ *
+ * Number of worker threads in the rayon thread pool used for parallel checkpoint serialization/deserialization.
+ * SIMULATED_CORE_COUNT must be a multiple of this value.
+ */
+pub const CHECKPOINT_POOL_SIZE: usize = {{ CHECKPOINT_POOL_SIZE }};
+static_assertions::const_assert!(SIMULATED_CORE_COUNT % CHECKPOINT_POOL_SIZE == 0);
+
+
 /**
  * CACHE_LINE_SIZE
  *
@@ -66,6 +82,20 @@ static_assertions::const_assert!(!MEASURE_HALF_OF_CORES || CORE_COUNT % 2 == 0);
 pub const CACHE_LINE_SIZE: usize = 64;
 static_assertions::const_assert!(CACHE_LINE_SIZE.is_power_of_two());
 
+/**
+ * BYPASSING_OS_SIMULATION
+ *
+ * Whether to bypass the OS simulation and only process the userspace trace.
+ *
+ */
+pub const BYPASSING_OS_SIMULATION: bool = {{ "true" if BYPASS_OS_SIMULATION else "false" }};
+
+/**
+ * ENABLE_MMU
+ *
+ * Whether to enable the MMU and the virtual memory translation. If false, all the memory accesses are treated as physical memory accesses, and no page walk will be modeled.
+ */
+pub const ENABLE_MMU: bool = {{ "true" if ENABLE_MMU else "false" }};
 
 // Use FullyAssociativeTLB
 pub const USE_HIGHLY_ASSOCIATIVE_L1TLB: bool = false;
@@ -97,7 +127,7 @@ static_assertions::const_assert!(!(STLB_ENABLED != true && USE_HIGHLY_ASSOCIATIV
  *
  * The associativity of the private & last-level TLB.
  */
-pub const STLB_ASSO: usize = 4;
+pub const STLB_ASSO: usize = {{ STLB_WAY }};
 
 /**
  * STLB_SET
@@ -105,7 +135,7 @@ pub const STLB_ASSO: usize = 4;
  * The number of sets of the private & last-level TLB.
  */
 
-pub const STLB_SET: usize = 1024;
+pub const STLB_SET: usize = {{ STLB_SET }};
 static_assertions::const_assert!(STLB_SET.is_power_of_two());
 
 // No huge pages?
@@ -144,7 +174,7 @@ static_assertions::const_assert!(UNIFIED_PRI_CACHE_SET.is_power_of_two());
  * The associativity of the private instruction cache.
  * This parameter is only used when the unified private cache is disabled.
  */
-pub const HARVARD_PRI_I_CACHE_ASSO: usize = 8;
+pub const HARVARD_PRI_I_CACHE_ASSO: usize = {{ L1I_WAY }};
 
 /**
  * HARVARD_PRI_I_CACHE_SET
@@ -152,7 +182,7 @@ pub const HARVARD_PRI_I_CACHE_ASSO: usize = 8;
  * The number of sets of the private instruction cache.
  * This parameter is only used when the unified private cache is disabled.
  */
-pub const HARVARD_PRI_I_CACHE_SET: usize = 128;
+pub const HARVARD_PRI_I_CACHE_SET: usize = {{ L1I_SET }};
 static_assertions::const_assert!(HARVARD_PRI_I_CACHE_SET.is_power_of_two());
 
 /**
@@ -161,7 +191,7 @@ static_assertions::const_assert!(HARVARD_PRI_I_CACHE_SET.is_power_of_two());
  * The associativity of the private data cache.
  * This parameter is only used when the unified private cache is disabled.
  */
-pub const HARVARD_PRI_D_CACHE_ASSO: usize = 8;
+pub const HARVARD_PRI_D_CACHE_ASSO: usize = {{ L1D_WAY }};
 
 /**
  * HARVARD_PRI_D_CACHE_SET
@@ -169,7 +199,7 @@ pub const HARVARD_PRI_D_CACHE_ASSO: usize = 8;
  * The number of sets of the private data cache.
  * This parameter is only used when the unified private cache is disabled.
  */
-pub const HARVARD_PRI_D_CACHE_SET: usize = 128;
+pub const HARVARD_PRI_D_CACHE_SET: usize = {{ L1D_SET }};
 static_assertions::const_assert!(HARVARD_PRI_D_CACHE_SET.is_power_of_two());
 
 /**
@@ -185,7 +215,8 @@ pub const SHARED_CACHE_ASSO: usize = {{ L2_WAY }}; // with 16 and 64, each cache
  * The number of sets of the shared cache for traffic recording.
  */
 pub const SHARED_CACHE_SET: usize = {{ L2_SET }};
-static_assertions::const_assert!(SHARED_CACHE_SET.is_power_of_two());
+static_assertions::const_assert!(SHARED_CACHE_SET % SIMULATED_CORE_COUNT == 0);
+static_assertions::const_assert!((SHARED_CACHE_SET / SIMULATED_CORE_COUNT).is_power_of_two());
 
 /**
  * SHARED_CACHE_EXCLUSIVE
@@ -245,10 +276,11 @@ pub const USE_INFINITE_DIRECTORY: bool = false;
 pub const INFINITE_DIRECTORY_SHARED_COUNT: usize = 32768;
 static_assertions::const_assert!(INFINITE_DIRECTORY_SHARED_COUNT.is_power_of_two());
 
-pub const FINITE_DIRECTORY_SET: usize = {{ DIRECTORY_SET }};
-static_assertions::const_assert!(FINITE_DIRECTORY_SET.is_power_of_two());
+pub const FINITE_DIRECTORY_SET: usize = {{ DIR_SET }};
+static_assertions::const_assert!(FINITE_DIRECTORY_SET % SIMULATED_CORE_COUNT == 0);
+static_assertions::const_assert!((FINITE_DIRECTORY_SET / SIMULATED_CORE_COUNT).is_power_of_two());
 
-pub const FINITE_DIRECTORY_ASSO: usize = {{ DIRECTORY_WAY }};
+pub const FINITE_DIRECTORY_ASSO: usize = {{ DIR_WAY }};
 
 /**
 * ADJACENT_LINE_PREFETCHING
@@ -256,6 +288,25 @@ pub const FINITE_DIRECTORY_ASSO: usize = {{ DIRECTORY_WAY }};
 * Whether to enable the adjacent (in PA) line prefetching for functional warming.
 */
 pub const ADJACENT_LINE_PREFETCHING: bool = false;
+
+/**
+* Parameters for SMS Prefetching
+*/
+pub const SMS_PREFETCHING: bool = {{ "true" if SMS_PREFETCHING else "false" }};
+pub const N_ACC: usize = 64; // Number of entries in the access table.
+pub const N_FILTER: usize = 32; // Number of entries in the filter table.
+pub const PHT_SETS: usize = {{ SMS_PHT_SET }}; // Number of sets in the PHT.
+pub const PHT_WAYS: usize = {{ SMS_PHT_WAY }}; // Number of ways in the PHT.
+pub const IDX_WIDTH: usize = 21; // Number of bits used to index the PHT.
+pub const N_BLK: usize = 32; // Number of blocks in the region.
+pub const PC_WIDTH: usize = IDX_WIDTH - N_BLK.trailing_zeros() as usize; // The number of PC bits used to index
+pub const SAT_CNT: bool = false; // Whether to use saturating counters or store bit patterns
+pub const SEP_RDWR: bool = false; // Whether to seperate read and write patterns
+pub const ROT: bool = false; // Whether to rotate the patterns when stored
+pub const PERFECT_PHT: bool = false; // Whether to use perfect PHT
+
+pub const N_PRINT_LOW: u64 = 0; // The lower bound of the access counter to print the access.
+pub const N_PRINT_UP: u64 = 100_000_000; // The upper bound of the access counter to print the access.
 
 /**
  * BP_GSHARE_SET
@@ -270,7 +321,7 @@ static_assertions::const_assert!(BP_GSHARE_SET.is_power_of_two());
  *
  * The number of sets of the BTB.
  */
-pub const BTB_SET: usize = 4096;
+pub const BTB_SET: usize = {{ BTB_SET }};
 static_assertions::const_assert!(BTB_SET.is_power_of_two());
 
 /**
@@ -278,7 +329,7 @@ static_assertions::const_assert!(BTB_SET.is_power_of_two());
  *
  * The associativity of the BTB.
  */
-pub const BTB_ASSO: usize = 4;
+pub const BTB_ASSO: usize = {{ BTB_WAY }};
 
 /**
  * BP_RAS_COUNT
@@ -293,8 +344,8 @@ use crate::components::Plugin;
 #[derive(PluginHelper)]
 pub struct PluginList {
     // Please comment out the plugins that you don't want to use.
-    _pb: crate::BranchPredictorPlugin,
-    _lm: crate::ParallelCacheHierarchyPlugin,
+    {{ "//" if NO_MICROARCHITECTURE else "" }} _pb: crate::BranchPredictorPlugin,
+    {{ "//" if NO_MICROARCHITECTURE else "" }} _lm: crate::ParallelCacheHierarchyPlugin,
     // _lm: crate::SingleCacheHierarchyPlugin,
     // _t: crate::TracePlugin,
 }
@@ -328,3 +379,37 @@ pub const ENABLE_EXCLUSIVE_CACHE_STATE: bool = true;
  */
 pub const ENABLE_CACHE_LINE_HISTORY: bool = false;
 
+/**
+ * Checkpoint serialization format.
+ *
+ * When true, use rkyv for checkpoint serialization (faster and more compact).
+ * When false, use JSON for checkpoint serialization (human-readable, backward compatible).
+ *
+ * Note: MMU serialization always uses JSON due to checkpoint conversion requirements.
+ */
+pub const USE_RKYV_SERIALIZATION: bool = true;
+
+/**
+ * Whether to record the on-chip network hop count for each memory access.
+ *
+ * This is used for a finer-grained IPC model that considers the on-chip network latency. It can be useful for debugging and testing the cache hierarchy and the coherence protocol.
+ */
+pub const RECORD_ON_CHIP_NETWORK_HOP: bool = true;
+static_assertions::const_assert!(ENABLE_STATISTICS || !RECORD_ON_CHIP_NETWORK_HOP);
+
+/**
+ * Whether to record the on-chip network traffic (NocTraffic) for each memory access.
+ *
+ * Disabled by default because NocTraffic recording adds per-access overhead.
+ * Enable only when the traffic matrix CSV output is needed.
+ */
+pub const RECORD_NOC_TRAFFIC: bool = false;
+static_assertions::const_assert!(ENABLE_STATISTICS || !RECORD_NOC_TRAFFIC);
+
+/**
+ * The position of DRAM controller.
+ *
+ * This is used to calculate the on-chip network hop count for each memory access. The DRAM controller is considered as the root of the on-chip network, and the hop count is calculated based on the distance from the core to the DRAM controller.
+ */
+pub const DRAM_CONTROLLER_COUNT: usize = {{ MEM_CTL_COUNT }};
+pub const DRAM_POSITION: [u64; DRAM_CONTROLLER_COUNT] = [{{ MEM_CTL_POSITION }}];

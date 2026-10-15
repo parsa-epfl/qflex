@@ -23,30 +23,35 @@ QFlex can be found in the [documentation](https://parsa-epfl.github.io/qflex/qui
 
 ### 1. Tools
 
-The following tools should be installed to start QFlex
+- [git](https://git-scm.com/)
+- [uv](https://docs.astral.sh/uv/), which runs the `./qflex` CLI
+- [Nix](https://nixos.org/) with flakes or [docker](https://www.docker.com/), to build the simulation stack
 
-- [Python, pip](https://www.python.org/) >= 3.9
-- [docker](https://www.docker.com/)
-
-### 2. Clone repositories
+### 2. Clone the repository
 ```sh
-git clone --recursive git@github.com:parsa-epfl/qflex.git
-```
-
-### 3. Build the python requirements
-```sh
+git clone --recursive https://github.com/parsa-epfl/qflex.git
 cd qflex
-pip install -r requirements.txt
 ```
 
-
-### 4. Start the docker image
-
+### 3. Create a working folder
+QFlex keeps the disk images (including the downloaded prebuilt workloads) and the experiments in one working folder,
+`<WORK_DIR>/images` and `<WORK_DIR>/experiments`. Create it somewhere with enough space, outside the repository:
 ```sh
-./dep --start-docker --worm
+mkdir -p <WORK_DIR>
 ```
 
-### 5. Show the help from QFlex cli inside the docker image
+### 4. Build the simulation stack
+With Nix, in a pure shell:
+```sh
+nix develop -i --keep HOME --command just all
+```
+Or start the Docker image, which contains the built stack, with the working folder mounted (at the same path):
+```sh
+uv run ./dep start-docker --worm --mounting-folder <WORK_DIR>
+```
+
+### 5. Run the CLI
+From the repository root (inside the Docker container if you use Docker):
 ```sh
 ./qflex --help
 ```

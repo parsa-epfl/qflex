@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Annotated, List, Dict
 import functools
 
@@ -16,7 +17,7 @@ def data_class_wrap(*args):
     params = []
     nested_params_names_nested = set()
     
-    root_name_to_init_funciton: Dict[str, callable] = {}
+    root_name_to_init_funciton: Dict[str, Callable] = {}
     root_name_to_params: Dict[str, List[inspect.Parameter]]={}
     
     for arg in args:
@@ -74,7 +75,8 @@ def data_class_wrap(*args):
 
         # TODO this order of appending always thinks the values coming from composites are none defaults
         params_final = list(params)+func_params
-        wrapper.__signature__ = inspect.Signature(parameters=params_final)
+        # typer reads the parameters from __signature__; ty does not model attributes set on functools.wraps wrappers
+        wrapper.__signature__ = inspect.Signature(parameters=params_final)  # ty: ignore[unresolved-attribute]
 
 
         return wrapper

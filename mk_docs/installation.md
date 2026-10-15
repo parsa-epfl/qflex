@@ -1,132 +1,183 @@
 ---
 title: Installation
-description: Clone the repository, install CLI requirements, and start the Docker image.
-tags: [install, setup, docker]
+description: Clone the repository, build QFlex with Nix or Docker, and set up the CLI.
+tags: [install, setup, nix, docker]
 ---
 
 # Installation
 
-Follow these steps to set up the CLI and start the Docker image.
+QFlex has two parts:
+
+- the **simulation stack**: two QEMUs (`fw-qemu` for functional warming, `timing-qemu` for detailed simulation), the Flexus simulators and `bxdb`. It is built once, with **Nix** or inside **Docker**;
+- the **`./qflex` CLI**, a Python script that drives the experiments. It runs through [uv](https://docs.astral.sh/uv/).
 
 ---
 
 ## Prerequisites
 
-- **Git** and **Python 3.9+**
-- **Docker** running locally (Docker Desktop on Windows, Docker Engine on Linux)
-- (Optional) **SSH key** configured for GitHub if using the SSH clone URL
-
-!!! note "Cloning over SSH"
-    The command below uses the SSH URL. Ensure your GitHub SSH key is set up and loaded (e.g., `ssh -T git@github.com`).  
-    Prefer HTTPS? Replace the URL accordingly.
+- **Git**
+- **uv**, for the CLI (step 2)
+- **Nix** with flakes enabled, **or** **Docker** (step 4)
+- **Linux** with **userfaultfd** allowed for your user (`vm.unprivileged_userfaultfd = 1`), when running natively:
+  the timing simulation loads checkpoints on demand through it (see the
+  [Quickstart's troubleshooting](quickstart.md#troubleshooting))
+- Disk space for a **working folder** (step 3): prebuilt workloads take a few GB to over 100 GB each
 
 ---
 
 ## 1) Clone the repository
 
 <!-- termynal -->
-``` bash
+```bash
 
-$ git clone --recursive git@github.com:parsa-epfl/qflex.git
+$ git clone --recursive https://github.com/parsa-epfl/qflex.git
 $ cd qflex
 
 ```
 
+`--recursive` also clones the submodules (the QEMUs, Flexus, WormCache and bxdb).
+
 ---
 
-## 2) Install requirements for the CLI
+## 2) Install uv for the CLI
+
+The CLI's Python dependencies are locked in `pyproject.toml` / `uv.lock`. Install uv once:
 
 ```bash
-pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# or, with Nix
+nix profile install nixpkgs#uv
 ```
 
-!!! tip "Use a virtual environment (recommended)"
-    ```bash
-    python -m venv .venv
-    # macOS/Linux
-    source .venv/bin/activate
-    # Windows (PowerShell)
-    .\.venv\Scripts\Activate.ps1
+`./qflex` runs itself through uv (see its shebang): the first run creates `.venv` from the lock file, downloading the pinned Python version if needed, and later runs reuse it.
 
-    pip install -r requirements.txt
-    ```
+!!! note "Run from the repository root"
+    uv finds `pyproject.toml` from the current directory, and the commands expect the repository layout, so always run `./qflex` from the repository root.
 
 ---
 
-## 3) Start the Docker image
+## 3) Create a working folder
 
-=== "Windows (PowerShell)"
-    <!-- termynal -->
-    ```powershell
+QFlex keeps all its data in one **working folder**, `<WORK_DIR>` in this documentation. It holds:
 
-    $ python dep start-docker --worm --mounting-folder <mounting_folder>
+- `<WORK_DIR>/images/`: the disk images, including the downloaded prebuilt workloads (`images/prebuilt/<id>/`);
+- `<WORK_DIR>/experiments/`: one folder per experiment, with its configuration, checkpoints and results.
 
-    ```
-
-=== "Linux"
-    <!-- termynal -->
-    ```bash
-
-    $ ./dep start-docker --worm --mounting-folder <mounting_folder>
-
-    ```
-
----
-
-## Verify
-
-After the container starts, run:
+Choose a location with enough space, outside the repository, and create it:
 
 <!-- termynal -->
 ```bash
 
-$ ./qflex --help
+$ mkdir -p <WORK_DIR>
 
 ```
-You should see qflex command-line options.
 
+Every `./qflex` command takes it as `--working-folder <WORK_DIR>` (written once in `qflex.args`, see the
+[Quickstart](quickstart.md)). Images are the largest part: to keep them on another disk, make `<WORK_DIR>/images` a
+symbolic link.
 
 ---
 
-## Need more on Docker or dependencies?
+## 4) Build the simulation stack
 
-!!! tip "Where to look next"
-    - Read the **Docker** guide for container usage, mounts, and troubleshooting: [Docker](reference/docker.md)
-    - Use the **dep** helper to explore commands and manage dependencies:
-      ```bash
-      # Linux/macOS
-      ./dep --help
+=== "Nix"
+    The flake provides the whole toolchain (LLVM 19, Boost 1.83, Rust, `just`, ...). Build everything in a **pure** shell (`-i`), so that nothing from the host environment leaks into the build:
+    <!-- termynal -->
+    ```bash
 
-      # Windows (PowerShell)
-      python dep --help
-      ```
-    - To (re)start the container with your workspace mounted:
-      ```bash
-      # Linux/macOS
-      ./dep start-docker --worm --mounting-folder <mounting_folder>
+    $ nix develop -i --keep HOME --command just all
 
-      # Windows (PowerShell)
-      python dep start-docker --worm --mounting-folder <mounting_folder>
-      ```
+    ```
 
+    - `-i` clears the environment; `--keep HOME` keeps only `HOME`, which cargo needs for its crate cache (`~/.cargo`).
+    - For an interactive build shell, run `nix develop -i --keep HOME` and then `just ...` (`just --list` shows every recipe).
+
+    !!! warning "Nix is only the build environment"
+        Run `./qflex` **outside** the Nix shell: uv is not part of it. qflex still uses Nix where it compiles: the build records `nix` in `out/build-env`, and every experiment then builds its WormCache plugin with `nix develop -i --keep HOME <qflex>`, the same toolchain as the QEMUs it plugs into. `nix` must therefore stay in your `PATH`.
+
+=== "Docker"
+    Start the QFlex container with your working folder mounted:
+    <!-- termynal -->
+    ```bash
+
+    $ uv run ./dep start-docker --worm --mounting-folder <WORK_DIR>
+
+    ```
+
+    `--mounting-folder` mounts `<WORK_DIR>` into the container **at the same path**, so the images and experiments stay
+    on your machine and `--working-folder <WORK_DIR>` works the same inside and outside the container. If
+    `<WORK_DIR>/images` is a symbolic link to another disk, mount that disk too, or the link is broken inside the
+    container.
+
+    The image contains the built stack and the CLI's environment, so `./qflex` works directly inside the container. See [Docker](reference/docker.md) for the options of `dep`.
+
+---
+
+## 5) Verify
+
+=== "Nix"
+    In the repository, these files exist:
+
+    | Path | What it is |
+    |------|------------|
+    | `fw-qemu/build/qemu-system-aarch64`, `fw-qemu/build/qemu-img` | Functional warming QEMU |
+    | `timing-qemu/build/qemu-system-aarch64` | Detailed (timing) QEMU |
+    | `out/kraken/mem{1,2,4,6,8}/lib{knottykraken,semikraken}.so` | Flexus simulators, one variant per memory controller count |
+    | `bxdb/target/release/bxdb` | Checkpoint database tool |
+    | `out/build-env` | `nix`: experiments build WormCache with Nix too |
+
+    Then, from the repository root (outside the Nix shell):
+
+    <!-- termynal -->
+    ```bash
+
+    $ ./qflex --help
+
+    ```
+
+=== "Docker"
+    Inside the container, in `/home/dev/qflex`, these files exist:
+
+    | Path | What it is |
+    |------|------------|
+    | `fw-qemu-saved/build/qemu-system-aarch64`, `fw-qemu-saved/build/qemu-img` | Functional warming QEMU |
+    | `timing-qemu-saved/build/qemu-system-aarch64` | Detailed (timing) QEMU |
+    | `kraken_out/mem{1,2,4,6,8}/lib{knottykraken,semikraken}.so` | Flexus simulators, one variant per memory controller count |
+    | `bxdb/target/release/bxdb` | Checkpoint database tool |
+    | `WormCache/` | WormCache source, built for each experiment (only in the `--worm` image) |
+    | `out/build-env` | `native`: experiments build WormCache with the container's cargo |
+
+    The image provides the binaries; `dep start-docker` mounts the CLI (`qflex`, `commands/`, `templates/` and the
+    helper scripts) from your checkout over them. Then, in the container:
+
+    <!-- termynal -->
+    ```bash
+
+    $ ./qflex --help
+
+    ```
+
+You should see the list of commands, including `image`. Continue with the [Quickstart](quickstart.md).
+
+---
 
 ## Troubleshooting
 
 ??? warning "Common issues"
-    **Permission denied on `./dep` (Linux)**  
-    Make it executable:  
-    ```bash
-    chmod +x dep
-    ```
+    **`./qflex`: `uv: command not found`**
+    You are probably inside `nix develop`; leave it (`exit`), or install uv (step 2).
 
-    **Docker not found / not running**  
-    Start Docker Desktop (Windows) or the Docker daemon (Linux):  
-    ```bash
-    systemctl status docker
-    ```
+    **`error: experimental Nix feature 'flakes' is disabled`**
+    Enable flakes, e.g. add `experimental-features = nix-command flakes` to `~/.config/nix/nix.conf`.
 
-    **SSH clone fails**  
-    Test your SSH setup:  
-    ```bash
-    ssh -T git@github.com
-    ```
+    **`QFlex was built with Nix (.../out/build-env), but nix is not in PATH`**
+    qflex builds the WormCache plugin of each experiment with Nix (see step 4); make `nix` available where you run `./qflex`.
+
+    **Permission denied on `./dep` or `./qflex` (Linux)**
+    Make it executable: `chmod +x dep qflex`.
+
+    **Docker not found / not running**
+    Start Docker Desktop (Windows) or the Docker daemon (Linux): `systemctl status docker`.
+
+!!! tip "More on the build"
+    The recipes live in `./justfile`; [docs/01-BUILD-FLEXUS.md](https://github.com/parsa-epfl/qflex/blob/main/docs/01-BUILD-FLEXUS.md) covers building without Nix or Docker, the build profiles and the Flexus variants.

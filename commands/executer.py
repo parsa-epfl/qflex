@@ -6,7 +6,7 @@ import os
 class Executor(abc.ABC):
 
     @abc.abstractmethod
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         pass
 
     def execute(self, to_stdio: bool = True, run_in_background: bool = False):

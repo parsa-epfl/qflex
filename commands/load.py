@@ -10,7 +10,7 @@ class Load(Executor):
         self.experiment_context = experiment_context
         self.qemu_common_parser = QemuCommonArgParser(experiment_context)
 
-    def cmd(self) -> str:
+    def cmd(self) -> str | list[str]:
         
         load_cmd = f"""
         ./qemu-system-aarch64 \
@@ -18,7 +18,7 @@ class Load(Executor):
         {self.qemu_common_parser.quantum_args()}
         """
     
-        # WormCacheQFlex/src/parameter.rss
+        # WormCache/src/parameter.rss
         return [
             f"cd {self.experiment_context.get_experiment_folder_address()}/run", 
             load_cmd
