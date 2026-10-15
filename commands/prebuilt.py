@@ -7,7 +7,7 @@ The catalog is the S3 bucket listing at PREBUILT_URL. Each prebuilt workload is 
     config.json   machine settings the snapshot was taken with (cores, memory, network)
     root.qcow2    guest disk, with the disk snapshot entry "base"
     base.zstd     RAM/device state of the "base" snapshot (read by -loadvm base)
-`./qflex image pull` downloads them to `<image_folder>/prebuilt/<cores>/<workload>/`; experiments
+`./qflex image pull` downloads them to `<working-folder>/images/prebuilt/<cores>/<workload>/`; experiments
 then copy root.qcow2 from there and link base.zstd (see ExperimentContext.set_up_prebuilt_image).
 """
 import json

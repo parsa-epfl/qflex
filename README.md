@@ -33,23 +33,30 @@ git clone --recursive https://github.com/parsa-epfl/qflex.git
 cd qflex
 ```
 
-### 3. Build the simulation stack
+### 3. Create a working folder
+QFlex keeps the disk images (including the downloaded prebuilt workloads) and the experiments in one working folder,
+`<WORK_DIR>/images` and `<WORK_DIR>/experiments`. Create it somewhere with enough space, outside the repository:
+```sh
+mkdir -p <WORK_DIR>
+```
+
+### 4. Build the simulation stack
 With Nix, in a pure shell:
 ```sh
 nix develop -i --keep HOME --command just all
 ```
-Or start the Docker image, which contains the built stack:
+Or start the Docker image, which contains the built stack, with the working folder mounted (at the same path):
 ```sh
-uv run ./dep start-docker --worm --mounting-folder <MOUNT_DIR>
+uv run ./dep start-docker --worm --mounting-folder <WORK_DIR>
 ```
 
-### 4. Run the CLI
+### 5. Run the CLI
 From the repository root (inside the Docker container if you use Docker):
 ```sh
 ./qflex --help
 ```
 
-### 5. Follow the quick start guide
+### 6. Follow the quick start guide
 Follow the quick start on our documentation page: [Quick Start Guide](https://parsa-epfl.github.io/qflex/quickstart/). The guide will help you start your workload and study it using QFlex. It will also help you understand how statistical sampling helps with both accuracy and speed and how to use it within QFlex.
 
 

@@ -17,7 +17,8 @@ QFlex has two parts:
 
 - **Git**
 - **uv**, for the CLI (step 2)
-- **Nix** with flakes enabled, **or** **Docker** (step 3)
+- **Nix** with flakes enabled, **or** **Docker** (step 4)
+- Disk space for a **working folder** (step 3): prebuilt workloads take a few GB to over 100 GB each
 
 ---
 
@@ -52,7 +53,29 @@ nix profile install nixpkgs#uv
 
 ---
 
-## 3) Build the simulation stack
+## 3) Create a working folder
+
+QFlex keeps all its data in one **working folder**, `<WORK_DIR>` in this documentation. It holds:
+
+- `<WORK_DIR>/images/`: the disk images, including the downloaded prebuilt workloads (`images/prebuilt/<id>/`);
+- `<WORK_DIR>/experiments/`: one folder per experiment, with its configuration, checkpoints and results.
+
+Choose a location with enough space, outside the repository, and create it:
+
+<!-- termynal -->
+```bash
+
+$ mkdir -p <WORK_DIR>
+
+```
+
+Every `./qflex` command takes it as `--working-folder <WORK_DIR>` (written once in `qflex.args`, see the
+[Quickstart](quickstart.md)). Images are the largest part: to keep them on another disk, make `<WORK_DIR>/images` a
+symbolic link.
+
+---
+
+## 4) Build the simulation stack
 
 === "Nix"
     The flake provides the whole toolchain (LLVM 19, Boost 1.83, Rust, `just`, ...). Build everything in a **pure** shell (`-i`), so that nothing from the host environment leaks into the build:
@@ -70,13 +93,13 @@ nix profile install nixpkgs#uv
         Run `./qflex` **outside** the Nix shell: uv is not part of it. qflex still uses Nix where it compiles: the build records `nix` in `out/build-env`, and every experiment then builds its WormCache plugin with `nix develop -i --keep HOME <qflex>`, the same toolchain as the QEMUs it plugs into. `nix` must therefore stay in your `PATH`.
 
 === "Docker"
-    Start the QFlex container, mounting the folder that will hold your images and experiments:
+    Start the QFlex container with your working folder mounted:
 
     === "Linux"
         <!-- termynal -->
         ```bash
 
-        $ uv run ./dep start-docker --worm --mounting-folder <MOUNT_DIR>
+        $ uv run ./dep start-docker --worm --mounting-folder <WORK_DIR>
 
         ```
 
@@ -84,15 +107,20 @@ nix profile install nixpkgs#uv
         <!-- termynal -->
         ```powershell
 
-        $ uv run python dep start-docker --worm --mounting-folder <MOUNT_DIR>
+        $ uv run python dep start-docker --worm --mounting-folder <WORK_DIR>
 
         ```
+
+    `--mounting-folder` mounts `<WORK_DIR>` into the container **at the same path**, so the images and experiments stay
+    on your machine and `--working-folder <WORK_DIR>` works the same inside and outside the container. If
+    `<WORK_DIR>/images` is a symbolic link to another disk, mount that disk too, or the link is broken inside the
+    container.
 
     The image contains the built stack and the CLI's environment, so `./qflex` works directly inside the container. See [Docker](reference/docker.md) for the options of `dep`.
 
 ---
 
-## 4) Verify
+## 5) Verify
 
 After a Nix build, these files exist:
 
@@ -127,7 +155,7 @@ You should see the list of commands, including `image`. Continue with the [Quick
     Enable flakes, e.g. add `experimental-features = nix-command flakes` to `~/.config/nix/nix.conf`.
 
     **`QFlex was built with Nix (.../out/build-env), but nix is not in PATH`**
-    qflex builds the WormCache plugin of each experiment with Nix (see step 3); make `nix` available where you run `./qflex`.
+    qflex builds the WormCache plugin of each experiment with Nix (see step 4); make `nix` available where you run `./qflex`.
 
     **Permission denied on `./dep` or `./qflex` (Linux)**
     Make it executable: `chmod +x dep qflex`.

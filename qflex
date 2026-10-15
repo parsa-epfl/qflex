@@ -1,10 +1,11 @@
 #!/usr/bin/env -S uv run python
 
+import os
 import typer
 from typing import Annotated
 from commands.createimage import CreateImage
 from commands.boot import Boot
-from commands.config import ExperimentContext
+from commands.config import ExperimentContext, get_images_folder
 from commands.load import Load
 from commands.init_warm import InitWarm
 from commands.functional_warming import FunctionalWarming
@@ -15,7 +16,7 @@ from commands.result import RunResultCommand, TrainCommand
 from commands import prebuilt
 from rich.console import Console
 from rich.table import Table
-from typer_inputs.config import ExperimentContextTyper
+from typer_inputs.config import ExperimentContextTyper, WorkingFolderOption, RemovedImageFolderOption, reject_removed_folder_options
 from typer_inputs.config_wrapper import data_class_wrap
 
 app = typer.Typer(
@@ -24,22 +25,22 @@ app = typer.Typer(
 )
 
 
-@app.command(help='creates a base image for qemu using alpine in the images folder in root, can be used in next steps')
+@app.command(help='creates an empty base image for qemu in <working-folder>/images, to install alpine on with boot --use-cd-rom')
 def create_base_image(
-    image_folder: Annotated[str, typer.Option(
-        help="Where to create the image"
-    )] = ".",
+    working_folder: WorkingFolderOption = ".",
     image_name: Annotated[str,typer.Option(
         help="Name of the base image file to create."
     )] = "root.qcow2",
-    image_size_gb: Annotated[int, typer.Option(help="Size of the base image in GB.")] = 8
+    image_size_gb: Annotated[int, typer.Option(help="Size of the base image in GB.")] = 8,
+    image_folder: RemovedImageFolderOption = None,
 ):
     """
     Create a base image for QEMU.
     This is the first step to create the images for an experiment.
     """
+    reject_removed_folder_options(image_folder=image_folder)
     create_image_executor = CreateImage(
-        image_folder=image_folder,
+        image_folder=get_images_folder(working_folder),
         image_name=image_name,
         size_gb=image_size_gb
     )
@@ -241,7 +242,6 @@ def train(
 image_app = typer.Typer(help="List and download prebuilt workloads (disk + base snapshot), to start experiments directly from initialize with --prebuilt-workload.")
 app.add_typer(image_app, name="image")
 
-ImageFolderOption = Annotated[str, typer.Option(help="Image folder; prebuilt workloads are stored in <image-folder>/prebuilt/<id>.")]
 CatalogUrlOption = Annotated[str, typer.Option(help="Base URL of the prebuilt workload bucket (or set QFLEX_PREBUILT_URL).")]
 
 
@@ -260,24 +260,30 @@ def print_prebuilt_table(catalog: list[prebuilt.PrebuiltWorkload], image_folder:
 
 @image_app.command("list")
 def image_list(
-    image_folder: ImageFolderOption = "./images",
+    working_folder: WorkingFolderOption = ".",
     url: CatalogUrlOption = prebuilt.PREBUILT_URL,
+    image_folder: RemovedImageFolderOption = None,
 ):
     """
-    List the prebuilt workloads available online. IDs are <core count>/<workload>, e.g. 16c/dc.
+    List the prebuilt workloads available online, and whether they are downloaded in the working folder.
+    IDs are <core count>/<workload>, e.g. 16c/dc.
     """
-    print_prebuilt_table(prebuilt.fetch_catalog(url), image_folder)
+    reject_removed_folder_options(image_folder=image_folder)
+    print_prebuilt_table(prebuilt.fetch_catalog(url), get_images_folder(working_folder))
 
 
 @image_app.command("pull")
 def image_pull(
     workload_id: Annotated[str, typer.Argument(help="ID of the prebuilt workload, e.g. 16c/dc. Omit to choose from a list.")] = "",
-    image_folder: ImageFolderOption = "./images",
+    working_folder: WorkingFolderOption = ".",
     url: CatalogUrlOption = prebuilt.PREBUILT_URL,
+    image_folder: RemovedImageFolderOption = None,
 ):
     """
-    Download a prebuilt workload to <image-folder>/prebuilt/<id>. Interrupted downloads resume when pulled again.
+    Download a prebuilt workload to <working-folder>/images/prebuilt/<id>. Interrupted downloads resume when pulled again.
     """
+    reject_removed_folder_options(image_folder=image_folder)
+    image_folder = get_images_folder(working_folder)
     catalog = prebuilt.fetch_catalog(url)
     if workload_id:
         workload = prebuilt.find_workload(catalog, workload_id)
@@ -291,7 +297,7 @@ def image_pull(
     config = prebuilt.load_prebuilt_config(folder)
     print(f"Downloaded {workload.id} to {folder}:")
     print(f"  cpu_cores={config['cpu_cores']} measured_core_count={config['measured_core_count']} memory={config['memory']} network_card={config['network_card']}")
-    print(f"Start an experiment from it with --prebuilt-workload {workload.id} --image-folder {image_folder}")
+    print(f"Start an experiment from it with --prebuilt-workload {workload.id} --working-folder {os.path.abspath(working_folder)}")
 
 
 if __name__ == "__main__":

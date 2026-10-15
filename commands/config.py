@@ -68,17 +68,22 @@ def find_run_file(name: str) -> str:
 # TODO check all the variables to match with the variables in templates
 # For anyone checking this with old scripts, all worklaod, and core information is combined into the cli, as it's part of the CLI paramers now
 
+def get_images_folder(working_folder: str) -> str:
+    """Images of the working folder: disks created with create-base-image, and prebuilt workloads in prebuilt/<id>."""
+    return os.path.join(os.path.abspath(working_folder), "images")
+
+
 def get_experiment_folder_address(
-    mounting_folder: str,
+    working_folder: str,
     experiment_name: str
 ) -> str:
     # check if working directory exists
-    if not os.path.isdir(mounting_folder):
-        raise ValueError(f"Working directory {mounting_folder} does not exist.")
+    if not os.path.isdir(working_folder):
+        raise ValueError(f"Working folder {working_folder} does not exist.")
     # create experiments if it doesn't exist
-    if not os.path.isdir(f'{mounting_folder}/experiments'):
-        os.makedirs(f'{mounting_folder}/experiments', exist_ok=False)
-    path = f'{mounting_folder}/experiments/{experiment_name}'
+    if not os.path.isdir(f'{working_folder}/experiments'):
+        os.makedirs(f'{working_folder}/experiments', exist_ok=False)
+    path = f'{working_folder}/experiments/{experiment_name}'
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=False)
     return os.path.abspath(path)
@@ -155,19 +160,19 @@ class ExperimentContext(BaseModel):
     """
     experiment_name: str = Field(description="Name of the experiment")
     # TODO move image name to the workload section
-    image_folder: str = Field(description="Address of the image to use")
+    image_folder: str = Field(description="Images of the working folder, <working_folder>/images")
     image_name: str = Field(description="Name of the image to use")
     simulation_context: SimulationContext = Field(description="Simulation context containing detailed configuration")
     workload: Workload = Field(description="Workload configuration")
-    mounting_folder: str = Field(default=".", description="Base working directory of qflex. use for shared folders")
+    working_folder: str = Field(default=".", description="Working folder of qflex, holding images/ and experiments/")
     keep_experiment_unique: bool = Field(default=True, description="Whether to keep the experiment folder unique by adding a timestamp")
     use_image_directly: bool = Field(default=False, description="Whether to use the image directly from image folder instead of copying it to experiments folder")
     loadvm_name: str = Field(default="", description="Name of the loadvm to use in QEMU, optional")
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     prebuilt_workload: str = Field(default="", description="ID of a prebuilt workload (e.g. 16c/dc) to start the experiment from, see ./qflex image list.")
 
-    def get_mounting_folder(self) -> str:
-        return self.mounting_folder
+    def get_working_folder(self) -> str:
+        return self.working_folder
 
     def get_experiment_folder_address(self) -> str:
         """
@@ -175,7 +180,7 @@ class ExperimentContext(BaseModel):
         """
         # TODO add some more document on how the folder structure works and why this is good that these folders get repeated for each experiment as it keeps them isolated and easy to copy and move
         # TODO clean this up later, but done this for when need to make a directory but don't have the full context
-        return get_experiment_folder_address(self.get_mounting_folder(), self.experiment_name)
+        return get_experiment_folder_address(self.get_working_folder(), self.experiment_name)
 
     def get_local_image_address(self) -> str:
         return self.image_address
@@ -227,7 +232,7 @@ class ExperimentContext(BaseModel):
         Sets the experiment up from a prebuilt workload (./qflex image pull). The first command copies the
         disk into run/ (the experiment writes snapshot entries into it) and links the read-only base.zstd;
         the choice is recorded in run/prebuilt.json, so later commands keep using run/root.qcow2 and ignore
-        --image-folder/--image-name.
+        --image-name.
         """
         run = f"{self.get_experiment_folder_address()}/run"
         record = self.get_prebuilt_record_address()
@@ -243,7 +248,7 @@ class ExperimentContext(BaseModel):
                 raise ValueError("Error: --prebuilt-workload cannot be combined with --use-image-directly.")
             source = get_prebuilt_folder(self.image_folder, self.prebuilt_workload)
             if not os.path.isfile(f"{source}/config.json"):
-                raise FileNotFoundError(f"Error: prebuilt workload {self.prebuilt_workload} not found in {source}. Download it with `./qflex image pull {self.prebuilt_workload} --image-folder {self.image_folder}`.")
+                raise FileNotFoundError(f"Error: prebuilt workload {self.prebuilt_workload} not found in {source}. Download it with `./qflex image pull {self.prebuilt_workload} --working-folder {self.working_folder}`.")
             config = load_prebuilt_config(source)
             self.validate_prebuilt_config(config)
             os.makedirs(run, exist_ok=True)
@@ -284,14 +289,10 @@ class ExperimentContext(BaseModel):
     def set_up_folders(self):
         # TODO go through all the files being copied with shanqing
 
-        if not os.path.exists(f"{self.get_mounting_folder()}/experiments"):
-            os.makedirs(f"{self.get_mounting_folder()}/experiments", exist_ok=False)
-        if not os.path.exists(f"{self.get_mounting_folder()}/images"):
-            os.makedirs(f"{self.get_mounting_folder()}/images", exist_ok=False)
+        os.makedirs(f"{self.get_working_folder()}/experiments", exist_ok=True)
+        os.makedirs(self.image_folder, exist_ok=True)
         if not os.path.exists(self.get_experiment_folder_address()):
             os.makedirs(self.get_experiment_folder_address(), exist_ok=False)
-        if not os.path.exists(f"{self.image_folder}"):
-            os.makedirs(f"{self.image_folder}")
 
         # Find the built files first, so a missing build fails before the image is copied.
         run_files = {name: find_run_file(name) for name in RUN_FILES}
@@ -391,12 +392,13 @@ class ExperimentContext(BaseModel):
         
 
 
-def find_prebuilt_config(mounting_folder: str, experiment_name: str, image_folder: str, prebuilt_workload: str) -> dict | None:
+def find_prebuilt_config(working_folder: str, experiment_name: str, prebuilt_workload: str) -> dict | None:
     """
     config.json of the prebuilt workload of the experiment: run/prebuilt.json once the experiment is set up
     (so later commands do not need --prebuilt-workload), else the downloaded one. None without a prebuilt workload.
     """
-    record = f"{mounting_folder}/experiments/{experiment_name}/run/prebuilt.json"
+    image_folder = get_images_folder(working_folder)
+    record = f"{working_folder}/experiments/{experiment_name}/run/prebuilt.json"
     if os.path.exists(record):
         with open(record) as f:
             config = json.load(f)
@@ -411,7 +413,7 @@ def find_prebuilt_config(mounting_folder: str, experiment_name: str, image_folde
         return None
     source = get_prebuilt_folder(image_folder, prebuilt_workload)
     if not os.path.isfile(f"{source}/config.json"):
-        raise FileNotFoundError(f"Error: prebuilt workload {prebuilt_workload} not found in {source}. Download it with `./qflex image pull {prebuilt_workload} --image-folder {image_folder}`.")
+        raise FileNotFoundError(f"Error: prebuilt workload {prebuilt_workload} not found in {source}. Download it with `./qflex image pull {prebuilt_workload} --working-folder {working_folder}`.")
     return load_prebuilt_config(source)
 
 
@@ -427,15 +429,13 @@ def create_experiment_context(
     workload_name: str | None,
     groups: list[CoreGroup] | None,
     population_seconds: float | None,
-    # experiment sections
-    image_folder: str,
     # Default parameters that can be induced from others
     experiment_name=None,
     image_name: str | None=None,
     keep_experiment_unique: bool = True,
     use_image_directly: bool = False,
     loadvm_name: str = "",
-    mounting_folder: str = ".",
+    working_folder: str = ".",
     # Default for simulation context
     check_period_quantum_coeff: float = 53.0,
     use_cd_rom: bool = False,
@@ -443,8 +443,8 @@ def create_experiment_context(
     prebuilt_workload: str = "",
 ) -> ExperimentContext:
     # TODO check this to make sure it doesn't have edge cases
-    mounting_folder = os.path.abspath(mounting_folder)
-    image_folder = os.path.abspath(image_folder)
+    working_folder = os.path.abspath(working_folder)
+    image_folder = get_images_folder(working_folder)
 
     if image_name is None:
         image_name = f"root.qcow2"
@@ -458,7 +458,7 @@ def create_experiment_context(
 
     # A prebuilt workload describes its machine and workload; given flags take precedence
     # (set_up_prebuilt_image rejects machine flags that do not match the snapshot).
-    config = find_prebuilt_config(mounting_folder, experiment_name, image_folder, prebuilt_workload)
+    config = find_prebuilt_config(working_folder, experiment_name, prebuilt_workload)
     if config is not None:
         measured = config["measured_core_count"]
         core_count = measured if core_count is None else core_count
@@ -505,7 +505,7 @@ def create_experiment_context(
         keep_experiment_unique=keep_experiment_unique,
         simulation_context=simulation_context,
         workload=workload,
-        mounting_folder=mounting_folder,
+        working_folder=working_folder,
         use_image_directly=use_image_directly,
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,

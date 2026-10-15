@@ -31,8 +31,7 @@ Without a prebuilt workload, `qflex.args` describes the machine and the workload
 --population-seconds 5
 --experiment-name web-search-8c-001
 --image-name root.qcow2
---image-folder <IMAGE_DIR>
---mounting-folder <MOUNT_DIR>
+--working-folder <WORK_DIR>
 --no-unique
 --use-image-directly
 ```
@@ -40,7 +39,7 @@ Without a prebuilt workload, `qflex.args` describes the machine and the workload
 - `--core-count` is the number of simulated cores: 1, 2, 4, 8, 16, 32, 48 or 64.
 - `--double-cores` gives the VM twice as many vCPUs: the second half runs the workload's client, as the `phantom`
   [core group](quickstart.md#core-groups). Add `--groups` to describe several workloads or other IPC estimates.
-- `--use-image-directly` makes the experiment use `<IMAGE_DIR>/<image name>` itself instead of a copy, so the
+- `--use-image-directly` makes the experiment use `<WORK_DIR>/images/<image name>` itself instead of a copy, so the
   snapshots saved in the steps below stay in your image.
 - Keep the machine settings (`--core-count`, `--double-cores`, `--memory-gb`, `--network`) the same in every step:
   a snapshot only restores on the machine it was taken on.
@@ -54,12 +53,12 @@ As in the Quickstart, write absolute paths: `xargs` does not expand `~` or `$VAR
 <!-- termynal -->
 ```bash
 
-$ ./qflex create-base-image --image-folder <IMAGE_DIR> --image-name root.qcow2
+$ ./qflex create-base-image --working-folder <WORK_DIR> --image-name root.qcow2
 
 ```
 
-This creates an empty qcow2 disk (8 GB; change it with `--image-size-gb`). Use the same `--image-folder` and
-`--image-name` as in `qflex.args`.
+This creates an empty qcow2 disk `<WORK_DIR>/images/root.qcow2` (8 GB; change it with `--image-size-gb`). Use the
+same `--working-folder` and `--image-name` as in `qflex.args`.
 
 ---
 

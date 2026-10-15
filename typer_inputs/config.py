@@ -4,6 +4,23 @@ from commands.config import create_experiment_context, ExperimentContext
 from commands.workload import parse_groups
 from .typer_base import TyperDataClassMeta
 
+WorkingFolderOption = Annotated[str, typer.Option(
+    help="Working folder: experiments are created in <working-folder>/experiments, and images (including the "
+         "prebuilt workloads of ./qflex image pull) are kept in <working-folder>/images."
+)]
+# Replaced by --working-folder; kept hidden only to explain the change to old qflex.args files.
+RemovedMountingFolderOption = Annotated[Optional[str], typer.Option(hidden=True)]
+RemovedImageFolderOption = Annotated[Optional[str], typer.Option(hidden=True)]
+
+
+def reject_removed_folder_options(mounting_folder: Optional[str] = None, image_folder: Optional[str] = None):
+    if mounting_folder is not None:
+        raise typer.BadParameter(f"--mounting-folder was renamed to --working-folder: use --working-folder {mounting_folder}.")
+    if image_folder is not None:
+        raise typer.BadParameter("--image-folder was removed: images are always kept in <working-folder>/images. "
+                                 f"Move (or link) {image_folder} there, and pass --working-folder instead.")
+
+
 class ExperimentContextTyper(TyperDataClassMeta):
     """
     A class to hold metadata for Typer CLI dataclass inputs.
@@ -34,11 +51,8 @@ class ExperimentContextTyper(TyperDataClassMeta):
             help="Name of the experiment. Used for organizing output files."
         )] = 'default-experiment',
         image_name:  Annotated[str, typer.Option(
-            help="Name of the image file to load."
+            help="Name of the image file to load, in <working-folder>/images."
         )] = 'root.qcow2',
-        image_folder: Annotated[str, typer.Option(
-            help="Folder where images are stored."
-        )] = './images',
         unique: Annotated[bool, typer.Option(
             help="Whether to keep the experiment folder unique by adding a timestamp."
         )] = True,
@@ -48,9 +62,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         loadvm_name: Annotated[str, typer.Option(
             help="Name of the loadvm to use in QEMU, optional"
         )] = "",
-        mounting_folder: Annotated[str, typer.Option(
-            help="Mounting directory where the experiment folders will be created."
-        )] = ".",
+        working_folder: WorkingFolderOption = ".",
+        mounting_folder: RemovedMountingFolderOption = None,
+        image_folder: RemovedImageFolderOption = None,
         check_period_quantum_coeff: Annotated[float, typer.Option(
             help="Coefficient to determine the check period based on quantum size. The value multiplied by quantum size to get check period."
         )] = 53.0,
@@ -61,6 +75,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
                  "The first command copies its disk into the experiment's run folder; later commands reuse it. --loadvm-name defaults to base."
         )]="",
     ):
+        reject_removed_folder_options(mounting_folder, image_folder)
         print("quantum_size_ns:", quantum_size_ns)
         if unique:
             print("Unique experiment is deprecated, will skip adding timestamp.")
@@ -79,11 +94,10 @@ class ExperimentContextTyper(TyperDataClassMeta):
             workload_name=workload_name,
             groups=parse_groups(groups) if groups else None,
             population_seconds=population_seconds,
-            image_folder=image_folder,
             keep_experiment_unique=unique,
             use_image_directly=use_image_directly,
             loadvm_name=loadvm_name,
-            mounting_folder=mounting_folder,
+            working_folder=working_folder,
             check_period_quantum_coeff=check_period_quantum_coeff,
             use_cd_rom=use_cd_rom,
             machine_freq_ghz=machine_freq_ghz,

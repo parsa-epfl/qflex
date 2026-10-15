@@ -39,10 +39,14 @@ graph TD
 QFlex is built and `./qflex --help` works (see [Installation](installation.md)). Run every command from the
 repository root, and outside the Nix shell if you built with Nix.
 
-The examples use two folders:
+All the data lives in the **working folder** you created during the
+[installation](installation.md#3-create-a-working-folder), `<WORK_DIR>` in the examples (`--working-folder`); with
+Docker, it is the folder you mounted:
 
-- `<MOUNT_DIR>`: holds the experiments, in `<MOUNT_DIR>/experiments/<experiment name>/`;
-- `<IMAGE_DIR>`: holds the downloaded workloads, e.g. `<MOUNT_DIR>/images`.
+- `<WORK_DIR>/images/`: disk images, and the downloaded workloads in `images/prebuilt/<id>/`;
+- `<WORK_DIR>/experiments/<experiment name>/`: one folder per experiment.
+
+Images are large: to keep them on another disk, make `<WORK_DIR>/images` a symbolic link.
 
 ---
 
@@ -56,15 +60,15 @@ runs in steady state, plus a `config.json` describing the machine and the worklo
 ```bash
 
 $ ./qflex image list
-$ ./qflex image pull 2c/djd --image-folder <IMAGE_DIR>
+$ ./qflex image pull 2c/djd --working-folder <WORK_DIR>
 
 ```
 
-- `image list` shows every workload with its size; with `--image-folder`, it also marks the downloaded ones.
+- `image list` shows every workload with its size; with `--working-folder`, it also marks the downloaded ones.
 - Without an ID, `image pull` lets you choose from a numbered list.
 - An interrupted download resumes when you run `image pull` again.
 
-**Check.** `<IMAGE_DIR>/prebuilt/2c/djd/` holds `root.qcow2`, `base.zstd` and `config.json` (read-only), and
+**Check.** `<WORK_DIR>/images/prebuilt/2c/djd/` holds `root.qcow2`, `base.zstd` and `config.json` (read-only), and
 `image pull` printed the machine: `cpu_cores=4 measured_core_count=2 memory=64G network_card=none`.
 
 ??? info "What is in `config.json`"
@@ -95,8 +99,7 @@ pass them with `xargs`:
 
 ```text
 --prebuilt-workload 2c/djd
---image-folder <IMAGE_DIR>
---mounting-folder <MOUNT_DIR>
+--working-folder <WORK_DIR>
 --experiment-name djd-2c-001
 --quantum-size-ns 2000
 --llc-size-per-tile-mb 2
@@ -154,7 +157,7 @@ Init Warm then generates the configuration, builds the experiment's WormCache pl
 [Installation](installation.md)), and runs the workload until the long-term state is warm. It saves the result as
 the snapshot **`init_warmed`**.
 
-**Check.** In `<MOUNT_DIR>/experiments/djd-2c-001/`:
+**Check.** In `<WORK_DIR>/experiments/djd-2c-001/`:
 
 - `run/` has `root.qcow2`, `base.zstd` (a link), `prebuilt.json`, and at the end `init_warmed.*`
   (`init_warmed.bxdb`, `.state.zstd`, `.uarch`);
@@ -233,8 +236,8 @@ simulates its checkpoints one after the other: it converts the checkpoint to Fle
 <!-- termynal -->
 ```bash
 
-$ tail -f <MOUNT_DIR>/experiments/djd-2c-001/run/partition_0/log
-$ ls -d <MOUNT_DIR>/experiments/djd-2c-001/run/partition_*/result_* | wc -l
+$ tail -f <WORK_DIR>/experiments/djd-2c-001/run/partition_0/log
+$ ls -d <WORK_DIR>/experiments/djd-2c-001/run/partition_*/result_* | wc -l
 
 ```
 The second command counts the simulated checkpoints; the step is done when it reaches the sample size.
@@ -244,7 +247,7 @@ To stop the run, press **Ctrl+C** or kill `./qflex`: every partition and its QEM
 !!! tip "Debugging one partition"
     Run a partition by itself, with the same ratios, to see its output directly:
     ```bash
-    cd <MOUNT_DIR>/experiments/djd-2c-001/run/partition_0 && ./run_flexus.sh 2 1
+    cd <WORK_DIR>/experiments/djd-2c-001/run/partition_0 && ./run_flexus.sh 2 1
     ```
 
 ---
@@ -288,7 +291,7 @@ accurate. Then clean up and warm again with the suggested sample size:
 
 $ xargs -a ./qflex.args -- ./qflex train
 $ xargs -a ./qflex.args -- ./qflex partition-cleanup
-$ xargs -a ./qflex.args -- ./qflex fw --loadvm-name init_warmed --sample-size $(cat <MOUNT_DIR>/experiments/djd-2c-001/NEXT_SAMPLE_SIZE)
+$ xargs -a ./qflex.args -- ./qflex fw --loadvm-name init_warmed --sample-size $(cat <WORK_DIR>/experiments/djd-2c-001/NEXT_SAMPLE_SIZE)
 $ xargs -a ./qflex.args -- ./qflex partition --partition-count 16
 $ xargs -a ./qflex.args -- ./qflex run-partition --warming-ratio 2 --measurement-ratio 1
 $ xargs -a ./qflex.args -- ./qflex result
