@@ -15,22 +15,33 @@ simulation result, and then shows how to iterate. Each step ends with a **Check*
 
 ``` mermaid
 graph TD
-  W[Prebuilt workload, or Boot + Load] --> I[Init Warm];
+  W[Workload: prebuilt, or Boot + Load] --> I[Init Warm];
   I --> F[Functional Warming];
   F --> P[Partitioning];
   P --> RP[Run Partitions];
   RP --> R[Results];
-  R --> C{Check Results};
-  C -->|Number of Samples Is Enough| Fi[Finished];
-  C ---->|Number of Samples Is Not Enough| T[Train the timekeeping model];
+  R --> C{Sampling error within the bound?};
+  C -->|Yes| Fi[Finished];
+  C ---->|No| T[Train the timekeeping model];
   T --> CleanPartition[Clean Up Partitions];
   CleanPartition --> F;
 ```
 
-- **Init Warm** warms the long-term microarchitectural state (caches, TLBs, branch predictors) once per experiment.
-- **Functional Warming** runs the workload over the population and takes a checkpoint per sample.
-- **Partitioning** and **Run Partitions** simulate every checkpoint in detail, in parallel.
-- **Results** computes the sampling error and the sample size the next iteration needs.
+- **Workload** ([1](#1-download-a-prebuilt-workload)): a disk and a snapshot in which the workload already runs in
+  steady state. Download a prebuilt one with `image pull`, or prepare your own with `boot` and `load` (see
+  [Your own workload](own-workload.md)).
+- **Init Warm** (`initialize`, [3](#3-init-warm)) warms the long-term microarchitectural state (caches, TLBs, branch
+  predictors), once per experiment.
+- **Functional Warming** (`fw`, [4](#4-functional-warming)) runs the workload over the population and takes a
+  checkpoint per sample. It keeps the time of each vCPU with the **timekeeping model** (`cfg/core_info.csv`).
+- **Partitioning** (`partition`, [5](#5-partitioning)) splits the checkpoints into groups that run in parallel.
+- **Run Partitions** (`run-partition`, [6](#6-run-partitions)) simulates every checkpoint in detail with Flexus.
+- **Results** (`result`, [7](#7-results)) computes the sampling error and the sample size that meets the bound. If
+  the error is within the bound, the experiment is finished.
+- **Train the timekeeping model** (`train`, [8](#8-next-iteration)) fits the timekeeping model to the detailed
+  results, so that the next functional warming keeps time more accurately.
+- **Clean Up Partitions** (`partition-cleanup`, [8](#8-next-iteration)) removes the partitions and checkpoints of
+  the iteration; the next one starts again from Functional Warming, with the suggested sample size.
 
 ---
 
@@ -133,8 +144,8 @@ The vCPUs are split into groups, given as `name:cores[:ipc]`:
 
 - Each measured group runs one workload; more than one group makes a **consolidated** workload.
 - With `--double-cores`, the `phantom` group holds the client vCPUs `N…2N-1` of an `N`-core experiment.
-- The IPC is the starting estimate written to `cfg/core_info.csv` (default 2, phantom 4), until
-  [`train`](#8-next-iteration) fits the IPC model.
+- The IPC is the starting estimate of the timekeeping model, `cfg/core_info.csv` (default 2, phantom 4), until
+  [`train`](#8-next-iteration) fits the model to the detailed results.
 - Without `--groups` (and without a prebuilt workload), all cores form one group.
 - `result` and `train` use the measured groups as their default `--core-groups`.
 
@@ -282,9 +293,10 @@ bound (`--error`, default 5% at `--confidence` 95%). The exit code tells whether
 
 ## 8) Next iteration
 
-Functional warming models the speed of each vCPU with `cfg/core_info.csv`. The first iteration used the IPC
-estimates of the groups; `train` fits an IPC model from `timing.csv`, which makes the next functional warming more
-accurate. Then clean up and warm again with the suggested sample size:
+Functional warming keeps the time of each vCPU with the timekeeping model, `cfg/core_info.csv`. The first iteration
+used a constant IPC per group (the estimates of the [core groups](#core-groups)); `train` fits an IPC model per core
+group to the detailed results in `timing.csv`, which makes the next functional warming more accurate. Then clean up
+and warm again with the suggested sample size:
 
 <!-- termynal -->
 ```bash
