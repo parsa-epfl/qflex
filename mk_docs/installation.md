@@ -97,22 +97,12 @@ symbolic link.
 
 === "Docker"
     Start the QFlex container with your working folder mounted:
+    <!-- termynal -->
+    ```bash
 
-    === "Linux"
-        <!-- termynal -->
-        ```bash
+    $ uv run ./dep start-docker --worm --mounting-folder <WORK_DIR>
 
-        $ uv run ./dep start-docker --worm --mounting-folder <WORK_DIR>
-
-        ```
-
-    === "Windows (PowerShell)"
-        <!-- termynal -->
-        ```powershell
-
-        $ uv run python dep start-docker --worm --mounting-folder <WORK_DIR>
-
-        ```
+    ```
 
     `--mounting-folder` mounts `<WORK_DIR>` into the container **at the same path**, so the images and experiments stay
     on your machine and `--working-folder <WORK_DIR>` works the same inside and outside the container. If
@@ -125,24 +115,47 @@ symbolic link.
 
 ## 5) Verify
 
-After a Nix build, these files exist:
+=== "Nix"
+    In the repository, these files exist:
 
-| Path | What it is |
-|------|------------|
-| `fw-qemu/build/qemu-system-aarch64`, `fw-qemu/build/qemu-img` | Functional warming QEMU |
-| `timing-qemu/build/qemu-system-aarch64` | Detailed (timing) QEMU |
-| `out/kraken/mem{1,2,4,6,8}/lib{knottykraken,semikraken}.so` | Flexus simulators, one variant per memory controller count |
-| `bxdb/target/release/bxdb` | Checkpoint database tool |
-| `out/build-env` | `nix` (or `native` for a build outside Nix) |
+    | Path | What it is |
+    |------|------------|
+    | `fw-qemu/build/qemu-system-aarch64`, `fw-qemu/build/qemu-img` | Functional warming QEMU |
+    | `timing-qemu/build/qemu-system-aarch64` | Detailed (timing) QEMU |
+    | `out/kraken/mem{1,2,4,6,8}/lib{knottykraken,semikraken}.so` | Flexus simulators, one variant per memory controller count |
+    | `bxdb/target/release/bxdb` | Checkpoint database tool |
+    | `out/build-env` | `nix`: experiments build WormCache with Nix too |
 
-Then, from the repository root (outside the Nix shell):
+    Then, from the repository root (outside the Nix shell):
 
-<!-- termynal -->
-```bash
+    <!-- termynal -->
+    ```bash
 
-$ ./qflex --help
+    $ ./qflex --help
 
-```
+    ```
+
+=== "Docker"
+    Inside the container, in `/home/dev/qflex`, these files exist:
+
+    | Path | What it is |
+    |------|------------|
+    | `fw-qemu-saved/build/qemu-system-aarch64`, `fw-qemu-saved/build/qemu-img` | Functional warming QEMU |
+    | `timing-qemu-saved/build/qemu-system-aarch64` | Detailed (timing) QEMU |
+    | `kraken_out/mem{1,2,4,6,8}/lib{knottykraken,semikraken}.so` | Flexus simulators, one variant per memory controller count |
+    | `bxdb/target/release/bxdb` | Checkpoint database tool |
+    | `WormCache/` | WormCache source, built for each experiment (only in the `--worm` image) |
+    | `out/build-env` | `native`: experiments build WormCache with the container's cargo |
+
+    The image provides the binaries; `dep start-docker` mounts the CLI (`qflex`, `commands/`, `templates/` and the
+    helper scripts) from your checkout over them. Then, in the container:
+
+    <!-- termynal -->
+    ```bash
+
+    $ ./qflex --help
+
+    ```
 
 You should see the list of commands, including `image`. Continue with the [Quickstart](quickstart.md).
 

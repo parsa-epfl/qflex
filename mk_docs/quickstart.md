@@ -101,6 +101,21 @@ $ ./qflex image pull 2c/djd --working-folder <WORK_DIR>
     The machine settings must match the snapshot; the population and the [core groups](#core-groups) are
     defaults you can override.
 
+### Core groups
+
+The `groups` of `config.json` split the vCPUs of the VM; for `2c/djd`, `djd` runs on vCPUs 0–1 and `phantom` on
+2–3:
+
+- A **measured** group runs a workload on simulated cores. A workload with more than one measured group, such as
+  `16c/dc-ws` (`dc` on 0–7, `ws` on 8–15), is **consolidated**.
+- The **phantom** group is the second half of the vCPUs. It runs the client (load generator) of the workload and is
+  not simulated in detail.
+- The `ipc` is the starting estimate of the **timekeeping model**, with which functional warming keeps the time of
+  each vCPU, until `train` fits the model to the detailed results.
+
+The later steps work per group: Init Warm writes the IPC of each vCPU to `cfg/core_info.csv`, `result` computes the
+sampling error of each measured group, and `train` fits the model of each measured group.
+
 ---
 
 ## 2) Create the shared args file
@@ -132,22 +147,9 @@ $ xargs -a ./qflex.args -- ./qflex <command> [command options]
   The snapshot only restores on the machine it was taken on, so qflex rejects values that do not match.
 - `--population-seconds` defaults to the workload's `suggested_population_seconds`; set it lower (e.g. `1`) for a
   quick test.
-- `--groups` defaults to the workload's groups (see [Core groups](#core-groups)).
+- `--groups` defaults to the workload's [core groups](#core-groups); to override them, see
+  [Your own workload](own-workload.md#core-groups).
 - `--no-unique` only silences a deprecation message: the experiment folder is always named `--experiment-name`.
-
-### Core groups
-
-The vCPUs are split into groups, given as `name:cores[:ipc]`:
-```text
---groups "dc:0-7:0.6,ws:8-15:4.2,phantom:16-31:4"
-```
-
-- Each measured group runs one workload; more than one group makes a **consolidated** workload.
-- With `--double-cores`, the `phantom` group holds the client vCPUs `N…2N-1` of an `N`-core experiment.
-- The IPC is the starting estimate of the timekeeping model, `cfg/core_info.csv` (default 2, phantom 4), until
-  [`train`](#8-next-iteration) fits the model to the detailed results.
-- Without `--groups` (and without a prebuilt workload), all cores form one group.
-- `result` and `train` use the measured groups as their default `--core-groups`.
 
 ---
 
@@ -172,8 +174,9 @@ the snapshot **`init_warmed`**.
 
 - `run/` has `root.qcow2`, `base.zstd` (a link), `prebuilt.json`, and at the end `init_warmed.*`
   (`init_warmed.bxdb`, `.state.zstd`, `.uarch`);
-- `cfg/` has `parameter.rs`, `flexus_configuration.json`, `timing.cfg` and `core_info.csv`, with one row per vCPU
-  (for `2c/djd`, vCPUs 0–1 at ipns 4.0 and the phantom vCPUs 2–3 at 8.0, i.e. IPC × 2 GHz);
+- `cfg/` has `parameter.rs`, `flexus_configuration.json`, `timing.cfg` and `core_info.csv`, the timekeeping model:
+  one row per vCPU at the IPC of its [group](#core-groups), in instructions per ns (IPC × 2 GHz). For `2c/djd`,
+  vCPUs 0–1 are at 4.0 and the phantom vCPUs 2–3 at 8.0;
 - `lib/` has `libknottykraken.so`, `libsemikraken.so` and `libworm_cache.so`; `bin/` has `checkpoint_conversion`
   and `bxdb`.
 
@@ -279,8 +282,8 @@ $ xargs -a ./qflex.args -- ./qflex result
 
 ```
 
-`result` collects every measurement into `timing.csv` and computes the sampling error of each core group (the
-measured [groups](#core-groups) by default, or `--core-groups "0-7,8-15"`).
+`result` collects every measurement into `timing.csv` and computes the sampling error of each measured
+[core group](#core-groups); `--core-groups "0-7,8-15"` analyzes other core ranges instead.
 
 It first checks that the sample is complete, i.e. that it has as many sampling units as the `--sample-size` of
 functional warming: every checkpoint must have a result that reaches the end of the measurement. Otherwise it

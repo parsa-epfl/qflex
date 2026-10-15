@@ -38,13 +38,29 @@ Without a prebuilt workload, `qflex.args` describes the machine and the workload
 
 - `--core-count` is the number of simulated cores: 1, 2, 4, 8, 16, 32, 48 or 64.
 - `--double-cores` gives the VM twice as many vCPUs: the second half runs the workload's client, as the `phantom`
-  [core group](quickstart.md#core-groups). Add `--groups` to describe several workloads or other IPC estimates.
+  [core group](#core-groups).
 - `--use-image-directly` makes the experiment use `<WORK_DIR>/images/<image name>` itself instead of a copy, so the
   snapshots saved in the steps below stay in your image.
 - Keep the machine settings (`--core-count`, `--double-cores`, `--memory-gb`, `--network`) the same in every step:
   a snapshot only restores on the machine it was taken on.
 
 As in the Quickstart, write absolute paths: `xargs` does not expand `~` or `$VARIABLES`.
+
+### Core groups
+
+Without `--groups`, the measured cores form one group named after `--workload-name` (IPC 2), plus the `phantom`
+group (IPC 4) with `--double-cores`. To describe a consolidated workload or other IPC estimates, give the groups as
+`name:cores[:ipc]`:
+```text
+--groups "dc:0-7:0.6,ws:8-15:4.2,phantom:16-31:4"
+```
+
+- The measured groups must cover the cores `0…N-1` exactly once, for `--core-count N`.
+- With `--double-cores`, the `phantom` group must be exactly the second half of the vCPUs, `N…2N-1`.
+- The IPC is optional: 2 for a measured group, 4 for `phantom`.
+
+See [Core groups](quickstart.md#core-groups) in the Quickstart for what the groups are used for. `--groups` also
+overrides the groups of a prebuilt workload.
 
 ---
 
