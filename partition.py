@@ -72,6 +72,8 @@ db_folder_name = db_folder_name[0]
 # Create symbolic links for the necessary bindary files in the current folder.
 NECESSARY_BINARY_FILES = [
     "QEMU_EFI.fd",
+    # Option ROM of the virtio devices (e.g. the network card); QEMU looks for it in the working directory first.
+    "efi-virtio.rom",
     "root.qcow2",
     "debug.cfg",
     "../cfg/flexus_configuration.json",

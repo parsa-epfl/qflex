@@ -8,8 +8,8 @@ from .partition import check_no_partition_running
 
 def refresh_scripts(experiment_context: ExperimentContext):
     """
-    Regenerates scripts/run_flexus.sh of an existing experiment from the current template, and replaces the copies in
-    its partitions. The configuration in cfg/ is left as it is: it is built into the WormCache plugin and the
+    Regenerates scripts/run_flexus.sh of an existing experiment from the current template, replaces the copies in
+    its partitions, and adds the links to run/ files that newer versions of partition.py create. The configuration in cfg/ is left as it is: it is built into the WormCache plugin and the
     checkpoints, so changing it needs a new experiment.
     """
     folder = experiment_context.get_experiment_folder_address()
@@ -30,5 +30,15 @@ def refresh_scripts(experiment_context: ExperimentContext):
         shutil.copy(script, f"{partition}/run_flexus.sh")
     if partitions:
         print(f"Copied it into {len(partitions)} partitions.")
+
+    # Links added to partition.py after the experiment was partitioned.
+    linked = 0
+    for partition in partitions:
+        for name in ["efi-virtio.rom"]:
+            if os.path.exists(f"{folder}/run/{name}") and not os.path.lexists(f"{partition}/{name}"):
+                os.symlink(f"../{name}", f"{partition}/{name}")
+                linked += 1
+    if linked:
+        print(f"Added {linked} missing links to the files of run/ in the partitions.")
     # partition.py, run_partitions.sh, result.py, collect.py and the training scripts are copied from the
     # repository by every command (when the repository's copy is newer), so they are already current.
