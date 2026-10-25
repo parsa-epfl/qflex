@@ -14,6 +14,11 @@ components:
     memory_gb: 64
     original_image_name: root.qcow2
     image_name: root-single.qcow2
+    # 2000 sampling units at a 0.5 % acceptable error, matching the 2-NIC and 2-node runs (MS_base: 500 / 5 %).
+    sample_size: 2000
+    acceptable_error: 0.005
+    # the same Oct 14 build the 2-NIC and 2-node runs used (the container's -saved trees are the image's older binaries)
+    binaries_folder: /mnt/sdb/multi-node-experiments/builds/single2nic
 
 
 # epoch_0

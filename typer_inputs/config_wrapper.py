@@ -30,11 +30,12 @@ def _cli_type_and_converter(inner_type):
 
     if get_origin(inner_type) is list:
         (elem_type,) = get_args(inner_type)
+        parse = getattr(elem_type, "from_cli", elem_type)   # models spell one entry as a string (NicLink.from_cli)
         def convert(s: str):
             stripped = s.strip()
             if not stripped:
                 return []
-            return [elem_type(part.strip()) for part in stripped.split(",")]
+            return [parse(part.strip()) for part in stripped.split(",")]
         return str, convert
     return inner_type, None
 

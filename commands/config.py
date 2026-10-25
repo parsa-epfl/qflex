@@ -7,6 +7,7 @@ import pandas
 
 from .host import Host, SMTHost, HOSTS, HostType
 from .workload import Workload, create_workload
+from .nic import NicLink
 
 # TODO double check all the parameters and their descriptions
 # TODO check all the variables to match with the variables in templates
@@ -144,7 +145,11 @@ class ExperimentContext(BaseModel):
     interactive_tmux: bool = Field(default=False, description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")
     start_point: str = Field(default="boot", description="Pipeline phase the `simulate` command starts from. One of: boot, load, initialize, fw, partition, run-partition. Only the `simulate` command consumes this; every other phase ignores it.")
     end_point: str = Field(default="run-partition", description="Pipeline phase the `simulate` command stops at (inclusive). One of: boot, load, initialize, fw, partition, run-partition, result. Defaults to run-partition; set to result to also aggregate. Only the `simulate` command consumes this; every other phase ignores it.")
+    acceptable_error: float = Field(default=0.05, description="Acceptable sampling error of the U-IPC estimate that `result` sizes the sample against (0.05 = 5 %).")
+    full_timing: bool = Field(default=False, description="Timing as ONE continuous detailed run from init_warmed (no FW sampling units): `simulate` chains boot, load, initialize, full-timing, result; `result` reports one mean over the run.")
+    full_timing_cycles: int = Field(default=0, description="Cycle budget of the full-timing run; 0 = the whole population (population_seconds x machine_freq_ghz x 1e9).")
     pdes_net_devs: List[str] = Field(default=[], description="List of network device models (e.g., 'e1000', 'virtio-net-pci') to use for each neighbor node in multi-node setup.")
+    nics: List[NicLink] = Field(default=[], description="This node's PDES NICs, index = NIC id: NIC i is wired to NIC nics[i].peer_nic of node nics[i].peer_node. The four legacy lists above mirror it.")
     sub_experiments: List["ExperimentContext"] = Field(default_factory=list, description="Optional sub-experiments. If non-empty, this context is a group node; leaf-level fields are unused and the executor recurses into each sub-experiment.")
     wait_for_nodes: List[int] = Field(default_factory=list, description="Node-numbers whose .started sentinel must exist before this leaf may proceed. Empty for the master. Set to e.g. [0] to wait for the master, or [2] to wait for node 2.")
     experiment_group_name: str = Field(default="", description="Parent group's experiment_name for this leaf; included in PDES shm names so concurrent projects on the same host don't collide. Auto-populated by the factory when sub_experiments is built.")
@@ -191,6 +196,10 @@ class ExperimentContext(BaseModel):
         from commands.jinja_loaders.interaction_script_loader import render_interaction_script
         self.interaction_script = render_interaction_script(self)
 
+    def full_timing_total_cycles(self) -> int:
+        # workload.population is ns; +1 as in run-idx so the last stats dump lands before Flexus stops.
+        return (self.full_timing_cycles or int(self.workload.population * self.workload.IPC_info.machine_freq_ghz)) + 1
+
     def get_partition_folder(self) -> str:
         if self.partition_number < 0:
             raise ValueError("Partition number is not set for this experiment context.")
@@ -211,10 +220,8 @@ class ExperimentContext(BaseModel):
         prefix = f"{self.experiment_group_name}_" if self.experiment_group_name else ""
         partition_str = f"part_{self.partition_number}_" if self.partition_number >= 0 else ""
         idx_str = f"idx_{self.idx}_" if self.idx >= 0 else ""
-        for i, neighbor in enumerate(self.neighbor_node_list):
-            me, peer = str(self.node_number), str(neighbor)
-            if neighbor == self.node_number:   # self-link: NIC i is wired to NIC i^1 of this same node
-                me, peer = f"{me}n{i}", f"{neighbor}n{i ^ 1}"
+        for i, nic in enumerate(self.nics):
+            me, peer = f"{self.node_number}n{i}", f"{nic.peer_node}n{nic.peer_nic}"
             if recieve:
                 shm_names.append(f"{prefix}pdes_{peer}_to_{me}"+partition_str+idx_str)
             else:
@@ -657,6 +664,7 @@ def create_experiment_context(
     neighbor_node_list: Annotated[Optional[List[int]], Field(description="List of neighbor node numbers in multi-node setup, only used if node_number is not -1.")] = None,
     latencies_ns_list: Annotated[Optional[List[int]], Field(description="List of latencies to neighbor nodes in nanoseconds, only used if node_number is not -1. Order matches neighbor_node_list.")] = None,
     syncs_list: Annotated[Optional[List[str]], Field(description="List of sync options to neighbor nodes ('true' or 'false'), only used if node_number is not -1. Order matches neighbor_node_list.")] = None,
+    nics: Annotated[Optional[List[NicLink]], Field(description="This node's PDES NICs in NIC-id order; NIC i is wired to NIC peer_nic of node peer_node. Replaces neighbor_node_list/latencies_ns_list/syncs_list/pdes_net_devs (give one spelling, not both). CLI entry: peer_node:peer_nic:dev:latency_ns:sync, e.g. 1:0:virtio-net-pci:100000:true.")] = None,
     seed_image_name: Annotated[str, Field(description="Name of the seed image file to use in multi-node setup.")] = "",
     telnet_port: Annotated[int, Field(description="Telnet port for QEMU monitor instead of stdio.")] = -1,
     use_telnet_monitor: Annotated[bool, Field(description="Whether to use telnet monitor for QEMU instead of stdio.")] = False,
@@ -678,6 +686,9 @@ def create_experiment_context(
     interactive_tmux: Annotated[bool, Field(description="If True, run boot/load in a fresh tmux window (one per leaf). Requires a running tmux server. Other phases ignore this field.")] = False,
     start_point: Annotated[str, Field(description="Pipeline phase the `simulate` command starts from. One of: boot, load, initialize, fw, partition, run-partition. Only the `simulate` command consumes this; other phases ignore it.")] = "boot",
     end_point: Annotated[str, Field(description="Pipeline phase the `simulate` command stops at (inclusive). One of: boot, load, initialize, fw, partition, run-partition, result. Defaults to run-partition; set to result to also aggregate. Only the `simulate` command consumes this; other phases ignore it.")] = "run-partition",
+    acceptable_error: Annotated[float, Field(description="Acceptable sampling error of the U-IPC estimate that `result` sizes the sample against (REQUIRED_SAMPLE_SIZE); 0.05 = 5 %.")] = 0.05,
+    full_timing: Annotated[bool, Field(description="Timing as ONE continuous detailed run from init_warmed instead of FW sampling units: `simulate` chains boot, load, initialize, full-timing, result; `result` reports one mean over the run (REQUIRED/NEXT are meaningless then).")] = False,
+    full_timing_cycles: Annotated[int, Field(description="Cycle budget of the full-timing run; 0 = the whole population (population_seconds x machine_freq_ghz x 1e9, e.g. 1e10 for a 5 s population at 2 GHz).")] = 0,
 ) -> ExperimentContext:
     neighbor_node_list = neighbor_node_list or []
     latencies_ns_list = latencies_ns_list or []
@@ -688,6 +699,18 @@ def create_experiment_context(
 
     creation_kwargs = {k: v for k, v in locals().items()}
     is_group = len(sub_experiments) > 0
+
+    # One NIC description, two spellings: `nics` is the source when given, the legacy lists otherwise (peer_nic 0).
+    if nics:
+        assert not neighbor_node_list, "give nics or neighbor_node_list, not both"
+        nics = [n if isinstance(n, NicLink) else NicLink(**n) for n in nics]
+        neighbor_node_list = [n.peer_node for n in nics]
+        latencies_ns_list = [n.latency_ns for n in nics]
+        syncs_list = [str(n.sync).lower() for n in nics]
+        pdes_net_devs = [n.dev for n in nics]
+    else:
+        nics = [NicLink(peer_node=n, dev=d, latency_ns=l, sync=s == 'true')
+                for n, d, l, s in zip(neighbor_node_list, pdes_net_devs, latencies_ns_list, syncs_list)]
 
     # assert False
     # TODO add how to create experiment name
@@ -700,7 +723,10 @@ def create_experiment_context(
 
         assert len(neighbor_node_list) == len(latencies_ns_list) == len(syncs_list) == len(pdes_net_devs)
         assert node_number != -1, "node_number must be set when neighbor nodes are specified."
-        assert neighbor_node_list.count(node_number) % 2 == 0, "self-links (neighbor == node_number) come in pairs: NIC i is wired to NIC i^1"
+        assert len({(n.peer_node, n.peer_nic) for n in nics}) == len(nics), "two NICs are wired to the same peer NIC"
+        for i, n in enumerate(nics):
+            if n.peer_node == node_number:   # self-link: the peer NIC must point back at this one
+                assert nics[n.peer_nic].peer_node == node_number and nics[n.peer_nic].peer_nic == i, f"self-link NIC {i} -> NIC {n.peer_nic} is not mutual"
         assert neighbers_length > 0, "neighbor_node_list, latencies_ns_list, and syncs_list must have at least one entry when node_number is set."
         for net_devs in set(pdes_net_devs):
             assert net_devs in ['e1000', 'virtio-net-pci'], "pdes_net_devs values must be either 'e1000' or 'virtio-net-pci'"
@@ -797,6 +823,7 @@ def create_experiment_context(
         stat_interval_cycles=stat_interval_cycles,
         idx=idx,
         pdes_net_devs=pdes_net_devs,
+        nics=nics,
         sub_experiments=sub_experiments,
         wait_for_nodes=wait_for_nodes,
         serial_telnet_port=serial_telnet_port,
@@ -806,11 +833,14 @@ def create_experiment_context(
         interactive_tmux=interactive_tmux,
         start_point=start_point,
         end_point=end_point,
+        acceptable_error=acceptable_error,
+        full_timing=full_timing,
+        full_timing_cycles=full_timing_cycles,
     )
 
     e._creation_kwargs = creation_kwargs
     # A machine whose only neighbors are itself (self-linked NICs) is still one machine: keep its own image.
-    if node_number >= 0 and neighbor_node_list and all(n == node_number for n in neighbor_node_list):
+    if node_number >= 0 and nics and all(n.peer_node == node_number for n in nics):
         e = e.model_copy(update={"copy_image_per_node": False})
         e._creation_kwargs = creation_kwargs
 

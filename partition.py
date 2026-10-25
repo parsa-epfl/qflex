@@ -41,7 +41,8 @@ for file in os.listdir('.'):
     if file.startswith('snapshot_') and file.endswith('.loc'):
         snapshot_files.append(file)
 
-PARTITION_COUNT = min(PARTITION_COUNT, len(snapshot_files))
+if snapshot_files:   # no FW snapshots (full-timing mode): keep the requested count, folders get links only
+    PARTITION_COUNT = min(PARTITION_COUNT, len(snapshot_files))
 
 # Create partition folder.
 for p in range(PARTITION_COUNT):
@@ -117,6 +118,8 @@ else:
         "efi-e1000.rom",
         "efi-virtio.rom",
         mem_folder_name,
+        mem_folder_name.removesuffix(".mem") + ".uarch",        # full-timing converts the base snapshot's uarch state
+        mem_folder_name.removesuffix(".mem") + ".state.zstd",   # ...and -loadvm's it (device state next to the .mem)
     ]
 
 for p in range(PARTITION_COUNT):

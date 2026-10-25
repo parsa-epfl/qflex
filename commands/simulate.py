@@ -7,12 +7,15 @@ from .init_warm import InitWarm
 from .functional_warming import FunctionalWarming
 from .partition import PartitionCommand
 from .run_partition import RunPartitionCommand
+from .full_timing import FullTimingCommand
 from .result import RunResultCommand
 
 # Ordered pipeline. Keys are the phase command names (== build_experiment_context
 # cmd_name == the YAML phase-overlay block key) -> the Executor that runs that phase.
 PHASE_ORDER = ["boot", "load", "initialize", "fw", "partition", "run_partition", "result"]
+FULL_TIMING_ORDER = ["boot", "load", "initialize", "full_timing", "result"]
 PHASE_BUILDERS = {
+    "full_timing": FullTimingCommand,
     "boot": Boot,
     "load": Load,
     "initialize": InitWarm,
@@ -55,20 +58,21 @@ class SimulateCommand(Executor):
 
         # CLI flag wins; otherwise take the YAML/factory value (the start_point / end_point
         # fields on ExperimentContext) — the same flag-overrides-YAML path every knob uses.
-        start, end = self.start_point_override, self.end_point_override
-        if start is None or end is None:
-            probe = build_experiment_context(self.config_path, cmd_name="simulate")
-            start = start if start is not None else probe.start_point
-            end = end if end is not None else probe.end_point
+        probe = build_experiment_context(self.config_path, cmd_name="simulate")
+        start = self.start_point_override if self.start_point_override is not None else probe.start_point
+        end = self.end_point_override if self.end_point_override is not None else probe.end_point
         start, end = start.replace("-", "_"), end.replace("-", "_")
+        order = FULL_TIMING_ORDER if probe.full_timing else PHASE_ORDER
+        if probe.full_timing and end == "run_partition":   # the factory default; full-timing is its counterpart
+            end = "full_timing"
         for name, val in (("start_point", start), ("end_point", end)):
-            if val not in PHASE_ORDER:
-                raise ValueError(f"{name} must be one of {PHASE_ORDER}, got {val!r}")
-        start_idx, end_idx = PHASE_ORDER.index(start), PHASE_ORDER.index(end)
+            if val not in order:
+                raise ValueError(f"{name} must be one of {order}, got {val!r}")
+        start_idx, end_idx = order.index(start), order.index(end)
         if end_idx < start_idx:
             raise ValueError(f"end_point {end!r} is before start_point {start!r}.")
 
-        for cmd_name in PHASE_ORDER[start_idx:end_idx + 1]:
+        for cmd_name in order[start_idx:end_idx + 1]:
             exp = build_experiment_context(self.config_path, cmd_name=cmd_name)
             phase = PHASE_BUILDERS[cmd_name](exp)
             # Stop the chain on failure. Multi-node group dispatch raises on its own;

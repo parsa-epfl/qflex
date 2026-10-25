@@ -1,3 +1,4 @@
+import glob
 import math
 import os
 import shutil
@@ -39,8 +40,11 @@ class RunResultCommand(Executor):
         freq_ghz = self.experiment_context.workload.IPC_info.machine_freq_ghz
         # Pass the measurement window explicitly so the reporters never fall back to their
         # defaults' silent warming=2/measurement=1 assumption.
+        measure_units = exp.measurement_ratio
+        if exp.full_timing:   # one mean over every dumped window after the detailed-warming prefix
+            measure_units = len(glob.glob(f"{experiment_folder}/run/partition_0/result_0/all.measurement.0*.log")) - exp.warming_ratio
         window_args = (f"--interval {exp.stat_interval_cycles} --index {exp.warming_ratio} "
-                       f"--measure-units {exp.measurement_ratio}")
+                       f"--measure-units {measure_units} --error {exp.acceptable_error}")
         # Always regenerate core_info_new.csv + REQUIRED_SAMPLE_SIZE; --no-exit-on-fail so
         # the cross-node save step below always runs (an unmet bound is not a failure).
         new_result_cmd = ""

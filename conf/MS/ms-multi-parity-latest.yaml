@@ -1,14 +1,20 @@
-# Parity harness, label "latest": the branch-head build (see parity-switch-latest-tmp.sh) of the same topology.
-# Phase C1 rewrites this file to the nics: schema (see harness-temp.md); until then the legacy
-# lists inherited from ms-multi describe the identical 2-node wire.
+# Parity harness, label "latest": the branch-head build of the same topology (legacy neighbour lists
+# inherited from ms-multi; the factory translates them to nics, peer NIC 0).
 extends: ms-multi
 
 _leaf_defaults:
   mounting_folder: /mnt/sdc/testing/parity/
   image_folder: /mnt/sdc/testing/parity/images-latest/
-  binaries_folder: /mnt/sdc/testing/parity/builds/latest
+  # The current build (no libqflex_step hunk, exit-gate fix, pdes_link_stats trace) = the one the 2-NIC run used;
+  # builds/latest keeps the September stash the L5 parity run was made with.
+  binaries_folder: /mnt/sdc/testing/parity/builds/current
   # Determinism: virtio-net TX on a VIRTUAL timer + no ioeventfd (see tmp-non-det.md). Every phase.
   pdes_nic_opts: ",ioeventfd=off,tx=timer,x-txtimer=0"
+  # PDES's own per-link tx/rx accounting at every savevm and at exit (zero cost when off).
+  extra_qemu_args: "-trace enable=pdes_link_stats"
+  # 2000 sampling units at a 0.5 % acceptable error, matching the 2-NIC single-node run (ms-multi: 500 / 5 %).
+  sample_size: 2000
+  acceptable_error: 0.005
 
 components:
   experiment_context:
@@ -17,14 +23,3 @@ components:
     experiment_name: media-streaming-node-0-0-parity-latest
   experiment_context_node_1:
     experiment_name: media-streaming-node-1-0-parity-latest
-
-# Interrupt-trace probe for the timing phases (diagnostic only; lands in qemu-timing.log).
-run_idx:
-  _leaf_defaults:
-    extra_qemu_args: "-d nochain,int -trace enable=gicv3_icc_iar1_read"
-run_single_partition:
-  _leaf_defaults:
-    extra_qemu_args: "-d nochain,int -trace enable=gicv3_icc_iar1_read"
-run_partition:
-  _leaf_defaults:
-    extra_qemu_args: "-d nochain,int -trace enable=gicv3_icc_iar1_read"

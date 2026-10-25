@@ -71,12 +71,20 @@ class RunIdxCommand(SimulationCommand):
             f"( {inner} ) >> {log} 2>> {err}",
         ]
 
+    def snapshot_name(self) -> str:
+        return f"snapshot_{self.experiment_context.idx}"
+
+    def total_cycles(self) -> int:
+        exp = self.experiment_context
+        ratio_coefficient = exp.stat_interval_cycles
+        return ((exp.warming_ratio * ratio_coefficient)
+                + (exp.measurement_ratio * ratio_coefficient)) + 1
+
     def cmd(self) -> str:
         self._assert_syncs_true()
         exp = self.experiment_context
-        ratio_coefficient = exp.stat_interval_cycles
-        total_cycles = ((exp.warming_ratio * ratio_coefficient)
-                        + (exp.measurement_ratio * ratio_coefficient)) + 1
+        total_cycles = self.total_cycles()
+        snapshot = self.snapshot_name()
         idx = exp.idx
         partition_folder = exp.get_partition_folder()
 
@@ -85,7 +93,7 @@ class RunIdxCommand(SimulationCommand):
         # over PDES until the master's idx exits. (The uniform phantom node falls through to the
         # master path below, only swapping the Flexus target for libphantomkraken.)
         if exp.all_phantom_cores and exp.multi_modal:
-            parser = PhantomTimingArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
+            parser = PhantomTimingArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio, snapshot_name=snapshot)
             return self._with_shared_log([
                 f"cd {partition_folder}",
                 f'echo "===== qflex idx {idx} (phantom): starting in {partition_folder} ====="',
@@ -99,9 +107,9 @@ class RunIdxCommand(SimulationCommand):
         # timing leaf — same vanilla binary, checkpoint_conversion, per-idx snapshot — only the
         # Flexus target differs (libphantomkraken, all cores phantom).
         if exp.all_phantom_cores:
-            vanilla_parser = PhantomUniformTimingArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
+            vanilla_parser = PhantomUniformTimingArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio, snapshot_name=snapshot)
         else:
-            vanilla_parser = VanillaQemuArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio)
+            vanilla_parser = VanillaQemuArgParser(exp, idx, total_cycles, use_stdio=self.use_stdio, snapshot_name=snapshot)
 
         # No gdb wrap. `; qrc=$?` + final `(exit $qrc)` keep mv/cp best-effort WITHOUT their
         # `|| true` swallowing a qemu crash — a segfaulted idx must fail the leaf, not mint
@@ -109,9 +117,9 @@ class RunIdxCommand(SimulationCommand):
         return self._with_shared_log([
             f"cd {partition_folder}",
             f'echo "===== qflex idx {idx}: starting in {partition_folder} ====="',
-            f'rm -rf "snapshot_{idx}-flexus"',
-            f"mkdir snapshot_{idx}-flexus",
-            f"./checkpoint_conversion ./snapshot_{idx}.uarch ../../cfg/flexus_configuration.json ./snapshot_{idx}-flexus true",
+            f'rm -rf "{snapshot}-flexus"',
+            f"mkdir {snapshot}-flexus",
+            f"./checkpoint_conversion ./{snapshot}.uarch ../../cfg/flexus_configuration.json ./{snapshot}-flexus true",
             f'rm -rf "result_{idx}"',
             f'mkdir "result_{idx}"',
             "tick=$(($(date +%s%N) / 1000000))",

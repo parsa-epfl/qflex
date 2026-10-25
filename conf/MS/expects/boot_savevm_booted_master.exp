@@ -82,6 +82,18 @@ proc quit_qemu {monitor_port} {
     }
 }
 
+proc wait_for_substring {path needle budget_seconds} {
+    set deadline [expr {[clock seconds] + $budget_seconds}]
+    while {[clock seconds] < $deadline} {
+        if {[file exists $path]} {
+            set fh [open $path r]; set content [read $fh]; close $fh
+            if {[string first $needle $content] >= 0} { return }
+        }
+        sleep 2
+    }
+    error "wait_for_substring: $needle never appeared in $path within ${budget_seconds}s"
+}
+
 proc wait_for_file {path budget_seconds} {
     set deadline [expr {[clock seconds] + $budget_seconds}]
     while {[clock seconds] < $deadline} {
@@ -159,8 +171,8 @@ expect {
     timeout { puts "ERROR: savevm didn't return"; exit 1 }
     "(qemu) "
 }
-
-sleep 5
+# Under PDES the prompt returns before the deferred checkpoint lands: quit only once it is on disk.
+wait_for_substring "$exp_folder/Boot.log" "savevm log 7" $BUDGET_CHECKPOINTING_S
 
 send "quit\r"
 catch {expect eof}

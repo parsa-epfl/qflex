@@ -1,30 +1,33 @@
 extends: ms
 
-# Single-node MS whose guest has TWO PDES NICs wired to each other (self-links: NIC0 <-> NIC1). The
+# Single-node MS whose guest has TWO PDES NICs wired to each other: NIC 0 <-> NIC 1 of this same node 0. The
 # client (hammar) and server (nginx) talk over the PDES wire instead of the guest loopback; see
 # expects/load_savevm_loaded_single_2nic.exp. Same image as `ms` (its booted/loaded tags are replaced).
-# The pairing rule for self-links lives in ExperimentContext.get_shm_names (NIC i <-> NIC i^1).
+# Rings: pdes_0n0_to_0n1 / pdes_0n1_to_0n0 (pdes_<node>n<nic>_to_<peer>n<peer_nic>).
 components:
   experiment_context:
     _base_: _leaf_defaults
     experiment_name: media-streaming-single-node-2nic-0
     node_number: 0
-    neighbor_node_list: [0, 0]
-    pdes_net_devs: [virtio-net-pci, virtio-net-pci]
-    latencies_ns_list: [100000, 100000]
-    syncs_list: ["true", "true"]
+    nics:
+      - {peer_node: 0, peer_nic: 1, dev: virtio-net-pci, latency_ns: 100000, sync: true}
+      - {peer_node: 0, peer_nic: 0, dev: virtio-net-pci, latency_ns: 100000, sync: true}
     pdes_nic_opts: ",ioeventfd=off,tx=timer,x-txtimer=0"
     # PDES's own per-link tx/rx accounting, one line per link at every savevm and at exit (zero cost when off).
     extra_qemu_args: "-trace enable=pdes_link_stats"
     # fresh qemu + parallel-qemu builds (container_compiler output copied from qemu/build, parallel-qemu/build)
     binaries_folder: /mnt/sdb/multi-node-experiments/builds/single2nic
+    # 2000 sampling units at a 0.5 % acceptable error (MS_base: 500 / 5 %).
+    sample_size: 2000
+    acceptable_error: 0.005
 
 # boot: high latency, no sync (the multi-node boot convention); no need for link statistics.
 boot:
   components:
     experiment_context:
-      latencies_ns_list: [1000000, 1000000]
-      syncs_list: ["false", "false"]
+      nics:
+        - {peer_node: 0, peer_nic: 1, dev: virtio-net-pci, latency_ns: 1000000, sync: false}
+        - {peer_node: 0, peer_nic: 0, dev: virtio-net-pci, latency_ns: 1000000, sync: false}
       extra_qemu_args: ""
 
 load:

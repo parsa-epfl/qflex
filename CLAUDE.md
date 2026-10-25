@@ -159,6 +159,7 @@ Every pipeline command builds the same `ExperimentContext` and accepts the same 
 | FW + sample selection | `fw` | Run workload with WormCacheQFlex plugin attached; produce one FW checkpoint per sampling unit. `--sample-size N` sets N = number of sampling units in this sample | parallel-qemu + WormCacheQFlex |
 | Parallelism prep | `partition`, `partition-cleanup`, `unpartition` | Split the per-sampling-unit checkpoints into `partition_count` chunks for parallel timing runs; emit per-partition run scripts. Not a sampling step — purely about scheduling work | (none) |
 | Timing | `run-partition`, `run-single-partition`, `run-idx` | Detailed cycle-accurate simulation per sampling unit (each unit = detailed-warming prefix + measurement segment) | qemu (`vanilla-`) + middleware + flexus |
+| Timing (continuous) | `full-timing` | One detailed run straight from `init_warmed` over `full_timing_cycles` (0 = whole population), no FW units; `result` with `full_timing: true` averages the whole run. `simulate` chains boot → load → initialize → full-timing → result when `full_timing` is set | qemu (`vanilla-`) + middleware + flexus |
 | Aggregate | `result` | Aggregate per-partition output into `core_info.csv`. Entry point: [result.py](result.py), driver in [commands/result.py](commands/result.py) | (none) |
 | Multi-node | `multi` | Currently wraps a `gdb --args ./qemu-system-aarch64 ...` invocation ([commands/multinode.py](commands/multinode.py)) | parallel-qemu |
 

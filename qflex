@@ -11,6 +11,7 @@ from commands.functional_warming import FunctionalWarming
 from commands.partition import PartitionCommand, CleanPartitionCommand, UnPartitionCommand
 from commands.run_partition import RunPartitionCommand
 from commands.run_idx import RunIdxCommand
+from commands.full_timing import FullTimingCommand
 from commands.run_single_partition import RunSinglePartitionCommand
 from commands.result import RunResultCommand
 from commands.duplicate_experiment import DuplicateExperiment
@@ -230,6 +231,19 @@ def run_idx(
         use_stdio=False,
     )
     run_idx_executor.execute(to_stdio=True, run_in_background=False)
+
+
+@app.command(name="full-timing")
+@data_class_wrap(create_experiment_context, name="experiment_context")
+def full_timing(
+    experiment_context: ExperimentContext,
+):
+    """
+    One continuous detailed (timing) run from the init_warmed snapshot — no FW sampling units.
+    Budget: `full_timing_cycles` (0 = the whole population). Output: run/partition_0/result_0, read by `result`
+    (pass `full_timing: true` / --full-timing to `result` so it averages the whole run).
+    """
+    FullTimingCommand(experiment_context=experiment_context, use_stdio=False).execute(to_stdio=True, run_in_background=False)
 
 
 @app.command()

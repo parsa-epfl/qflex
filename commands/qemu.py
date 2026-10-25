@@ -210,10 +210,12 @@ class VanillaQemuArgParser(QemuCommonArgParser):
                  experiment_context: ExperimentContext,
                  idx: int,
                  total_cycles: int,
-                 use_stdio: bool = True):
+                 use_stdio: bool = True,
+                 snapshot_name: str = None):
         super().__init__(experiment_context, use_stdio)
         self.idx = idx
         self.total_cycles = total_cycles
+        self.snapshot_name = snapshot_name or f"snapshot_{idx}"   # full-timing loads init_warmed instead
 
 
 
@@ -221,10 +223,10 @@ class VanillaQemuArgParser(QemuCommonArgParser):
         return "libsemikraken" if self.double_cores else "libknottykraken"
 
     def get_load_vm(self):
-        return f"""-loadvm snapshot_{self.idx},on-demand"""
-    
+        return f"""-loadvm {self.snapshot_name},on-demand"""
+
     def get_base_image_arg(self) -> str:
-        return f"""-drive if=virtio,file={self.image_address},format=qcow2,snapshot=on,tmp-snapshot-name=snapshot_{self.idx} """
+        return f"""-drive if=virtio,file={self.image_address},format=qcow2,snapshot=on,tmp-snapshot-name={self.snapshot_name} """
     
     def quantum_args(self) -> str:
         return f'   -icount shift=0,align=off,sleep=off '
@@ -237,7 +239,7 @@ class VanillaQemuArgParser(QemuCommonArgParser):
         single_step_command = f""" -singlestep -d nochain """
         log_command = f""" -D "qemu-timing.log" """
         lib_qflex_command = f""" -libqflex """
-        mode_command = f""" mode=timing,lib-path=../../lib/"{self.lib_name()}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:{self.experiment_context.stat_interval_cycles},debug=crit,ckpt-path=./snapshot_{self.idx}-flexus,freq={int(self.experiment_context.workload.IPC_info.machine_freq_ghz)} """
+        mode_command = f""" mode=timing,lib-path=../../lib/"{self.lib_name()}".so,cfg-path=../../cfg/timing.cfg,cycles={self.total_cycles}:{self.experiment_context.stat_interval_cycles},debug=crit,ckpt-path=./{self.snapshot_name}-flexus,freq={int(self.experiment_context.workload.IPC_info.machine_freq_ghz)} """
 
         qemu_args = base_args + \
         single_step_command + \
