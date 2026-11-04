@@ -115,7 +115,7 @@ RUN --mount=type=bind,source=./flexus,target=/home/dev/qflex/flexus,rw \
     ./build cq ${MODE} && \
     python3 build-multiple-kraken_vanilla.py && \
     mkdir /home/dev/qflex/kraken_out && \
-    cp -r out/lib/Release /home/dev/qflex/kraken_out && \
+    cp -r out/lib/Release/. /home/dev/qflex/kraken_out/ && \
     rm -rf out && \
     mkdir /home/dev/qflex/qemu-saved && \
     cp -r /home/dev/qflex/qemu/pc-bios /home/dev/qflex/qemu-saved/pc-bios && \
