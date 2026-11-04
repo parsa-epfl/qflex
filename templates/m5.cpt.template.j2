@@ -157,7 +157,7 @@ _counterLimit=0
 _offset=0
 
 [system.realview.generic_timer.pe_implementation0.virt_timer]
-control_serial=1
+control_serial={{ reg_map['cntv_ctl_el0'] }}
 _counterLimit={{ reg_map['cntv_cval_el0'] }}
 _offset=0
 
@@ -177,7 +177,7 @@ _offset=0
 [system.realview.sys_counter]
 _enabled=true
 _freq={{ reg_map['cntfrq_el0'] }}
-_value={{ reg_map['cntv_cval_el0'] }}
+_value={{ reg_map['cntvct_el0'] }}
 _increment=1
 _freqTable={{ reg_map['cntfrq_el0'] }} 0
 _activeFreqEntry=0

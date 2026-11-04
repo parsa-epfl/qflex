@@ -517,6 +517,7 @@ def qpoints_convert_single_cmd(
         ssh_base=ssh_base,
         overwrite=overwrite,
         ruby_protocol=ruby_protocol,
+        qemu_nic=experiment_context.simulation_context.qemu_nic,
     )
 
 

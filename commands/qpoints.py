@@ -1152,6 +1152,7 @@ def convert_single(
     overwrite: bool = False,
     cancel_event: Optional[threading.Event] = None,
     ruby_protocol: str = "mesi_two_level",
+    qemu_nic: str = "-nic user,model=virtio-net-pci",
 ) -> None:
     start_time = time.time()
 
@@ -1285,7 +1286,7 @@ def convert_single(
                         "-boot", "order=d,menu=on",
                         "-bios", str(qemu_efi_fd),
                         "-drive", f"if=virtio,file={base},format=qcow2",
-                        "-nic", "user,model=virtio-net-pci",
+                        *qemu_nic.split(),
                         "-rtc", "clock=vm",
                         "-nographic",
                         "-no-reboot",
