@@ -19,4 +19,5 @@ class WormConfigLoader(ParameterLoader):
             "DIRECTORY_WAY": self.experiment_context.simulation_context.directory_way,
             "DOUBLED_VCPU": self.experiment_context.simulation_context.doubled_vcpu,
             "CORE_COUNT": self.experiment_context.simulation_context.core_count,
+            "GEM5_COMPATIBILITY": self.experiment_context.emit_gem,
         }

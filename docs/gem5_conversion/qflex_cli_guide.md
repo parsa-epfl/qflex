@@ -73,6 +73,7 @@ Examples from the current typed args model:
 - `--mounting-folder`
 - `--experiment-name`
 - `--loadvm-name`
+- `--emit-gem` (gem5 mode; see the `fw` section)
 
 This is the right place for parameters that define the experiment itself rather
 than one particular invocation.
@@ -191,7 +192,6 @@ Examples:
 - `--cleanup-conversion-artifacts`
 - tracing flags
 - `--collect-gem5-bbl-btb`
-- `--emit-gem`
 
 These flags describe what this invocation should do now. They are not the
 right place to encode the experiment’s persistent identity.
@@ -546,7 +546,6 @@ Purpose:
 Current important options:
 - `--sample-size`
 - `--collect-gem5-bbl-btb`
-- `--emit-gem`
 
 What `.gem` means:
 - `.gem` is the gem5-facing architectural checkpoint bundle emitted from the
@@ -563,8 +562,9 @@ What it produces:
   - `snapshot_X.loc`
   - `snapshot_X.state.zstd`
   - `snapshot_X.uarch/`
-- optionally:
+- in gem5 mode (`--emit-gem`):
   - `snapshot_X.gem/`
+  - `snapshot_X.uarch/gem5-tlbs-0.json.zstd`
 
 Typical use:
 
@@ -575,11 +575,17 @@ xargs -a ./qflex.args -- ./qflex fw \
 ```
 
 Important current behavior:
-- `.gem` emission is optional
-- if `--emit-gem` is used during `fw`, each snapshot gets its `.gem` bundle at
-  snapshot-generation time
-- if `--emit-gem` is omitted, `convert-single` can materialize the missing
-  `.gem` lazily later when conversion actually needs it
+- gem5 mode is an experiment option (`--emit-gem` in the args file), not an
+  `fw` flag. It is compiled into WormCacheQFlex (`GEM5_COMPATIBILITY` in
+  `cfg/parameter.rs`) when `initialize` generates the configuration, and every
+  later `fw` keeps it
+- in gem5 mode, each snapshot gets its `.gem` bundle at snapshot-generation
+  time, and `snapshot_X.uarch/gem5-tlbs-0.json.zstd` holds a separate L1
+  ITLB/DTLB model with real page sizes for gem5 TLB restore
+- gem5 TLB conversion requires `gem5-tlbs-0.json.zstd`; `convert-single`
+  fails with "gem5 TLB snapshot not found" without it
+- outside gem5 mode, `convert-single` can still materialize a missing `.gem`
+  lazily later when conversion actually needs it
 - `fw` also supports `--collect-gem5-bbl-btb`
 - if `fw` resumes from `init_warmed`, the current implementation compares the
   `initialize` and `fw` BBL-BTB collection settings
@@ -591,12 +597,9 @@ Important current behavior:
     start BBL-BTB export only from the `fw` phase onward
 
 How to choose `--emit-gem`:
-- use `--emit-gem` during `fw` if disk space is available and you want later
-  gem5 conversion to be faster
-- omit `--emit-gem` if disk space is tight and you prefer to pay the
-  architectural-dump cost only for the snapshots that are actually converted
-- this tradeoff exists because `.gem` is large, but lazy creation lets the
-  workflow avoid paying that space cost for every snapshot up front
+- use it for experiments where you will use gem5
+- it costs disk space, because `.gem` is large and is written for every
+  snapshot
 
 How cleanup fits:
 - if `.gem` is created lazily during conversion, the gem5 `run_sample` path can
@@ -1061,7 +1064,7 @@ for debugging or instrumentation without generating snapshots.
 Note:
 - `--collect-gem5-bbl-btb` and `--emit-gem` are not tracing options
 - they are workflow/export controls documented in the `initialize` and `fw`
-  sections above
+  sections above (`--emit-gem` is an experiment option in the args file)
 
 ### gem5 timing-side tracing
 

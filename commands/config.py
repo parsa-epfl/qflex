@@ -154,6 +154,7 @@ class ExperimentContext(BaseModel):
     image_address: str = Field(default="", description="Full address of the image to use. Set up during initialization based on other parameters.")
     include_affinity: bool = Field(default=False, description="Whether or not generate affinity index in core_info.csv.")
     refresh_wormcache: bool = Field(default=False, description="Whether to refresh WormCacheQFlex in the experiment folder.")
+    emit_gem: bool = Field(default=False, description="Build WormCacheQFlex with gem5 mode: write the .gem bundle at each fw snapshot.")
 
     def get_mounting_folder(self) -> str:
         return self.mounting_folder
@@ -227,9 +228,18 @@ class ExperimentContext(BaseModel):
 
         for link_name in ("cfg/machine_config.json", "run/machine_config.json"):
             link_path = Path(self.get_experiment_folder_address()) / link_name
-            if link_path.exists() or link_path.is_symlink():
-                link_path.unlink()
-            link_path.symlink_to(machine_config_path)
+            # machine_config_path is the same for every concurrent caller in
+            # this experiment, so a lost race here just means another
+            # process already created the identical symlink first -- harmless.
+            try:
+                if link_path.exists() or link_path.is_symlink():
+                    link_path.unlink()
+            except FileNotFoundError:
+                pass
+            try:
+                link_path.symlink_to(machine_config_path)
+            except FileExistsError:
+                pass
 
     def get_vanila_qemu_build_folder(self) -> str:
         return f'{self.get_experiment_folder_address()}/qemu-saved'
@@ -308,7 +318,12 @@ class ExperimentContext(BaseModel):
                 os.system(f"cp -u {self.image_folder}/{self.image_name} {self.image_folder}/experiments/{self.experiment_name}/{self.image_name}")
                 print("copied image, creating symlink...")
                 # Create a symlink to the new image in the experiment folder
-                os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
+                try:
+                    os.symlink(f"{self.image_folder}/experiments/{self.experiment_name}/{self.image_name}", self.get_local_image_address())
+                except FileExistsError:
+                    # Target is identical for every concurrent caller in this
+                    # experiment, so losing this race to another process is harmless.
+                    pass
                 print(f"Linked image to")
 
             
@@ -339,7 +354,12 @@ class ExperimentContext(BaseModel):
             # TODO see why sys link could fail here
             # TODO see if we even need this image
             os.system(f"rm -f {self.get_experiment_folder_address()}/run/{self.image_name}")
-            os.symlink(self.get_local_image_address(), f"{self.get_experiment_folder_address()}/run/{self.image_name}")
+            try:
+                os.symlink(self.get_local_image_address(), f"{self.get_experiment_folder_address()}/run/{self.image_name}")
+            except FileExistsError:
+                # Target is identical for every concurrent caller in this
+                # experiment, so losing this race to another process is harmless.
+                pass
 
         root_sls = [
            "partition.py",
@@ -467,7 +487,12 @@ class ExperimentContext(BaseModel):
         except FileNotFoundError:
             # As faulty symlink won't show
             pass
-        os.symlink(target, sym_target)
+        try:
+            os.symlink(target, sym_target)
+        except FileExistsError:
+            # target is identical for every concurrent caller in this
+            # experiment, so losing this race to another process is harmless.
+            pass
 
 
         
@@ -509,7 +534,8 @@ def create_experiment_context(
     use_cd_rom: bool = False,
     machine_freq_ghz: float = 2.0,  # Default frequency, can be modified later
     include_affinity: bool = False,
-    refresh_wormcache: bool = False
+    refresh_wormcache: bool = False,
+    emit_gem: bool = False
 ) -> ExperimentContext:
     # assert False
     # TODO add how to create experiment name
@@ -579,7 +605,8 @@ def create_experiment_context(
         image_address="", # will be set up during initialization based on other parameters
         loadvm_name=loadvm_name,
         include_affinity=include_affinity,
-        refresh_wormcache=refresh_wormcache
+        refresh_wormcache=refresh_wormcache,
+        emit_gem=emit_gem
     )
 
     e.set_up_folders()

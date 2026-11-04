@@ -142,14 +142,12 @@ def test_fw_forwards_collect_gem5_bbl_btb():
             experiment_context=mock.sentinel.experiment_context,
             sample_size=2,
             collect_gem5_bbl_btb=True,
-            emit_gem=False,
         )
 
     fw_cls.assert_called_once_with(
         experiment_context=mock.sentinel.experiment_context,
         sample_size=2,
         collect_gem5_bbl_btb=True,
-        emit_gem=False,
     )
     executor.execute.assert_called_once_with(to_stdio=True, run_in_background=False)
 

@@ -88,6 +88,9 @@ class ExperimentContextTyper(TyperDataClassMeta):
         refresh_wormcache: Annotated[bool, typer.Option(
             help="Whether to refresh WormCacheQFlex in the experiment folder."
         )]=False,
+        emit_gem: Annotated[bool, typer.Option(
+            help="Build WormCacheQFlex with gem5 mode: write the .gem bundle at each fw snapshot. Takes effect when initialize regenerates cfg/parameter.rs."
+        )]=False,
     ):
         print("quantum_size_ns:", quantum_size_ns)
         if unique:
@@ -127,6 +130,7 @@ class ExperimentContextTyper(TyperDataClassMeta):
             use_cd_rom=use_cd_rom,
             machine_freq_ghz=machine_freq_ghz,
             include_affinity=include_affinity,
-            refresh_wormcache=refresh_wormcache
+            refresh_wormcache=refresh_wormcache,
+            emit_gem=emit_gem
         )
         return experiment_context
