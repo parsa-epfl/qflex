@@ -16,8 +16,8 @@ class Boot(Executor):
     SNAPSHOT_NAME = "boot"
     SSH_HOST = "127.0.0.1"
     SSH_PORT = 2222
-    SSH_USER = "qflex"
-    SSH_PASSWORD = "qflex"
+    SSH_USER = "ubuntu"
+    SSH_PASSWORD = "ubuntu"
     MONITOR_HOST = "127.0.0.1"
     MONITOR_WAIT_SECONDS = 60
     QEMU_EXIT_WAIT_SECONDS = 10

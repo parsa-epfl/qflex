@@ -1,5 +1,6 @@
 import argparse
 import json
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -212,7 +213,7 @@ class KernelCapture:
 
     def _scp_from_guest(self, remote_path: str, local_path: Path) -> None:
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
+        result = subprocess.run(
             [
                 "sshpass",
                 "-p",
@@ -225,18 +226,49 @@ class KernelCapture:
                 str(local_path),
             ],
             text=True,
-            check=True,
+            check=False,
         )
+        if result.returncode == 0:
+            return
+        # Some /boot artifacts (e.g. System.map-*) are root-only on the guest; scp as the
+        # unprivileged ssh user can't read them, so fall back to reading via sudo over ssh.
+        with local_path.open("wb") as local_file:
+            sudo_result = subprocess.run(
+                [
+                    "sshpass",
+                    "-p",
+                    self.ssh_password,
+                    "ssh",
+                    *SSH_OPTIONS,
+                    "-p",
+                    str(self.ssh_port),
+                    f"{self.ssh_user}@{self.ssh_host}",
+                    f"sudo -n cat {shlex.quote(remote_path)}",
+                ],
+                stdout=local_file,
+                check=False,
+            )
+        if sudo_result.returncode != 0:
+            local_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Failed to fetch {remote_path!r} from guest via scp or `sudo cat` "
+                f"(sudo exit code {sudo_result.returncode})."
+            )
 
     def wait_until_ready(self, wait_seconds: int, poll_seconds: int = 2) -> None:
         deadline = time.time() + wait_seconds
+        last_probe: subprocess.CompletedProcess | None = None
         while time.time() < deadline:
-            probe = self._run_guest("true", check=False)
-            if probe.returncode == 0:
+            last_probe = self._run_guest("true", check=False)
+            if last_probe.returncode == 0:
                 return
             time.sleep(poll_seconds)
+        detail = ""
+        if last_probe is not None:
+            stderr = (last_probe.stderr or "").strip()
+            detail = f" Last attempt exit code {last_probe.returncode}: {stderr}"
         raise RuntimeError(
-            f"SSH did not become ready for kernel capture within {wait_seconds} seconds."
+            f"SSH did not become ready for kernel capture within {wait_seconds} seconds.{detail}"
         )
 
     @staticmethod
