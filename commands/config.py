@@ -271,7 +271,14 @@ class ExperimentContext(BaseModel):
             commands.extend(
                 [
                     f"rm -rf {wormcache_dest}",
-                    f"cp -a {wormcache_src} {wormcache_dest}",
+                    # --no-preserve=ownership: on some NFS mounts, cp -a's
+                    # ownership-preservation step fails with "Operation not
+                    # permitted" and exits non-zero even though the content
+                    # copied fine, which silently aborts the rest of this
+                    # &&-chained command (the cargo build and QEMU launch
+                    # never run). We only need the file contents here, not
+                    # preserved ownership.
+                    f"cp -a --no-preserve=ownership {wormcache_src} {wormcache_dest}",
                 ]
             )
 
